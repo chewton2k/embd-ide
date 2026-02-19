@@ -1,16 +1,27 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { invoke } from '@tauri-apps/api/core';
+  import { onMount, onDestroy } from 'svelte';
+  import { invoke, convertFileSrc } from '@tauri-apps/api/core';
   import DOMPurify from 'dompurify';
+  import * as pdfjsLib from 'pdfjs-dist';
+
+  // Point PDF.js to its bundled worker
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.mjs',
+    import.meta.url
+  ).href;
 
   let { filePath }: { filePath: string } = $props();
 
   let dataUrl = $state<string | null>(null);
+  let assetUrl = $state<string | null>(null);
   let svgContent = $state<string | null>(null);
+  let pdfData = $state<Uint8Array | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let zoom = $state(100);
   let fileSize = $state('');
+  let pdfContainer: HTMLDivElement;
+  let pdfPageCount = $state(0);
 
   function getFileType(path: string): 'image' | 'svg' | 'pdf' | 'video' | 'audio' | 'unknown' {
     const ext = path.split('.').pop()?.toLowerCase();
@@ -35,7 +46,7 @@
     const mimes: Record<string, string> = {
       png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
       gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
-      ico: 'image/x-icon', svg: 'image/svg+xml', pdf: 'application/pdf',
+      ico: 'image/x-icon', svg: 'image/svg+xml',
       mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
       mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac',
     };
@@ -52,22 +63,34 @@
     loading = true;
     error = null;
     dataUrl = null;
+    assetUrl = null;
     svgContent = null;
+    pdfData = null;
+    pdfPageCount = 0;
     zoom = 100;
 
     const type = getFileType(path);
 
     try {
       if (type === 'svg') {
-        // Load SVG as text so we can render it inline
         const content = await invoke<string>('read_file_content', { path });
         svgContent = DOMPurify.sanitize(content, { USE_PROFILES: { svg: true, svgFilters: true } });
         fileSize = formatSize(new Blob([content]).size);
+      } else if (type === 'pdf') {
+        const base64 = await invoke<string>('read_file_binary', { path });
+        const raw = atob(base64);
+        const bytes = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+        pdfData = bytes;
+        fileSize = formatSize(bytes.length);
+      } else if (type === 'video' || type === 'audio') {
+        assetUrl = convertFileSrc(path);
+        const base64 = await invoke<string>('read_file_binary', { path });
+        fileSize = formatSize(Math.floor(base64.length * 0.75));
       } else {
         const base64 = await invoke<string>('read_file_binary', { path });
         const mime = getMimeType(path);
         dataUrl = `data:${mime};base64,${base64}`;
-        // Estimate file size from base64 length
         fileSize = formatSize(Math.floor(base64.length * 0.75));
       }
     } catch (e) {
@@ -76,6 +99,43 @@
 
     loading = false;
   }
+
+  async function renderPdf(data: Uint8Array, scale: number) {
+    if (!pdfContainer) return;
+    pdfContainer.innerHTML = '';
+
+    try {
+      const pdf = await pdfjsLib.getDocument({ data }).promise;
+      pdfPageCount = pdf.numPages;
+
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: scale / 100 * 1.5 });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        canvas.style.display = 'block';
+        canvas.style.marginBottom = '8px';
+        canvas.style.borderRadius = '4px';
+        canvas.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
+
+        const ctx = canvas.getContext('2d')!;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+
+        pdfContainer.appendChild(canvas);
+      }
+    } catch (e) {
+      error = `Failed to render PDF: ${e}`;
+    }
+  }
+
+  // Re-render PDF when data or zoom changes
+  $effect(() => {
+    if (pdfData && pdfContainer) {
+      renderPdf(pdfData, zoom);
+    }
+  });
 
   function zoomIn() { zoom = Math.min(500, zoom + 25); }
   function zoomOut() { zoom = Math.max(25, zoom - 25); }
@@ -97,7 +157,7 @@
     <!-- Toolbar -->
     <div class="viewer-toolbar">
       <span class="viewer-filename">{filePath.split('/').pop()}</span>
-      <span class="viewer-meta">{fileSize}</span>
+      <span class="viewer-meta">{fileSize}{pdfPageCount > 0 ? ` - ${pdfPageCount} page${pdfPageCount !== 1 ? 's' : ''}` : ''}</span>
       <div class="viewer-controls">
         <button onclick={zoomOut} title="Zoom out">-</button>
         <button onclick={zoomReset} title="Reset zoom">{zoom}%</button>
@@ -123,20 +183,16 @@
           draggable="false"
         />
 
-      {:else if getFileType(filePath) === 'pdf' && dataUrl}
-        <iframe
-          src={dataUrl}
-          title={filePath.split('/').pop()}
-          class="pdf-frame"
-        ></iframe>
+      {:else if getFileType(filePath) === 'pdf' && pdfData}
+        <div class="pdf-scroll" bind:this={pdfContainer}></div>
 
-      {:else if getFileType(filePath) === 'video' && dataUrl}
-        <video controls src={dataUrl} class="media-player">
+      {:else if getFileType(filePath) === 'video' && assetUrl}
+        <video controls src={assetUrl} class="media-player">
           <track kind="captions" />
         </video>
 
-      {:else if getFileType(filePath) === 'audio' && dataUrl}
-        <audio controls src={dataUrl} class="audio-player">
+      {:else if getFileType(filePath) === 'audio' && assetUrl}
+        <audio controls src={assetUrl} class="audio-player">
           <track kind="captions" />
         </audio>
 
@@ -221,11 +277,14 @@
     max-height: 100%;
   }
 
-  .pdf-frame {
+  .pdf-scroll {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     width: 100%;
     height: 100%;
-    border: none;
-    border-radius: 4px;
+    overflow-y: auto;
+    padding: 12px;
   }
 
   .media-player {
