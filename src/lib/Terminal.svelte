@@ -5,6 +5,7 @@
   import { Terminal as XTerm } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
+  import { open } from '@tauri-apps/plugin-shell';
   import { projectRoot, terminalFontSize, currentThemeId, getTheme } from './stores.ts';
   import { get } from 'svelte/store';
   import '@xterm/xterm/css/xterm.css';
@@ -22,7 +23,6 @@
   let terminalContainer: HTMLDivElement;
   let tabs = $state<TerminalTab[]>([]);
   let activeTabId = $state<number | null>(null);
-  let nextTabId = 1;
 
   function buildXtermTheme() {
     const c = getTheme(get(currentThemeId)).colors;
@@ -56,8 +56,6 @@
 
   async function createTab() {
     const cwd = get(projectRoot);
-    const tabId = nextTabId++;
-    const name = `Terminal ${tabId}`;
 
     const xterm = new XTerm({
       cursorBlink: true,
@@ -68,7 +66,9 @@
 
     const fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
-    xterm.loadAddon(new WebLinksAddon());
+    xterm.loadAddon(new WebLinksAddon((_event, uri) => {
+      open(uri);
+    }));
 
     // Hide all other terminals, show this one
     hideAllTerminals();
@@ -79,14 +79,17 @@
     fitAddon.fit();
 
     let sessionId: number;
+    let name: string;
     let unlisten: UnlistenFn;
 
     try {
-      sessionId = await invoke<number>('spawn_terminal', {
+      const result = await invoke<{ id: number; pid: number | null }>('spawn_terminal', {
         cwd,
         rows: xterm.rows,
         cols: xterm.cols,
       });
+      sessionId = result.id;
+      name = result.pid ? `Terminal ${result.pid}` : `Terminal ${result.id}`;
 
       unlisten = await listen<string>(`terminal-output-${sessionId}`, (event) => {
         xterm.write(event.payload);
@@ -107,14 +110,14 @@
     }
 
     const resizeObserver = new ResizeObserver(() => {
-      if (activeTabId === tabId) {
+      if (activeTabId === sessionId) {
         fitAddon.fit();
       }
     });
     resizeObserver.observe(terminalContainer);
 
     const tab: TerminalTab = {
-      id: tabId,
+      id: sessionId,
       sessionId,
       name,
       xterm,
@@ -124,7 +127,7 @@
     };
 
     tabs = [...tabs, tab];
-    activeTabId = tabId;
+    activeTabId = sessionId;
   }
 
   function hideAllTerminals() {

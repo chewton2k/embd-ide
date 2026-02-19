@@ -1,6 +1,8 @@
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use base64::Engine;
 
 #[derive(Serialize, Clone)]
@@ -99,6 +101,132 @@ pub fn create_folder(path: String) -> Result<(), String> {
         return Err("Folder already exists".to_string());
     }
     fs::create_dir_all(&p).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_entries(paths: Vec<String>) -> Result<(), String> {
+    for path in paths {
+        let p = PathBuf::from(&path);
+        if !p.exists() {
+            continue;
+        }
+        if p.is_dir() {
+            fs::remove_dir_all(&p).map_err(|e| format!("Failed to delete {}: {}", path, e))?;
+        } else {
+            fs::remove_file(&p).map_err(|e| format!("Failed to delete {}: {}", path, e))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rename_entry(old_path: String, new_path: String) -> Result<(), String> {
+    fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename: {}", e))
+}
+
+#[tauri::command]
+pub fn paste_entries(sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+    let dest = PathBuf::from(&dest_dir);
+    if !dest.is_dir() {
+        return Err("Destination is not a directory".to_string());
+    }
+    for src in sources {
+        let src_path = PathBuf::from(&src);
+        let file_name = src_path
+            .file_name()
+            .ok_or_else(|| format!("Invalid source path: {}", src))?;
+        let mut target = dest.join(file_name);
+        // Avoid overwriting — add " copy" suffix if needed
+        if target.exists() {
+            let stem = target.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let mut i = 1;
+            loop {
+                let name = if i == 1 {
+                    format!("{} copy{}", stem, ext)
+                } else {
+                    format!("{} copy {}{}", stem, i, ext)
+                };
+                target = dest.join(&name);
+                if !target.exists() { break; }
+                i += 1;
+            }
+        }
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &target)
+                .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
+        } else {
+            fs::copy(&src_path, &target)
+                .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Returns a map of relative_path -> status_code for all changed files.
+/// Status codes: "M" = modified (unstaged), "A" = staged new, "S" = staged modified,
+/// "D" = deleted, "?" = untracked, "R" = renamed
+#[tauri::command]
+pub fn get_git_status(path: String) -> Result<HashMap<String, String>, String> {
+    let output = Command::new("git")
+        .args(["status", "--porcelain", "-uall"])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(HashMap::new()); // Not a git repo or git error
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut result = HashMap::new();
+
+    for line in stdout.lines() {
+        if line.len() < 4 { continue; }
+        let index_status = line.as_bytes()[0];
+        let wt_status = line.as_bytes()[1];
+        let file_path = &line[3..];
+
+        // Handle renames: "R  old -> new"
+        let file_path = if let Some(arrow_pos) = file_path.find(" -> ") {
+            &file_path[arrow_pos + 4..]
+        } else {
+            file_path
+        };
+
+        let abs_path = PathBuf::from(&path).join(file_path);
+        let abs_str = abs_path.to_string_lossy().to_string();
+
+        // Determine status — staged takes priority display, but show modified if only worktree changed
+        let status = match (index_status, wt_status) {
+            (b'?', b'?') => "U",  // untracked
+            (b'A', _) => "A",     // staged new file
+            (b'R', _) => "A",     // renamed (treat as staged)
+            (b'M', b' ') | (b'M', b'\0') => "S", // staged modified only
+            (b'D', _) | (_, b'D') => "D", // deleted
+            (_, b'M') => "M",     // modified in worktree (includes staged + further modified)
+            _ => "M",
+        };
+
+        result.insert(abs_str, status.to_string());
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]

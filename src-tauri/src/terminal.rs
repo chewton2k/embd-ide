@@ -1,8 +1,15 @@
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
+
+#[derive(Serialize)]
+pub struct SpawnResult {
+    pub id: u32,
+    pub pid: Option<u32>,
+}
 
 pub struct PtyInstance {
     writer: Box<dyn Write + Send>,
@@ -36,7 +43,7 @@ pub fn spawn_terminal(
     cwd: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
-) -> Result<u32, String> {
+) -> Result<SpawnResult, String> {
     let pty_system = native_pty_system();
 
     let initial_rows = rows.unwrap_or(24);
@@ -58,7 +65,8 @@ pub fn spawn_terminal(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
 
-    let _child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let pid = child.process_id();
     drop(pair.slave);
 
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -105,7 +113,7 @@ pub fn spawn_terminal(
         }
     });
 
-    Ok(id)
+    Ok(SpawnResult { id, pid })
 }
 
 #[tauri::command]

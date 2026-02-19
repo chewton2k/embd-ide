@@ -14,6 +14,7 @@
     "fs:allow-remove",
     "fs:allow-rename",
     "fs:allow-read-dir",
+    "fs:allow-watch",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-ask",

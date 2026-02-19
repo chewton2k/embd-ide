@@ -55,6 +55,26 @@ export function updateFileContent(path: string, content: string) {
   );
 }
 
+export function closeFileByPath(path: string) {
+  openFiles.update(files => {
+    const newFiles = files.filter(f => f.path !== path);
+    activeFilePath.update(current => {
+      if (current === path) {
+        return newFiles.length > 0 ? newFiles[newFiles.length - 1].path : null;
+      }
+      return current;
+    });
+    return newFiles;
+  });
+}
+
+export function renameOpenFile(oldPath: string, newPath: string, newName: string) {
+  openFiles.update(files =>
+    files.map(f => f.path === oldPath ? { ...f, path: newPath, name: newName } : f)
+  );
+  activeFilePath.update(current => current === oldPath ? newPath : current);
+}
+
 export function markFileSaved(path: string) {
   openFiles.update(files =>
     files.map(f => f.path === path ? { ...f, modified: false } : f)
