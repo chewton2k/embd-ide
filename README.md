@@ -35,4 +35,4 @@ brew install rust
 ```bash
 npm run tauri:build
 ```
-Builds the app and opens a DMG installer to drag embd into your Applications folder.
+Builds the app moves it to your application folder.
