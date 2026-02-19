@@ -35,4 +35,10 @@ brew install rust
 ```bash
 npm run tauri:build
 ```
-The built app will be in src-tauri/target/release/bundle/. (On mac, this will create a popup to drag embd into applications)
+The built `.app` will be at `src-tauri/target/release/bundle/macos/embd.app`.
+
+#### Build DMG Installer (macOS)
+```bash
+npm run tauri:dmg
+```
+Creates a `.dmg` installer with the drag-to-Applications window at `src-tauri/target/release/bundle/dmg/embd.dmg`.
