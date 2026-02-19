@@ -77,6 +77,21 @@
     }
   }
 
+  // Git status polling (git operations only modify .git/ which the file watcher doesn't cover)
+  let gitPollInterval: ReturnType<typeof setInterval> | null = null;
+
+  function startGitPolling() {
+    stopGitPolling();
+    gitPollInterval = setInterval(() => fetchGitStatus(), 3000);
+  }
+
+  function stopGitPolling() {
+    if (gitPollInterval) {
+      clearInterval(gitPollInterval);
+      gitPollInterval = null;
+    }
+  }
+
   // File watcher
   let unwatchFn: UnwatchFn | null = null;
   let watchDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -123,6 +138,7 @@
       await loadDirectory(rootPath);
       await fetchGitStatus();
       startWatching(rootPath);
+      startGitPolling();
     }
   }
 
@@ -513,6 +529,7 @@
 
   onDestroy(() => {
     stopWatching();
+    stopGitPolling();
     if (watchDebounce) clearTimeout(watchDebounce);
   });
 </script>
