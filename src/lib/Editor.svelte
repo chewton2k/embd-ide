@@ -4,7 +4,7 @@
   import { get } from 'svelte/store';
   import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';
   import { EditorState, Compartment } from '@codemirror/state';
-  import { defaultKeymap, indentWithTab, history, historyKeymap } from '@codemirror/commands';
+  import { defaultKeymap, indentWithTab, history, historyKeymap, cursorDocStart, cursorDocEnd, cursorLineBoundaryForward, cursorLineBoundaryBackward, selectDocStart, selectDocEnd, selectLineBoundaryForward, selectLineBoundaryBackward, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, selectCharLeft, selectCharRight, selectLineUp, selectLineDown, deleteLine, cursorPageDown, cursorPageUp } from '@codemirror/commands';
   import { javascript } from '@codemirror/lang-javascript';
   import { python } from '@codemirror/lang-python';
   import { html } from '@codemirror/lang-html';
@@ -20,7 +20,7 @@
   import { xml } from '@codemirror/lang-xml';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { autocompletion } from '@codemirror/autocomplete';
-  import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+  import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
   import { marked } from 'marked';
   import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers } from './stores.ts';
 
@@ -129,7 +129,85 @@
           ...historyKeymap,
           ...searchKeymap,
           indentWithTab,
-          { key: 'Mod-s', run: () => { saveFile(path); return true; } }
+          { key: 'Mod-s', run: () => { saveFile(path); return true; } },
+          // Emacs navigation
+          { key: 'Ctrl-a', run: cursorLineBoundaryBackward, shift: selectLineBoundaryBackward },
+          { key: 'Ctrl-e', run: cursorLineBoundaryForward, shift: selectLineBoundaryForward },
+          { key: 'Ctrl-f', run: cursorCharRight, shift: selectCharRight },
+          { key: 'Ctrl-b', run: cursorCharLeft, shift: selectCharLeft },
+          { key: 'Ctrl-p', run: cursorLineUp, shift: selectLineUp },
+          { key: 'Ctrl-n', run: cursorLineDown, shift: selectLineDown },
+          { key: 'Ctrl-v', run: cursorPageDown },
+          // Top/bottom of file
+          { key: 'Mod-Up', run: cursorDocStart, shift: selectDocStart },
+          { key: 'Mod-Down', run: cursorDocEnd, shift: selectDocEnd },
+          // Delete entire line (Cmd+Backspace)
+          { key: 'Mod-Backspace', run: deleteLine },
+          // Emacs kill line (Ctrl-k): delete from cursor to end of line
+          { key: 'Ctrl-k', run: (view) => {
+            const { state } = view;
+            const range = state.selection.main;
+            const line = state.doc.lineAt(range.head);
+            const from = range.head;
+            const to = from === line.to && line.to < state.doc.length ? line.to + 1 : line.to;
+            if (from === to) return false;
+            view.dispatch({ changes: { from, to } });
+            return true;
+          }},
+          // Transpose characters (Ctrl-t)
+          { key: 'Ctrl-t', run: (view) => {
+            const { state } = view;
+            const pos = state.selection.main.head;
+            if (pos <= 0 || pos >= state.doc.length) return false;
+            const before = state.doc.sliceString(pos - 1, pos);
+            const after = state.doc.sliceString(pos, pos + 1);
+            view.dispatch({ changes: { from: pos - 1, to: pos + 1, insert: after + before } });
+            return true;
+          }},
+          // Delete word backward (Ctrl-w / Alt-Backspace)
+          { key: 'Alt-Backspace', run: (view) => {
+            const { state } = view;
+            const pos = state.selection.main.head;
+            if (pos === 0) return false;
+            const text = state.doc.sliceString(0, pos);
+            const match = text.match(/(?:\s+|\w+|[^\s\w]+)$/);
+            const deleteFrom = match ? pos - match[0].length : pos - 1;
+            view.dispatch({ changes: { from: deleteFrom, to: pos } });
+            return true;
+          }},
+          // Delete word forward (Alt-d)
+          { key: 'Alt-d', run: (view) => {
+            const { state } = view;
+            const pos = state.selection.main.head;
+            if (pos >= state.doc.length) return false;
+            const text = state.doc.sliceString(pos);
+            const match = text.match(/^(?:\s+|\w+|[^\s\w]+)/);
+            const deleteTo = match ? pos + match[0].length : pos + 1;
+            view.dispatch({ changes: { from: pos, to: deleteTo } });
+            return true;
+          }},
+          // Word movement (Alt-f forward, Alt-b backward)
+          { key: 'Alt-f', run: (view) => {
+            const { state } = view;
+            const pos = state.selection.main.head;
+            const text = state.doc.sliceString(pos);
+            const match = text.match(/^(?:\s*\w+|\s*[^\s\w]+|\s+)/);
+            const newPos = match ? pos + match[0].length : pos;
+            view.dispatch({ selection: { anchor: newPos } });
+            return true;
+          }},
+          { key: 'Alt-b', run: (view) => {
+            const { state } = view;
+            const pos = state.selection.main.head;
+            const text = state.doc.sliceString(0, pos);
+            const match = text.match(/(?:\w+\s*|[^\s\w]+\s*|\s+)$/);
+            const newPos = match ? pos - match[0].length : pos;
+            view.dispatch({ selection: { anchor: newPos } });
+            return true;
+          }},
+          // Go to top/bottom of file (Alt-< / Alt->)
+          { key: 'Alt-<', run: cursorDocStart },
+          { key: 'Alt->', run: cursorDocEnd },
         ]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
@@ -199,11 +277,24 @@
     }
   });
 
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    // Cmd/Ctrl+F: focus editor and open search panel
+    if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      if (view) {
+        e.preventDefault();
+        view.focus();
+        openSearchPanel(view);
+      }
+    }
+  }
+
   onMount(() => {
     loadFile(filePath);
+    window.addEventListener('keydown', handleGlobalKeydown);
   });
 
   onDestroy(() => {
+    window.removeEventListener('keydown', handleGlobalKeydown);
     // Save before destroying if there are pending changes
     if (autosaveTimer) {
       clearTimeout(autosaveTimer);

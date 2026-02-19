@@ -12,7 +12,7 @@
     children: FileEntry[] | null;
   }
 
-  let { onFileSelect }: { onFileSelect: (path: string, name: string) => void } = $props();
+  let { onFileSelect, onSearchFiles }: { onFileSelect: (path: string, name: string) => void; onSearchFiles?: () => void } = $props();
   let files = $state<FileEntry[]>([]);
   let expandedDirs = $state<Set<string>>(new Set());
   let rootPath = $state<string | null>(null);
@@ -214,11 +214,17 @@
     try {
       if (creating === 'file') {
         await invoke('create_file', { path: fullPath });
-        // Open the newly created file
         onFileSelect(fullPath, newName.trim());
       } else {
         await invoke('create_folder', { path: fullPath });
       }
+      // Expand all ancestor folders so the new item is visible
+      let dir = parentDir;
+      while (dir.length > (rootPath?.length ?? 0)) {
+        expandedDirs.add(dir);
+        dir = dir.substring(0, dir.lastIndexOf('/'));
+      }
+      expandedDirs = new Set(expandedDirs);
       await refreshTree();
       selectedPath = fullPath;
     } catch (e) {
@@ -545,13 +551,21 @@
     </div>
   {:else}
     <div class="tree-header">
-      <div class="tree-header-left">
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="tree-header-left" onclick={() => { selectedPath = null; selectedPaths = new Set(); }}>
         <svg class="header-folder-icon" viewBox={icons.folderOpen.viewBox} fill="var(--accent)">
           <path d={icons.folderOpen.path} />
         </svg>
         <span class="root-name" title={rootPath}>{rootPath.split('/').pop()}</span>
       </div>
       <div class="tree-header-actions">
+        <button class="header-btn" title="Search files (Cmd+P)" onclick={() => onSearchFiles?.()}>
+          <svg class="header-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
+            <circle cx="7" cy="7" r="4.5" />
+            <path d="M10.5 10.5L14 14" />
+          </svg>
+        </button>
         <button class="header-btn" title="New file" onclick={() => startCreate('file')}>
           <svg class="header-btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
             <path d="M9 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5L9 1z" />
@@ -579,6 +593,9 @@
           bind:this={newNameInput}
           bind:value={newName}
           class="create-input"
+          autocapitalize="off"
+          autocomplete="off"
+          spellcheck="false"
           placeholder={creating === 'file' ? 'filename.ext' : 'folder name'}
           onkeydown={(e) => {
             if (e.key === 'Enter') confirmCreate();
@@ -588,7 +605,14 @@
         />
       </div>
     {/if}
-    <div class="tree-content">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="tree-content" onclick={(e) => {
+      if (e.target === e.currentTarget) {
+        selectedPath = null;
+        selectedPaths = new Set();
+      }
+    }}>
       {#each files.filter(e => !isHidden(e.name)) as entry}
         {@render fileNode(entry, 0)}
       {/each}
@@ -619,6 +643,15 @@
         Delete {selectedPaths.size} items
       </button>
     {:else}
+      {#if contextMenu!.isDir}
+        <button class="context-item" onclick={() => { selectedPath = contextMenu!.path; closeContextMenu(); startCreate('file'); }}>
+          New File
+        </button>
+        <button class="context-item" onclick={() => { selectedPath = contextMenu!.path; closeContextMenu(); startCreate('folder'); }}>
+          New Folder
+        </button>
+        <div class="context-separator"></div>
+      {/if}
       <button class="context-item" onclick={() => copyPath(contextMenu!.path)}>
         Copy Path
       </button>
@@ -677,6 +710,9 @@
         bind:this={renameInput}
         bind:value={renameValue}
         class="rename-input"
+        autocapitalize="off"
+        autocomplete="off"
+        spellcheck="false"
         onclick={(e) => e.stopPropagation()}
         onkeydown={(e) => {
           if (e.key === 'Enter') confirmRename();
@@ -703,6 +739,8 @@
 <style>
   .file-tree {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     overflow-x: hidden;
     padding-bottom: 12px;
@@ -759,6 +797,13 @@
     align-items: center;
     gap: 6px;
     min-width: 0;
+    cursor: pointer;
+    border-radius: 3px;
+    padding: 2px 4px;
+  }
+
+  .tree-header-left:hover {
+    background: var(--bg-surface);
   }
 
   .header-folder-icon {
@@ -809,6 +854,8 @@
   .tree-content {
     display: flex;
     flex-direction: column;
+    flex: 1;
+    min-height: 0;
   }
 
   /* Tree items */

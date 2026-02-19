@@ -178,6 +178,35 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+pub fn list_all_files(path: String) -> Result<Vec<String>, String> {
+    let root = PathBuf::from(&path);
+    let mut files = Vec::new();
+    collect_files(&root, &root, &mut files);
+    Ok(files)
+}
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == ".git" || name == "node_modules" || name == "target" || name == ".DS_Store" {
+            continue;
+        }
+        if path.is_dir() {
+            collect_files(root, &path, out);
+        } else {
+            if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_string_lossy().to_string());
+            }
+        }
+    }
+}
+
 /// Returns a map of relative_path -> status_code for all changed files.
 /// Status codes: "M" = modified (unstaged), "A" = staged new, "S" = staged modified,
 /// "D" = deleted, "?" = untracked, "R" = renamed

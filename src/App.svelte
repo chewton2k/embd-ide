@@ -6,6 +6,7 @@
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
   import Settings from './lib/Settings.svelte';
+  import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
   import { openFiles, activeFile, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, currentThemeId, getTheme, uiFontSize, uiDensity } from './lib/stores.ts';
@@ -23,6 +24,7 @@
 
   let showTerminal = $state(true);
   let showChat = $state(false);
+  let showFileSearch = $state(false);
   let sidebarWidth = $state(220);
   let terminalHeight = $state(220);
   let chatWidth = $state(320);
@@ -144,6 +146,10 @@
       e.preventDefault();
       toggleChat();
     }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+      e.preventDefault();
+      showFileSearch = !showFileSearch;
+    }
   }
 </script>
 
@@ -154,7 +160,7 @@
     <div class="sidebar-header">
       <img src="/embd_logo_cutout.png" alt="embd" class="logo-img" />
     </div>
-    <FileTree onFileSelect={(path, name) => addFile(path, name)} />
+    <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} />
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
@@ -174,6 +180,7 @@
             <div class="shortcuts">
               <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
               <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
+              <div><kbd>Cmd</kbd> + <kbd>P</kbd> Search Files</div>
             </div>
           </div>
         {/if}
@@ -201,6 +208,10 @@
 
   {#if $showSettings}
     <Settings />
+  {/if}
+
+  {#if showFileSearch}
+    <FileSearch onClose={() => showFileSearch = false} />
   {/if}
 
   <div class="statusbar">
