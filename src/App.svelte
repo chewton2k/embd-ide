@@ -7,6 +7,7 @@
   import ChatPanel from './lib/ChatPanel.svelte';
   import Settings from './lib/Settings.svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { getVersion } from '@tauri-apps/api/app';
   import { openFiles, activeFile, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, currentThemeId, getTheme, uiFontSize, uiDensity } from './lib/stores.ts';
   import { onMount, onDestroy } from 'svelte';
 
@@ -83,7 +84,10 @@
     }
   }
 
+  let appVersion = $state('');
+
   onMount(() => {
+    getVersion().then(v => appVersion = v);
     const unsub = projectRoot.subscribe((root) => {
       fetchGitBranch(root);
     });
@@ -225,7 +229,7 @@
       </button>
     </div>
     <div class="statusbar-right">
-      <span>embd v0.1.0</span>
+      <span>embd v{appVersion}</span>
     </div>
   </div>
 </div>
