@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import DOMPurify from 'dompurify';
 
   let { filePath }: { filePath: string } = $props();
 
@@ -60,7 +61,7 @@
       if (type === 'svg') {
         // Load SVG as text so we can render it inline
         const content = await invoke<string>('read_file_content', { path });
-        svgContent = content;
+        svgContent = DOMPurify.sanitize(content, { USE_PROFILES: { svg: true, svgFilters: true } });
         fileSize = formatSize(new Blob([content]).size);
       } else {
         const base64 = await invoke<string>('read_file_binary', { path });

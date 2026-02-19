@@ -1,10 +1,28 @@
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
+
+pub type ApiKeyState = Arc<Mutex<Option<String>>>;
+
+pub fn create_api_key_state() -> ApiKeyState {
+    Arc::new(Mutex::new(None))
+}
+
+#[tauri::command]
+pub fn set_api_key(state: tauri::State<'_, ApiKeyState>, key: String) -> Result<(), String> {
+    let mut stored = state.lock().map_err(|e| e.to_string())?;
+    if key.is_empty() {
+        *stored = None;
+    } else {
+        *stored = Some(key);
+    }
+    Ok(())
+}
 
 #[derive(Deserialize)]
 pub struct AiRequest {
     pub prompt: String,
     pub context: Option<String>,
-    pub api_key: String,
+    pub api_key: Option<String>, // kept for backwards compat, prefer stored key
 }
 
 #[derive(Serialize)]
@@ -32,7 +50,20 @@ struct ContentBlock {
 }
 
 #[tauri::command]
-pub async fn ai_chat(request: AiRequest) -> Result<String, String> {
+pub async fn ai_chat(state: tauri::State<'_, ApiKeyState>, request: AiRequest) -> Result<String, String> {
+    // Prefer stored key, fall back to request key for backwards compat
+    let api_key = {
+        let stored = state.lock().map_err(|e| e.to_string())?;
+        stored.clone()
+    };
+    let api_key = api_key
+        .or(request.api_key)
+        .ok_or_else(|| "No API key configured. Set it in Settings.".to_string())?;
+
+    if api_key.is_empty() {
+        return Err("No API key configured. Set it in Settings.".to_string());
+    }
+
     let system_prompt = "You are an AI coding assistant embedded in a lightweight IDE called embd. \
         Help the user with their code: explain, debug, refactor, or write new code. \
         Keep responses concise and code-focused.";
@@ -55,7 +86,7 @@ pub async fn ai_chat(request: AiRequest) -> Result<String, String> {
     let client = reqwest::Client::new();
     let response = client
         .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", &request.api_key)
+        .header("x-api-key", &api_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&body)
@@ -65,8 +96,7 @@ pub async fn ai_chat(request: AiRequest) -> Result<String, String> {
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(format!("API error {}: {}", status, error_text));
+        return Err(format!("API error: {}", status));
     }
 
     let claude_response: ClaudeResponse = response

@@ -91,6 +91,7 @@ export const apiKey = writable<string>(localStorage.getItem('embd-api-key') || '
 
 apiKey.subscribe(key => {
   if (key) localStorage.setItem('embd-api-key', key);
+  else localStorage.removeItem('embd-api-key');
 });
 
 export const projectRoot = writable<string | null>(null);

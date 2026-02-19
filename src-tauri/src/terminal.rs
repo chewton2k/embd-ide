@@ -1,9 +1,12 @@
+use crate::fs_commands::ProjectRootState;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
+
+const MAX_SESSIONS: usize = 10;
 
 #[derive(Serialize)]
 pub struct SpawnResult {
@@ -39,11 +42,31 @@ pub fn create_terminal_state() -> TerminalState {
 #[tauri::command]
 pub fn spawn_terminal(
     state: tauri::State<'_, TerminalState>,
+    project_root: tauri::State<'_, ProjectRootState>,
     app: AppHandle,
     cwd: Option<String>,
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> Result<SpawnResult, String> {
+    // Limit concurrent sessions
+    {
+        let manager = state.lock().map_err(|e| e.to_string())?;
+        if manager.sessions.len() >= MAX_SESSIONS {
+            return Err("Maximum number of terminal sessions reached".to_string());
+        }
+    }
+
+    // Validate cwd against project root
+    if let Some(ref dir) = cwd {
+        let root = project_root.lock().map_err(|e| e.to_string())?;
+        if let Some(ref root_path) = *root {
+            let canonical = std::fs::canonicalize(dir).map_err(|e| format!("Invalid cwd: {}", e))?;
+            if !canonical.starts_with(root_path) {
+                return Err("Access denied: terminal cwd is outside the project directory".to_string());
+            }
+        }
+    }
+
     let pty_system = native_pty_system();
 
     let initial_rows = rows.unwrap_or(24);

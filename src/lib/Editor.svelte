@@ -2,8 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { get } from 'svelte/store';
-  import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';
-  import { EditorState, Compartment } from '@codemirror/state';
+  import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, gutter, GutterMarker } from '@codemirror/view';
+  import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state';
   import { defaultKeymap, indentWithTab, history, historyKeymap, cursorDocStart, cursorDocEnd, cursorLineBoundaryForward, cursorLineBoundaryBackward, selectDocStart, selectDocEnd, selectLineBoundaryForward, selectLineBoundaryBackward, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, selectCharLeft, selectCharRight, selectLineUp, selectLineDown, deleteLine, cursorPageDown, cursorPageUp } from '@codemirror/commands';
   import { javascript } from '@codemirror/lang-javascript';
   import { python } from '@codemirror/lang-python';
@@ -18,13 +18,53 @@
   import { php } from '@codemirror/lang-php';
   import { sql } from '@codemirror/lang-sql';
   import { xml } from '@codemirror/lang-xml';
+  import { prolog } from 'codemirror-lang-prolog';
+  import { scheme } from 'codemirror-lang-scheme';
+  import { StreamLanguage } from '@codemirror/language';
+  import { oCaml } from '@codemirror/legacy-modes/mode/mllike';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { autocompletion } from '@codemirror/autocomplete';
   import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
   import { marked } from 'marked';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers } from './stores.ts';
+  import DOMPurify from 'dompurify';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot } from './stores.ts';
 
   let { filePath }: { filePath: string } = $props();
+
+  // Git gutter markers
+  class AddedMarker extends GutterMarker {
+    toDOM() {
+      const el = document.createElement('div');
+      el.className = 'cm-git-added';
+      return el;
+    }
+  }
+  class ModifiedMarker extends GutterMarker {
+    toDOM() {
+      const el = document.createElement('div');
+      el.className = 'cm-git-modified';
+      return el;
+    }
+  }
+  class DeletedMarker extends GutterMarker {
+    toDOM() {
+      const el = document.createElement('div');
+      el.className = 'cm-git-deleted';
+      return el;
+    }
+  }
+
+  const addedMarker = new AddedMarker();
+  const modifiedMarker = new ModifiedMarker();
+  const deletedMarker = new DeletedMarker();
+
+  interface DiffRange {
+    kind: string;
+    start: number;
+    end: number;
+  }
+
+  const gitGutterComp = new Compartment();
   let editorContainer: HTMLDivElement;
   let view: EditorView | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -40,6 +80,48 @@
   const tabSizeComp = new Compartment();
   const wordWrapComp = new Compartment();
   const lineNumbersComp = new Compartment();
+
+  async function updateGitGutter(path: string) {
+    if (!view) return;
+    const root = get(projectRoot);
+    if (!root || !path.startsWith(root)) return;
+    const relPath = path.slice(root.length + 1);
+    try {
+      const ranges = await invoke<DiffRange[]>('git_diff_line_ranges', { repoPath: root, filePath: relPath });
+      if (!view) return;
+      const doc = view.state.doc;
+      const builder = new RangeSetBuilder<GutterMarker>();
+      // RangeSetBuilder requires positions in ascending order
+      const marks: { pos: number; marker: GutterMarker }[] = [];
+      for (const r of ranges) {
+        const marker = r.kind === 'add' ? addedMarker : r.kind === 'del' ? deletedMarker : modifiedMarker;
+        for (let line = r.start; line <= r.end; line++) {
+          if (line >= 1 && line <= doc.lines) {
+            const pos = doc.line(line).from;
+            marks.push({ pos, marker });
+          }
+        }
+      }
+      marks.sort((a, b) => a.pos - b.pos);
+      for (const m of marks) {
+        builder.add(m.pos, m.pos, m.marker);
+      }
+      const markers = builder.finish();
+      view.dispatch({
+        effects: gitGutterComp.reconfigure(
+          gutter({
+            class: 'cm-git-gutter',
+            markers: () => markers,
+          })
+        ),
+      });
+    } catch {
+      // Not in a git repo or command failed — clear gutter
+      if (view) {
+        view.dispatch({ effects: gitGutterComp.reconfigure([]) });
+      }
+    }
+  }
 
   function getLanguage(path: string) {
     const ext = path.split('.').pop()?.toLowerCase();
@@ -60,6 +142,9 @@
       case 'php': return php();
       case 'sql': return sql();
       case 'xml': case 'xsl': case 'xsd': case 'svg': case 'plist': return xml();
+      case 'pl': case 'pro': case 'prolog': return prolog();
+      case 'scm': case 'ss': case 'rkt': return scheme();
+      case 'ml': case 'mli': case 'ocaml': return StreamLanguage.define(oCaml);
       case 'yaml': case 'yml': case 'toml': case 'ini': case 'conf': case 'cfg': return null;
       case 'sh': case 'bash': case 'zsh': case 'fish': return null;
       case 'txt': case 'text': case 'log': case 'env': return null;
@@ -74,7 +159,7 @@
 
   function updatePreview(content: string) {
     if (isMarkdown && showPreview) {
-      previewHtml = marked.parse(content) as string;
+      previewHtml = DOMPurify.sanitize(marked.parse(content) as string);
     }
   }
 
@@ -98,6 +183,8 @@
       const content = await invoke<string>('read_file_content', { path });
       createEditor(content, path);
       updatePreview(content);
+      // Load git gutter after editor is created
+      updateGitGutter(path);
     } catch (e) {
       createEditor(`// Error loading file: ${e}`, path);
     }
@@ -124,6 +211,7 @@
         })),
         tabSizeComp.of(EditorState.tabSize.of(get(editorTabSize))),
         wordWrapComp.of(get(editorWordWrap) ? EditorView.lineWrapping : []),
+        gitGutterComp.of([]),
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
@@ -239,6 +327,7 @@
     try {
       await invoke('write_file_content', { path, content });
       markFileSaved(path);
+      updateGitGutter(path);
     } catch (e) {
       console.error('Failed to save:', e);
     }
@@ -359,6 +448,32 @@
   .editor-wrapper :global(.cm-gutters) {
     background: var(--bg-secondary);
     border-right: 1px solid var(--border);
+  }
+
+  .editor-wrapper :global(.cm-git-gutter) {
+    width: 6px;
+    padding: 0 1px;
+  }
+
+  .editor-wrapper :global(.cm-git-added) {
+    width: 3px;
+    height: 100%;
+    background: var(--success, #a6e3a1);
+    border-radius: 1px;
+  }
+
+  .editor-wrapper :global(.cm-git-modified) {
+    width: 3px;
+    height: 100%;
+    background: var(--accent, #89b4fa);
+    border-radius: 1px;
+  }
+
+  .editor-wrapper :global(.cm-git-deleted) {
+    width: 3px;
+    height: 100%;
+    background: var(--error, #f38ba8);
+    border-radius: 1px;
   }
 
   /* Root container — always present */

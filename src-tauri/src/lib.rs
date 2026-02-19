@@ -5,13 +5,18 @@ mod terminal;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let terminal_state = terminal::create_terminal_state();
+    let project_root_state = fs_commands::create_project_root_state();
+    let api_key_state = ai::create_api_key_state();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(terminal_state)
+        .manage(project_root_state)
+        .manage(api_key_state)
         .invoke_handler(tauri::generate_handler![
+            fs_commands::set_project_root,
             fs_commands::read_dir_tree,
             fs_commands::read_file_content,
             fs_commands::write_file_content,
@@ -25,10 +30,18 @@ pub fn run() {
             fs_commands::get_git_status,
             fs_commands::list_all_files,
             fs_commands::get_git_branch,
+            fs_commands::git_diff,
+            fs_commands::git_stage,
+            fs_commands::git_unstage,
+            fs_commands::git_commit,
+            fs_commands::git_push,
+            fs_commands::git_ahead_behind,
+            fs_commands::git_diff_line_ranges,
             terminal::spawn_terminal,
             terminal::write_terminal,
             terminal::kill_terminal,
             terminal::resize_terminal,
+            ai::set_api_key,
             ai::ai_chat,
         ])
         .setup(|app| {

@@ -1,9 +1,13 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { projectRoot, hiddenPatterns, renameOpenFile } from './stores.ts';
+
+  function isValidName(name: string): boolean {
+    return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';
+  }
 
   interface FileEntry {
     name: string;
@@ -134,6 +138,8 @@
     if (selected) {
       rootPath = selected as string;
       projectRoot.set(rootPath);
+      // Register project root with backend for path validation
+      await invoke('set_project_root', { path: rootPath });
       expandedDirs = new Set();
       await loadDirectory(rootPath);
       await fetchGitStatus();
@@ -200,6 +206,12 @@
 
   async function confirmCreate() {
     if (!newName.trim() || !rootPath) return;
+    if (!isValidName(newName.trim())) {
+      console.error('Invalid name: must not contain / or \\ or be . or ..');
+      creating = null;
+      newName = '';
+      return;
+    }
     // Determine parent directory: use selected dir, or parent of selected file, or root
     let parentDir = rootPath;
     if (selectedPath) {
@@ -257,6 +269,11 @@
     const paths = selectedPaths.size > 0 ? [...selectedPaths] : (selectedPath ? [selectedPath] : []);
     if (paths.length === 0) return;
     closeContextMenu();
+    const confirmed = await ask(
+      `Delete ${paths.length} item${paths.length !== 1 ? 's' : ''}? This cannot be undone.`,
+      { title: 'Confirm Delete', kind: 'warning' }
+    );
+    if (!confirmed) return;
     try {
       await invoke('delete_entries', { paths });
     } catch (e) {
@@ -316,6 +333,11 @@
 
   async function confirmRename() {
     if (!renamingPath || !renameValue.trim()) {
+      cancelRename();
+      return;
+    }
+    if (!isValidName(renameValue.trim())) {
+      console.error('Invalid name: must not contain / or \\ or be . or ..');
       cancelRename();
       return;
     }

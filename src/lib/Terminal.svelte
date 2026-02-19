@@ -67,7 +67,9 @@
     const fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
     xterm.loadAddon(new WebLinksAddon((_event, uri) => {
-      open(uri);
+      if (uri.startsWith('http://') || uri.startsWith('https://')) {
+        open(uri);
+      }
     }));
 
     // Hide all other terminals, show this one

@@ -5,11 +5,12 @@
   import Tabs from './lib/Tabs.svelte';
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
+  import GitPanel from './lib/GitPanel.svelte';
   import Settings from './lib/Settings.svelte';
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
-  import { openFiles, activeFile, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, currentThemeId, getTheme, uiFontSize, uiDensity } from './lib/stores.ts';
+  import { openFiles, activeFile, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey } from './lib/stores.ts';
   import { onMount, onDestroy } from 'svelte';
 
   const viewerExts = new Set([
@@ -24,15 +25,17 @@
 
   let showTerminal = $state(true);
   let showChat = $state(false);
+  let showGit = $state(false);
   let showFileSearch = $state(false);
   let sidebarWidth = $state(220);
   let terminalHeight = $state(220);
   let chatWidth = $state(320);
+  let gitWidth = $state(360);
 
   // --- Drag resize logic ---
-  let dragging = $state<'sidebar' | 'terminal' | 'chat' | null>(null);
+  let dragging = $state<'sidebar' | 'terminal' | 'chat' | 'git' | null>(null);
 
-  function startDrag(target: 'sidebar' | 'terminal' | 'chat') {
+  function startDrag(target: 'sidebar' | 'terminal' | 'chat' | 'git') {
     return (e: MouseEvent) => {
       e.preventDefault();
       dragging = target;
@@ -51,6 +54,8 @@
       terminalHeight = Math.max(100, Math.min(windowH - 150, windowH - e.clientY));
     } else if (dragging === 'chat') {
       chatWidth = Math.max(200, Math.min(600, window.innerWidth - e.clientX));
+    } else if (dragging === 'git') {
+      gitWidth = Math.max(260, Math.min(600, window.innerWidth - e.clientX));
     }
   }
 
@@ -68,6 +73,12 @@
 
   function toggleChat() {
     showChat = !showChat;
+    if (showChat) showGit = false;
+  }
+
+  function toggleGit() {
+    showGit = !showGit;
+    if (showGit) showChat = false;
   }
 
   // Git branch polling
@@ -90,6 +101,11 @@
 
   onMount(() => {
     getVersion().then(v => appVersion = v);
+    // Sync stored API key to backend on startup
+    const storedKey = localStorage.getItem('embd-api-key');
+    if (storedKey) {
+      invoke('set_api_key', { key: storedKey }).catch(() => {});
+    }
     const unsub = projectRoot.subscribe((root) => {
       fetchGitBranch(root);
     });
@@ -146,6 +162,10 @@
       e.preventDefault();
       toggleChat();
     }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
+      e.preventDefault();
+      toggleGit();
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
       e.preventDefault();
       showFileSearch = !showFileSearch;
@@ -181,6 +201,7 @@
               <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
               <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
               <div><kbd>Cmd</kbd> + <kbd>P</kbd> Search Files</div>
+              <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
             </div>
           </div>
         {/if}
@@ -206,6 +227,18 @@
     </div>
   {/if}
 
+  {#if showGit}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="resize-handle resize-handle-col" onmousedown={startDrag('git')}></div>
+    <div class="git-panel-container" style="width: {gitWidth}px">
+      <div class="panel-header">
+        <span>Source Control</span>
+        <button onclick={toggleGit}>✕</button>
+      </div>
+      <GitPanel />
+    </div>
+  {/if}
+
   {#if $showSettings}
     <Settings />
   {/if}
@@ -222,18 +255,21 @@
         </svg>
       </button>
       {#if $gitBranch}
-        <span class="statusbar-branch">
+        <button class="statusbar-btn statusbar-branch" onclick={toggleGit}>
           <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
             <path d="M14.7 7.3L8.7 1.3a1 1 0 0 0-1.4 0L5.7 2.9l1.8 1.8A1.2 1.2 0 0 1 9 5.9v4.3a1.2 1.2 0 1 1-1-.1V6.1L6.3 7.8a1.2 1.2 0 1 1-.9-.5l1.8-1.8-1.8-1.8L1.3 7.3a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0l6-6a1 1 0 0 0 0-1.4z"/>
           </svg>
           {$gitBranch}
-        </span>
+        </button>
       {/if}
       <button onclick={toggleTerminal} class="statusbar-btn">
         {showTerminal ? 'Hide' : 'Show'} Terminal
       </button>
       <button onclick={toggleChat} class="statusbar-btn">
         {showChat ? 'Hide' : 'Show'} AI
+      </button>
+      <button onclick={toggleGit} class="statusbar-btn">
+        {showGit ? 'Hide' : 'Show'} Git
       </button>
       <button onclick={() => autosaveEnabled.update(v => !v)} class="statusbar-btn autosave-btn">
         {$autosaveEnabled ? '● Autosave' : '○ Autosave'}
@@ -389,6 +425,15 @@
   }
 
   .chat-panel {
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 24px);
+    flex-shrink: 0;
+  }
+
+  .git-panel-container {
     background: var(--bg-secondary);
     border-left: 1px solid var(--border);
     display: flex;

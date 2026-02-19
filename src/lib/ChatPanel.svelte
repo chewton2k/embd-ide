@@ -9,8 +9,10 @@
   let showKeyInput = $state(false);
   let keyInput = $state(get(apiKey));
 
-  function saveKey() {
+  async function saveKey() {
     apiKey.set(keyInput);
+    // Store key on backend so it's not sent on every request
+    try { await invoke('set_api_key', { key: keyInput }); } catch {}
     showKeyInput = false;
   }
 
@@ -41,7 +43,7 @@
 
     try {
       const response = await invoke<string>('ai_chat', {
-        request: { prompt, context: context || null, api_key: key }
+        request: { prompt, context: context || null, api_key: key || null }
       });
       const assistantMsg: ChatMessage = { role: 'assistant', content: response };
       chatMessages.update(msgs => [...msgs, assistantMsg]);

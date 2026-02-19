@@ -3,7 +3,64 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use base64::Engine;
+
+pub type ProjectRootState = Arc<Mutex<Option<PathBuf>>>;
+
+pub fn create_project_root_state() -> ProjectRootState {
+    Arc::new(Mutex::new(None))
+}
+
+#[tauri::command]
+pub fn set_project_root(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+    let canonical = fs::canonicalize(&path).map_err(|e| format!("Invalid path: {}", e))?;
+    let mut root = state.lock().map_err(|e| e.to_string())?;
+    *root = Some(canonical);
+    Ok(())
+}
+
+/// Validate that a path is within the current project root.
+/// Returns the canonicalized path on success.
+fn validate_path(path: &str, state: &tauri::State<'_, ProjectRootState>) -> Result<PathBuf, String> {
+    let root = state.lock().map_err(|e| e.to_string())?;
+    let root = root.as_ref().ok_or_else(|| "No project is open".to_string())?;
+
+    let p = PathBuf::from(path);
+    // For paths that don't exist yet (create_file/create_folder), canonicalize the parent
+    let canonical = if p.exists() {
+        fs::canonicalize(&p).map_err(|e| format!("Invalid path: {}", e))?
+    } else if let Some(parent) = p.parent() {
+        if parent.exists() {
+            let canon_parent = fs::canonicalize(parent).map_err(|e| format!("Invalid path: {}", e))?;
+            canon_parent.join(p.file_name().ok_or("Invalid file name")?)
+        } else {
+            // Parent doesn't exist either — check that the ultimate ancestor is in root
+            PathBuf::from(path)
+        }
+    } else {
+        return Err("Invalid path".to_string());
+    };
+
+    if !canonical.starts_with(root) {
+        return Err("Access denied: path is outside the project directory".to_string());
+    }
+
+    // Deny access to .git internals for write/delete operations
+    // (read is ok for branch detection etc.)
+    Ok(canonical)
+}
+
+/// Validate that a repo_path matches the project root for git commands.
+fn validate_repo_path(repo_path: &str, state: &tauri::State<'_, ProjectRootState>) -> Result<PathBuf, String> {
+    let root = state.lock().map_err(|e| e.to_string())?;
+    let root = root.as_ref().ok_or_else(|| "No project is open".to_string())?;
+    let canonical = fs::canonicalize(repo_path).map_err(|e| format!("Invalid repo path: {}", e))?;
+    if !canonical.starts_with(root) && !root.starts_with(&canonical) {
+        return Err("Access denied: repo path is outside the project directory".to_string());
+    }
+    Ok(canonical)
+}
 
 #[derive(Serialize, Clone)]
 pub struct FileEntry {
@@ -14,8 +71,9 @@ pub struct FileEntry {
 }
 
 #[tauri::command]
-pub fn read_dir_tree(path: String, depth: Option<u32>) -> Result<Vec<FileEntry>, String> {
-    let max_depth = depth.unwrap_or(1);
+pub fn read_dir_tree(state: tauri::State<'_, ProjectRootState>, path: String, depth: Option<u32>) -> Result<Vec<FileEntry>, String> {
+    validate_path(&path, &state)?;
+    let max_depth = depth.unwrap_or(1).min(50); // Cap depth to prevent abuse
     read_dir_recursive(&PathBuf::from(path), 0, max_depth)
 }
 
@@ -60,18 +118,21 @@ fn read_dir_recursive(path: &PathBuf, current_depth: u32, max_depth: u32) -> Res
 }
 
 #[tauri::command]
-pub fn read_file_content(path: String) -> Result<String, String> {
-    fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path, e))
+pub fn read_file_content(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<String, String> {
+    validate_path(&path, &state)?;
+    fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))
 }
 
 #[tauri::command]
-pub fn write_file_content(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, &content).map_err(|e| format!("Failed to write {}: {}", path, e))
+pub fn write_file_content(state: tauri::State<'_, ProjectRootState>, path: String, content: String) -> Result<(), String> {
+    validate_path(&path, &state)?;
+    fs::write(&path, &content).map_err(|e| format!("Failed to write file: {}", e.kind()))
 }
 
 #[tauri::command]
-pub fn read_file_binary(path: String) -> Result<String, String> {
-    let bytes = fs::read(&path).map_err(|e| format!("Failed to read {}: {}", path, e))?;
+pub fn read_file_binary(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<String, String> {
+    validate_path(&path, &state)?;
+    let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
@@ -83,7 +144,8 @@ pub fn get_home_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn create_file(path: String) -> Result<(), String> {
+pub fn create_file(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+    validate_path(&path, &state)?;
     let p = PathBuf::from(&path);
     if p.exists() {
         return Err("File already exists".to_string());
@@ -95,7 +157,8 @@ pub fn create_file(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn create_folder(path: String) -> Result<(), String> {
+pub fn create_folder(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+    validate_path(&path, &state)?;
     let p = PathBuf::from(&path);
     if p.exists() {
         return Err("Folder already exists".to_string());
@@ -104,28 +167,33 @@ pub fn create_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn delete_entries(paths: Vec<String>) -> Result<(), String> {
+pub fn delete_entries(state: tauri::State<'_, ProjectRootState>, paths: Vec<String>) -> Result<(), String> {
+    for path in &paths {
+        validate_path(path, &state)?;
+    }
     for path in paths {
         let p = PathBuf::from(&path);
         if !p.exists() {
             continue;
         }
-        if p.is_dir() {
-            fs::remove_dir_all(&p).map_err(|e| format!("Failed to delete {}: {}", path, e))?;
-        } else {
-            fs::remove_file(&p).map_err(|e| format!("Failed to delete {}: {}", path, e))?;
-        }
+        trash::delete(&p).map_err(|e| format!("Failed to move to trash: {}", e))?;
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn rename_entry(old_path: String, new_path: String) -> Result<(), String> {
+pub fn rename_entry(state: tauri::State<'_, ProjectRootState>, old_path: String, new_path: String) -> Result<(), String> {
+    validate_path(&old_path, &state)?;
+    validate_path(&new_path, &state)?;
     fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename: {}", e))
 }
 
 #[tauri::command]
-pub fn paste_entries(sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+pub fn paste_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+    for src in &sources {
+        validate_path(src, &state)?;
+    }
+    validate_path(&dest_dir, &state)?;
     let dest = PathBuf::from(&dest_dir);
     if !dest.is_dir() {
         return Err("Destination is not a directory".to_string());
@@ -142,6 +210,9 @@ pub fn paste_entries(sources: Vec<String>, dest_dir: String) -> Result<(), Strin
             let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
             let mut i = 1;
             loop {
+                if i > 10_000 {
+                    return Err("Too many copies exist".to_string());
+                }
                 let name = if i == 1 {
                     format!("{} copy{}", stem, ext)
                 } else {
@@ -179,26 +250,40 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn list_all_files(path: String) -> Result<Vec<String>, String> {
+pub fn list_all_files(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<Vec<String>, String> {
+    validate_path(&path, &state)?;
     let root = PathBuf::from(&path);
     let mut files = Vec::new();
-    collect_files(&root, &root, &mut files);
+    collect_files(&root, &root, &mut files, 0);
     Ok(files)
 }
 
-fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
+const MAX_COLLECT_DEPTH: u32 = 100;
+const MAX_COLLECT_FILES: usize = 100_000;
+
+fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>, depth: u32) {
+    if depth > MAX_COLLECT_DEPTH || out.len() >= MAX_COLLECT_FILES {
+        return;
+    }
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
     };
     for entry in entries.flatten() {
+        if out.len() >= MAX_COLLECT_FILES { return; }
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
         if name == ".git" || name == "node_modules" || name == "target" || name == ".DS_Store" {
             continue;
         }
+        // Skip symlinks to prevent cycles
+        if let Ok(meta) = fs::symlink_metadata(&path) {
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+        }
         if path.is_dir() {
-            collect_files(root, &path, out);
+            collect_files(root, &path, out, depth + 1);
         } else {
             if let Ok(rel) = path.strip_prefix(root) {
                 out.push(rel.to_string_lossy().to_string());
@@ -211,7 +296,8 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
 /// Status codes: "M" = modified (unstaged), "A" = staged new, "S" = staged modified,
 /// "D" = deleted, "?" = untracked, "R" = renamed
 #[tauri::command]
-pub fn get_git_status(path: String) -> Result<HashMap<String, String>, String> {
+pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<HashMap<String, String>, String> {
+    validate_repo_path(&path, &state)?;
     let output = Command::new("git")
         .args(["status", "--porcelain", "-uall"])
         .current_dir(&path)
@@ -256,6 +342,301 @@ pub fn get_git_status(path: String) -> Result<HashMap<String, String>, String> {
     }
 
     Ok(result)
+}
+
+// ── Git panel commands ───────────────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct DiffLine {
+    pub kind: String, // "add", "del", "ctx"
+    pub old_num: Option<u32>,
+    pub new_num: Option<u32>,
+    pub text: String,
+}
+
+#[tauri::command]
+pub fn git_diff(state: tauri::State<'_, ProjectRootState>, repo_path: String, file_path: String, staged: bool) -> Result<Vec<DiffLine>, String> {
+    validate_repo_path(&repo_path, &state)?;
+    // Ensure file_path is relative and has no traversal
+    if file_path.contains("..") {
+        return Err("Invalid file path".to_string());
+    }
+    // Check if file is untracked
+    let status_out = Command::new("git")
+        .args(["status", "--porcelain", "--", &file_path])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let status_str = String::from_utf8_lossy(&status_out.stdout);
+    let is_untracked = status_str.lines().any(|l| l.starts_with("??"));
+
+    let output = if is_untracked {
+        let abs = PathBuf::from(&repo_path).join(&file_path);
+        Command::new("git")
+            .args(["diff", "--no-index", "/dev/null", &abs.to_string_lossy()])
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?
+    } else if staged {
+        Command::new("git")
+            .args(["diff", "--cached", "--", &file_path])
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?
+    } else {
+        Command::new("git")
+            .args(["diff", "--", &file_path])
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(parse_unified_diff(&stdout))
+}
+
+fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
+    let mut lines = Vec::new();
+    let mut old_line: u32 = 0;
+    let mut new_line: u32 = 0;
+    let mut in_hunk = false;
+
+    for raw in diff.lines() {
+        if raw.starts_with("@@") {
+            // Parse hunk header: @@ -old,count +new,count @@
+            in_hunk = true;
+            if let Some(rest) = raw.strip_prefix("@@ -") {
+                let parts: Vec<&str> = rest.splitn(2, '+').collect();
+                if parts.len() == 2 {
+                    old_line = parts[0].split(',').next().unwrap_or("1").trim().parse().unwrap_or(1);
+                    new_line = parts[1].split(|c: char| c == ',' || c == ' ').next().unwrap_or("1").parse().unwrap_or(1);
+                }
+            }
+            lines.push(DiffLine {
+                kind: "ctx".to_string(),
+                old_num: None,
+                new_num: None,
+                text: raw.to_string(),
+            });
+        } else if !in_hunk {
+            continue;
+        } else if let Some(text) = raw.strip_prefix('+') {
+            lines.push(DiffLine {
+                kind: "add".to_string(),
+                old_num: None,
+                new_num: Some(new_line),
+                text: text.to_string(),
+            });
+            new_line += 1;
+        } else if let Some(text) = raw.strip_prefix('-') {
+            lines.push(DiffLine {
+                kind: "del".to_string(),
+                old_num: Some(old_line),
+                new_num: None,
+                text: text.to_string(),
+            });
+            old_line += 1;
+        } else {
+            // Context line (starts with ' ' or is empty)
+            let text = raw.strip_prefix(' ').unwrap_or(raw);
+            lines.push(DiffLine {
+                kind: "ctx".to_string(),
+                old_num: Some(old_line),
+                new_num: Some(new_line),
+                text: text.to_string(),
+            });
+            old_line += 1;
+            new_line += 1;
+        }
+    }
+    lines
+}
+
+#[tauri::command]
+pub fn git_stage(state: tauri::State<'_, ProjectRootState>, repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    validate_repo_path(&repo_path, &state)?;
+    for p in &paths {
+        if p.contains("..") { return Err("Invalid file path".to_string()); }
+    }
+    let mut args = vec!["add".to_string(), "--".to_string()];
+    args.extend(paths);
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_unstage(state: tauri::State<'_, ProjectRootState>, repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    validate_repo_path(&repo_path, &state)?;
+    for p in &paths {
+        if p.contains("..") { return Err("Invalid file path".to_string()); }
+    }
+    let mut args = vec!["restore".to_string(), "--staged".to_string(), "--".to_string()];
+    args.extend(paths);
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn git_commit(state: tauri::State<'_, ProjectRootState>, repo_path: String, message: String) -> Result<String, String> {
+    validate_repo_path(&repo_path, &state)?;
+    let output = Command::new("git")
+        .args(["commit", "-m", &message])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    // Extract commit hash from output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let hash = stdout
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .unwrap_or("unknown")
+        .trim_end_matches(']')
+        .to_string();
+    Ok(hash)
+}
+
+#[tauri::command]
+pub fn git_push(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+    validate_repo_path(&repo_path, &state)?;
+    let output = Command::new("git")
+        .args(["push"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(stderr);
+    }
+    Ok(String::from_utf8_lossy(&output.stderr).to_string()) // git push outputs to stderr
+}
+
+#[derive(Serialize, Clone)]
+pub struct AheadBehind {
+    pub ahead: u32,
+    pub behind: u32,
+    pub upstream: Option<String>,
+}
+
+#[tauri::command]
+pub fn git_ahead_behind(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<AheadBehind, String> {
+    validate_repo_path(&repo_path, &state)?;
+    // Get upstream name
+    let upstream_out = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !upstream_out.status.success() {
+        return Ok(AheadBehind { ahead: 0, behind: 0, upstream: None });
+    }
+
+    let upstream = String::from_utf8_lossy(&upstream_out.stdout).trim().to_string();
+
+    let output = Command::new("git")
+        .args(["rev-list", "--count", "--left-right", "HEAD...@{u}"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(AheadBehind { ahead: 0, behind: 0, upstream: Some(upstream) });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parts: Vec<&str> = stdout.trim().split('\t').collect();
+    let ahead = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let behind = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    Ok(AheadBehind { ahead, behind, upstream: Some(upstream) })
+}
+
+#[derive(Serialize, Clone)]
+pub struct DiffRange {
+    pub kind: String, // "add", "del", "mod"
+    pub start: u32,
+    pub end: u32,
+}
+
+#[tauri::command]
+pub fn git_diff_line_ranges(state: tauri::State<'_, ProjectRootState>, repo_path: String, file_path: String) -> Result<Vec<DiffRange>, String> {
+    validate_repo_path(&repo_path, &state)?;
+    if file_path.contains("..") {
+        return Err("Invalid file path".to_string());
+    }
+    let output = Command::new("git")
+        .args(["diff", "-U0", "--", &file_path])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut ranges = Vec::new();
+
+    for line in stdout.lines() {
+        if !line.starts_with("@@") { continue; }
+        // Parse @@ -old[,count] +new[,count] @@
+        if let Some(rest) = line.strip_prefix("@@ -") {
+            let parts: Vec<&str> = rest.splitn(2, '+').collect();
+            if parts.len() != 2 { continue; }
+
+            let old_part = parts[0].trim().trim_end_matches(',');
+            let new_part = parts[1].split_whitespace().next().unwrap_or("0");
+
+            let (_old_start, old_count) = parse_hunk_range(old_part);
+            let (new_start, new_count) = parse_hunk_range(new_part);
+
+            if old_count == 0 && new_count > 0 {
+                // Pure addition
+                ranges.push(DiffRange {
+                    kind: "add".to_string(),
+                    start: new_start,
+                    end: new_start + new_count - 1,
+                });
+            } else if new_count == 0 && old_count > 0 {
+                // Pure deletion — mark the line after deletion point
+                ranges.push(DiffRange {
+                    kind: "del".to_string(),
+                    start: new_start.max(1),
+                    end: new_start.max(1),
+                });
+            } else {
+                // Modification
+                ranges.push(DiffRange {
+                    kind: "mod".to_string(),
+                    start: new_start,
+                    end: new_start + new_count - 1,
+                });
+            }
+        }
+    }
+
+    Ok(ranges)
+}
+
+fn parse_hunk_range(s: &str) -> (u32, u32) {
+    let parts: Vec<&str> = s.split(',').collect();
+    let start: u32 = parts[0].parse().unwrap_or(0);
+    let count: u32 = if parts.len() > 1 { parts[1].parse().unwrap_or(1) } else { 1 };
+    (start, count)
 }
 
 #[tauri::command]
