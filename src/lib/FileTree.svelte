@@ -32,6 +32,21 @@
 
   // Context menu state
   let contextMenu = $state<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
+  let contextMenuEl = $state<HTMLDivElement | undefined>();
+
+  $effect(() => {
+    if (contextMenuEl && contextMenu) {
+      const rect = contextMenuEl.getBoundingClientRect();
+      const viewH = window.innerHeight;
+      const viewW = window.innerWidth;
+      if (rect.bottom > viewH) {
+        contextMenu.y = Math.max(4, contextMenu.y - (rect.bottom - viewH) - 8);
+      }
+      if (rect.right > viewW) {
+        contextMenu.x = Math.max(4, contextMenu.x - (rect.right - viewW) - 8);
+      }
+    }
+  });
 
   // Clipboard for copy/paste files
   let clipboardPaths = $state<string[]>([]);
@@ -151,6 +166,8 @@
   let gitFileStatus = $state<Map<string, string>>(new Map());
   // Derived: folder path -> "highest priority" status of any child
   let gitFolderStatus = $state<Map<string, string>>(new Map());
+  // Gitignored paths (files and directories)
+  let gitIgnoredPaths = $state<Set<string>>(new Set());
 
   async function fetchGitStatus() {
     if (!rootPath) return;
@@ -175,6 +192,22 @@
       gitFileStatus = new Map();
       gitFolderStatus = new Map();
     }
+    // Fetch gitignored paths
+    try {
+      const ignored = await invoke<string[]>('get_git_ignored', { path: rootPath });
+      gitIgnoredPaths = new Set(ignored);
+    } catch (_) {
+      gitIgnoredPaths = new Set();
+    }
+  }
+
+  function isGitIgnored(path: string): boolean {
+    if (gitIgnoredPaths.has(path)) return true;
+    // Check if any parent directory is ignored
+    for (const ignored of gitIgnoredPaths) {
+      if (path.startsWith(ignored + '/')) return true;
+    }
+    return false;
   }
 
   function getGitStatusColor(path: string, isDir: boolean): string | null {
@@ -1042,7 +1075,7 @@
 
 {#if contextMenu}
   <div class="context-overlay" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
-  <div class="context-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px">
+  <div class="context-menu" bind:this={contextMenuEl} style="left: {contextMenu.x}px; top: {contextMenu.y}px">
     {#if selectedPaths.size > 1}
       <button class="context-item" onclick={copyFiles}>
         Copy {selectedPaths.size} items
@@ -1108,6 +1141,7 @@
     class:dragging={draggedPaths.includes(entry.path)}
     class:drop-target={dropTargetPath === entry.path && entry.is_dir}
     class:drop-target-child={dropTargetPath !== null && getParentDir(entry.path) === dropTargetPath}
+    class:git-ignored={isGitIgnored(entry.path)}
     style="padding-left: {8 + depth * 8}px"
     data-path={entry.path}
     data-isdir={entry.is_dir}
@@ -1421,6 +1455,10 @@
 
   .tree-item.drop-target-child {
     background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+
+  .tree-item.git-ignored {
+    opacity: 0.5;
   }
 
   .tree-content.drop-target {

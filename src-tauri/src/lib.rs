@@ -31,6 +31,7 @@ pub fn run() {
             fs_commands::import_external_files,
             fs_commands::paste_entries,
             fs_commands::get_git_status,
+            fs_commands::get_git_ignored,
             fs_commands::list_all_files,
             fs_commands::get_git_branch,
             fs_commands::git_diff,

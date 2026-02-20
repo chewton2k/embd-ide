@@ -420,6 +420,34 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
     Ok(result)
 }
 
+#[tauri::command]
+pub fn get_git_ignored(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<Vec<String>, String> {
+    validate_repo_path(&path, &state)?;
+    // List all files, then use git check-ignore to filter
+    let output = Command::new("git")
+        .args(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let root = PathBuf::from(&path);
+    let result: Vec<String> = stdout
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let clean = l.trim_end_matches('/');
+            root.join(clean).to_string_lossy().to_string()
+        })
+        .collect();
+
+    Ok(result)
+}
+
 // ── Git panel commands ───────────────────────────────────────────
 
 #[derive(Serialize, Clone)]

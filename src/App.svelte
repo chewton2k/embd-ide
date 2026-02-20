@@ -171,7 +171,7 @@
       e.preventDefault();
       toggleGit();
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
       e.preventDefault();
       showFileSearch = !showFileSearch;
     }
@@ -204,7 +204,8 @@
             <div class="shortcuts">
               <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
               <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
-              <div><kbd>Cmd</kbd> + <kbd>P</kbd> Search Files</div>
+              <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
+              <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
               <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
             </div>
           </div>
