@@ -373,6 +373,13 @@
         e.preventDefault();
         view.focus();
         openSearchPanel(view);
+        // Disable autocapitalize on the search inputs
+        requestAnimationFrame(() => {
+          view.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
+            input.setAttribute('autocapitalize', 'off');
+            input.setAttribute('autocorrect', 'off');
+          });
+        });
       }
     }
   }

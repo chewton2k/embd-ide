@@ -1219,6 +1219,10 @@
     padding: 10px 12px 8px;
     border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
     margin-bottom: 4px;
+    position: sticky;
+    top: 0;
+    background: var(--bg-secondary);
+    z-index: 5;
   }
 
   .tree-header-left {

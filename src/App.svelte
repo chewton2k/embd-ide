@@ -2,6 +2,7 @@
   import FileTree from './lib/FileTree.svelte';
   import Editor from './lib/Editor.svelte';
   import FileViewer from './lib/FileViewer.svelte';
+  import JSONViewer from './lib/JSONViewer.svelte';
   import Tabs from './lib/Tabs.svelte';
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
@@ -21,6 +22,10 @@
   function isViewerFile(path: string): boolean {
     const ext = path.split('.').pop()?.toLowerCase() || '';
     return viewerExts.has(ext);
+  }
+
+  function isJsonFile(path: string): boolean {
+    return path.toLowerCase().endsWith('.json');
   }
 
   let showTerminal = $state(true);
@@ -177,9 +182,6 @@
 
 <div class="ide-layout">
   <div class="sidebar" style="width: {sidebarWidth}px">
-    <div class="sidebar-header">
-      <img src="/embd_logo_cutout.png" alt="embd" class="logo-img" />
-    </div>
     <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} />
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -189,7 +191,9 @@
     <div class="editor-area" style="flex: 1; min-height: 0;">
       <Tabs />
       <div class="editor-container">
-        {#if $activeFile && isViewerFile($activeFile)}
+        {#if $activeFile && isJsonFile($activeFile)}
+          <JSONViewer filePath={$activeFile} />
+        {:else if $activeFile && isViewerFile($activeFile)}
           <FileViewer filePath={$activeFile} />
         {:else if $activeFile}
           <Editor filePath={$activeFile} />
@@ -263,16 +267,16 @@
         </button>
       {/if}
       <button onclick={toggleTerminal} class="statusbar-btn">
-        {showTerminal ? 'Hide' : 'Show'} Terminal
+        | {showTerminal ? 'Hide' : 'Show'} Terminal 
       </button>
       <button onclick={toggleChat} class="statusbar-btn">
-        {showChat ? 'Hide' : 'Show'} AI
+        | {showChat ? 'Hide' : 'Show'} AI 
       </button>
       <button onclick={toggleGit} class="statusbar-btn">
-        {showGit ? 'Hide' : 'Show'} Git
+        | {showGit ? 'Hide' : 'Show'} Git 
       </button>
       <button onclick={() => autosaveEnabled.update(v => !v)} class="statusbar-btn autosave-btn">
-        {$autosaveEnabled ? '● Autosave' : '○ Autosave'}
+        | {$autosaveEnabled ? 'ON Autosave' : 'OFF Autosave'} |
       </button>
     </div>
     <div class="statusbar-right">
@@ -297,20 +301,6 @@
     height: calc(100vh - 24px);
     overflow: hidden;
     flex-shrink: 0;
-  }
-
-  .sidebar-header {
-    padding: 6px 10px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .logo-img {
-    height: 70px;
-    width: auto;
-    object-fit: contain;
   }
 
   .main-area {

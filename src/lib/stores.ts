@@ -12,7 +12,7 @@ export const activeFilePath = writable<string | null>(null);
 
 export const activeFile = derived(activeFilePath, ($path) => $path);
 
-const MAX_TABS = 5;
+const MAX_TABS = 8;
 
 export function addFile(path: string, name: string) {
   openFiles.update(files => {
