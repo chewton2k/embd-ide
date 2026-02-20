@@ -5,6 +5,7 @@ export interface OpenFile {
   name: string;
   content: string;
   modified: boolean;
+  pinned: boolean;
 }
 
 export const openFiles = writable<OpenFile[]>([]);
@@ -21,31 +22,25 @@ export function addFile(path: string, name: string) {
       return files;
     }
     activeFilePath.set(path);
-    let updated = [...files, { path, name, content: '', modified: false }];
+    let updated = [...files, { 
+      path, 
+      name, 
+      content: '', 
+      modified: false,
+      pinned: false
+    }];
     // Drop the oldest unmodified tab when over the limit
     while (updated.length > MAX_TABS) {
-      const oldest = updated.find(f => f.path !== path && !f.modified);
-      if (oldest) {
-        updated = updated.filter(f => f.path !== oldest.path);
-      } else {
-        // All other tabs are modified, drop the oldest anyway
-        updated = updated.filter((_, i) => i !== 0);
-      }
-    }
-    return updated;
-  });
-}
+      const oldest = updated.find(
+        f => !f.pinned && !f.modified && f.path !== path
+      );
 
-export function closeFile(path: string) {
-  openFiles.update(files => {
-    const newFiles = files.filter(f => f.path !== path);
-    activeFilePath.update(current => {
-      if (current === path) {
-        return newFiles.length > 0 ? newFiles[newFiles.length - 1].path : null;
-      }
-      return current;
-    });
-    return newFiles;
+      if (!oldest) break;
+
+      updated = updated.filter(f => f.path !== oldest.path);
+    }
+
+    return updated;
   });
 }
 
@@ -55,24 +50,45 @@ export function updateFileContent(path: string, content: string) {
   );
 }
 
-export function closeFileByPath(path: string) {
-  openFiles.update(files => {
-    const newFiles = files.filter(f => f.path !== path);
-    activeFilePath.update(current => {
-      if (current === path) {
-        return newFiles.length > 0 ? newFiles[newFiles.length - 1].path : null;
-      }
-      return current;
-    });
-    return newFiles;
-  });
-}
-
 export function renameOpenFile(oldPath: string, newPath: string, newName: string) {
   openFiles.update(files =>
     files.map(f => f.path === oldPath ? { ...f, path: newPath, name: newName } : f)
   );
   activeFilePath.update(current => current === oldPath ? newPath : current);
+}
+
+// Pinned tabs 
+export function togglePin(path: string) {
+  openFiles.update(files =>
+    files.map(f =>
+      f.path === path ? { ...f, pinned: !f.pinned } : f
+    )
+  );
+}
+
+export const pinnedFiles = derived(openFiles, files =>
+  files.filter(f => f.pinned)
+);
+
+export const unpinnedFiles = derived(openFiles, files =>
+  files.filter(f => !f.pinned)
+);
+
+export function closeFile(path: string) {
+  openFiles.update(files => {
+    const file = files.find(f => f.path === path);
+    if (file?.pinned) return files; // 🚫 don’t close pinned
+
+    const newFiles = files.filter(f => f.path !== path);
+
+    activeFilePath.update(current =>
+      current === path
+        ? newFiles.at(-1)?.path ?? null
+        : current
+    );
+
+    return newFiles;
+  });
 }
 
 export function markFileSaved(path: string) {
