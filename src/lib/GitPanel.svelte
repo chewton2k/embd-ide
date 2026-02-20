@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { projectRoot, gitBranch } from './stores.ts';
+  import { projectRoot, gitBranch, activeFilePath } from './stores.ts';
 
   interface GitFile {
     path: string;       // absolute path
@@ -315,6 +315,13 @@
     pollInterval = setInterval(fetchStatus, 3000);
   });
 
+  // Refresh source control when the user switches files
+  $effect(() => {
+    $activeFilePath;          // track changes
+    fetchStatus();
+    if (showHistory) fetchHistory();
+  });
+
   onDestroy(() => {
     if (pollInterval) clearInterval(pollInterval);
   });
@@ -410,6 +417,7 @@
       <div class="section">
         <div class="section-header">
           <span>Diff: {selectedFile.relPath}</span>
+          <button class="section-action" onclick={() => { selectedFile = null; diffLines = []; }} title="Close Diff">✕</button>
         </div>
         <div class="diff-preview">
           {#each diffLines as line}
