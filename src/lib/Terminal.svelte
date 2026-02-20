@@ -103,6 +103,32 @@
         killTab(sessionId);
       });
 
+      // Handle macOS keyboard shortcuts that xterm doesn't natively support
+      xterm.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+        if (e.type !== 'keydown') return true;
+        // Cmd+Backspace: clear line (send Ctrl+U)
+        if (e.metaKey && e.key === 'Backspace') {
+          invoke('write_terminal', { id: sessionId, data: '\x15' });
+          return false;
+        }
+        // Cmd+Left: move to beginning of line (send Home / Ctrl+A)
+        if (e.metaKey && e.key === 'ArrowLeft') {
+          invoke('write_terminal', { id: sessionId, data: '\x01' });
+          return false;
+        }
+        // Cmd+Right: move to end of line (send End / Ctrl+E)
+        if (e.metaKey && e.key === 'ArrowRight') {
+          invoke('write_terminal', { id: sessionId, data: '\x05' });
+          return false;
+        }
+        // Alt+Backspace: delete word backward (send Ctrl+W)
+        if (e.altKey && e.key === 'Backspace') {
+          invoke('write_terminal', { id: sessionId, data: '\x17' });
+          return false;
+        }
+        return true;
+      });
+
       // Send input directly to PTY
       xterm.onData((data) => {
         invoke('write_terminal', { id: sessionId, data });
@@ -137,6 +163,9 @@
 
     tabs = [...tabs, tab];
     activeTabId = sessionId;
+
+    // Auto-focus so user can type immediately
+    requestAnimationFrame(() => xterm.focus());
   }
 
   function hideAllTerminals() {
@@ -205,6 +234,19 @@
     e.stopPropagation();
     killTab(tabId);
   }
+
+  // Re-focus active terminal when panel becomes visible
+  $effect(() => {
+    if ($showTerminal) {
+      const tab = getActiveTab();
+      if (tab) {
+        requestAnimationFrame(() => {
+          tab.fitAddon.fit();
+          tab.xterm.focus();
+        });
+      }
+    }
+  });
 
   // When project root changes, create a fresh first terminal
   let initializedForRoot: string | null = null;
