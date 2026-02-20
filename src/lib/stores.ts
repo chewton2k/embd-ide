@@ -13,6 +13,15 @@ export const activeFilePath = writable<string | null>(null);
 
 export const activeFile = derived(activeFilePath, ($path) => $path);
 
+export const activeFileModified = derived(
+  [openFiles, activeFilePath],
+  ([$files, $path]) => {
+    if (!$path) return false;
+    const file = $files.find(f => f.path === $path);
+    return file?.modified ?? false;
+  }
+);
+
 const MAX_TABS = 9;
 
 export function addFile(path: string, name: string) {

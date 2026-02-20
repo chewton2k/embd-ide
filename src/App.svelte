@@ -11,7 +11,7 @@
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
-  import { openFiles, activeFile, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey } from './lib/stores.ts';
+  import { openFiles, activeFile, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey } from './lib/stores.ts';
   import { onMount, onDestroy } from 'svelte';
 
   const viewerExts = new Set([
@@ -267,7 +267,7 @@
         </button>
       {/if}
       <button onclick={toggleTerminal} class="statusbar-btn">
-        | {$showTerminal ? 'Hide' : 'Show'} Terminal 
+        {$showTerminal ? 'Hide' : 'Show'} Terminal 
       </button>
       <button onclick={toggleChat} class="statusbar-btn">
         | {showChat ? 'Hide' : 'Show'} AI 
@@ -280,6 +280,21 @@
       </button>
     </div>
     <div class="statusbar-right">
+      {#if $activeFile}
+        <span class="save-indicator" class:saved={!$activeFileModified} class:unsaved={$activeFileModified}>
+          {#if $activeFileModified}
+            <svg viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
+              <circle cx="8" cy="8" r="5" />
+            </svg>
+            Unsaved
+          {:else}
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="11" height="11">
+              <path d="M3 8.5l3.5 3.5 6.5-7" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            Saved
+          {/if}
+        </span>
+      {/if}
       <span>embd v{appVersion}</span>
     </div>
   </div>
@@ -481,5 +496,24 @@
     font-weight: 500;
     padding-right: 8px;
     border-right: 1px solid color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
+  }
+
+  .save-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 3px;
+    transition: all 0.2s ease;
+  }
+
+  .save-indicator.saved {
+    opacity: 0.85;
+  }
+
+  .save-indicator.unsaved {
+    opacity: 1;
   }
 </style>

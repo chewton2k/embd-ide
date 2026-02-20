@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { watch } from '@tauri-apps/plugin-fs';
+  import type { UnwatchFn } from '@tauri-apps/plugin-fs';
   import { get } from 'svelte/store';
   import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, gutter, GutterMarker } from '@codemirror/view';
   import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state';
@@ -70,6 +72,12 @@
   let view: EditorView | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let saving = $state(false);
+
+  // File watcher for external changes
+  let unwatchFn: UnwatchFn | null = null;
+  let watchDebounce: ReturnType<typeof setTimeout> | null = null;
+  let lastSavedContent: string = '';
+  let ignoreNextWatch = false;
 
   // Markdown preview
   let isMarkdown = $derived(/\.(md|mdx|markdown)$/i.test(filePath));
@@ -173,6 +181,57 @@
     }, get(autosaveDelay));
   }
 
+  async function stopWatching() {
+    if (unwatchFn) {
+      unwatchFn();
+      unwatchFn = null;
+    }
+    if (watchDebounce) {
+      clearTimeout(watchDebounce);
+      watchDebounce = null;
+    }
+  }
+
+  async function startWatching(path: string) {
+    await stopWatching();
+    try {
+      unwatchFn = await watch(path, () => {
+        if (ignoreNextWatch) {
+          ignoreNextWatch = false;
+          return;
+        }
+        if (watchDebounce) clearTimeout(watchDebounce);
+        watchDebounce = setTimeout(() => reloadFromDisk(path), 200);
+      }, { recursive: false });
+    } catch {
+      // File may not exist yet or watching not supported
+    }
+  }
+
+  async function reloadFromDisk(path: string) {
+    if (!view) return;
+    try {
+      const diskContent = await invoke<string>('read_file_content', { path });
+      // Only reload if content actually changed from what we know
+      if (diskContent === lastSavedContent) return;
+      if (diskContent === view.state.doc.toString()) return;
+
+      // Preserve cursor position
+      const cursorPos = Math.min(view.state.selection.main.head, diskContent.length);
+
+      view.dispatch({
+        changes: { from: 0, to: view.state.doc.length, insert: diskContent },
+        selection: { anchor: cursorPos },
+      });
+      lastSavedContent = diskContent;
+      markFileSaved(path);
+      updatePreview(diskContent);
+      updateGitGutter(path);
+    } catch {
+      // File might have been deleted
+    }
+  }
+
   async function loadFile(path: string) {
     // Clear any pending autosave for the previous file
     if (autosaveTimer) {
@@ -182,10 +241,13 @@
 
     try {
       const content = await invoke<string>('read_file_content', { path });
+      lastSavedContent = content;
       createEditor(content, path);
       updatePreview(content);
       // Load git gutter after editor is created
       updateGitGutter(path);
+      // Start watching for external changes
+      startWatching(path);
     } catch (e) {
       createEditor(`// Error loading file: ${e}`, path);
     }
@@ -332,11 +394,14 @@
     saving = true;
     const content = view.state.doc.toString();
     try {
+      ignoreNextWatch = true;
       await invoke('write_file_content', { path, content });
+      lastSavedContent = content;
       markFileSaved(path);
       updateGitGutter(path);
     } catch (e) {
       console.error('Failed to save:', e);
+      ignoreNextWatch = false;
     }
     saving = false;
   }
@@ -398,6 +463,7 @@
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleGlobalKeydown);
+    stopWatching();
     // Save before destroying if there are pending changes
     if (autosaveTimer) {
       clearTimeout(autosaveTimer);
