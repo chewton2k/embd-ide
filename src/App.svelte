@@ -195,7 +195,7 @@
           <Editor filePath={$activeFile} />
         {:else}
           <div class="welcome">
-            <img src="/embd_logo_cutout.png" alt="embd" class="welcome-logo" />
+            <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
             <p>Open a file from the sidebar to start editing</p>
             <div class="shortcuts">
               <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
@@ -343,10 +343,11 @@
   }
 
   .welcome-logo {
-    height: 64px;
+    height: 75px;
     width: auto;
     object-fit: contain;
     opacity: 0.7;
+    border-radius: 18px;
   }
 
   .shortcuts {

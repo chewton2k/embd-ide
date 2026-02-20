@@ -4,7 +4,7 @@
 
 ### Prerequisites: 
 1. Node.js (v18+)
-2. Rust 
+2. Rust
 ```bash
 brew install rust
 ```
@@ -35,4 +35,4 @@ brew install rust
 ```bash
 npm run tauri:build
 ```
-Builds the app moves it to your application folder.
+Builds the app and moves it to your application folder.
