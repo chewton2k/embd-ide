@@ -472,6 +472,25 @@
     });
   }
 
+  async function duplicateEntry(path: string) {
+    closeContextMenu();
+    try {
+      await invoke('duplicate_entry', { path });
+    } catch (e) {
+      console.error('Failed to duplicate:', e);
+    }
+    await refreshTree();
+  }
+
+  async function revealInFileManager(path: string) {
+    closeContextMenu();
+    try {
+      await invoke('reveal_in_file_manager', { path });
+    } catch (e) {
+      console.error('Failed to reveal in file manager:', e);
+    }
+  }
+
   async function confirmRename() {
     if (!renamingPath || !renameValue.trim()) {
       cancelRename();
@@ -1096,15 +1115,21 @@
         Delete {selectedPaths.size} items
       </button>
     {:else}
-      {#if contextMenu!.isDir}
-        <button class="context-item" onclick={() => { selectedPath = contextMenu!.path; closeContextMenu(); startCreate('file'); }}>
-          New File
-        </button>
-        <button class="context-item" onclick={() => { selectedPath = contextMenu!.path; closeContextMenu(); startCreate('folder'); }}>
-          New Folder
-        </button>
-        <div class="context-separator"></div>
-      {/if}
+      <button class="context-item" onclick={() => {
+        selectedPath = contextMenu!.path;
+        closeContextMenu();
+        startCreate('file');
+      }}>
+        New File
+      </button>
+      <button class="context-item" onclick={() => {
+        selectedPath = contextMenu!.path;
+        closeContextMenu();
+        startCreate('folder');
+      }}>
+        New Folder
+      </button>
+      <div class="context-separator"></div>
       <button class="context-item" onclick={() => copyPath(contextMenu!.path)}>
         Copy Path
       </button>
@@ -1120,10 +1145,17 @@
           Paste
         </button>
       {/if}
+      <button class="context-item" onclick={() => duplicateEntry(contextMenu!.path)}>
+        Duplicate
+      </button>
       <div class="context-separator"></div>
       <button class="context-item" onclick={() => startRename(contextMenu!.path)}>
         Rename
       </button>
+      <button class="context-item" onclick={() => revealInFileManager(contextMenu!.path)}>
+        Reveal in File Manager
+      </button>
+      <div class="context-separator"></div>
       <button class="context-item danger" onclick={deleteSelected}>
         Delete
       </button>

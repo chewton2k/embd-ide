@@ -310,6 +310,79 @@ pub fn paste_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<Str
     Ok(())
 }
 
+#[tauri::command]
+pub fn duplicate_entry(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+    validate_path(&path, &state)?;
+    let src_path = PathBuf::from(&path);
+    if !src_path.exists() {
+        return Err("Path does not exist".to_string());
+    }
+    let parent = src_path.parent().ok_or("No parent directory")?;
+    let stem = src_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+    let ext = src_path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let is_dir = src_path.is_dir();
+
+    let mut target;
+    let mut i = 1;
+    loop {
+        if i > 10_000 {
+            return Err("Too many copies exist".to_string());
+        }
+        let name = if i == 1 {
+            if is_dir {
+                format!("{} copy", stem)
+            } else {
+                format!("{} copy{}", stem, ext)
+            }
+        } else if is_dir {
+            format!("{} copy {}", stem, i)
+        } else {
+            format!("{} copy {}{}", stem, i, ext)
+        };
+        target = parent.join(&name);
+        if !target.exists() { break; }
+        i += 1;
+    }
+
+    if is_dir {
+        copy_dir_recursive(&src_path, &target)?;
+    } else {
+        fs::copy(&src_path, &target).map_err(|e| format!("Failed to duplicate: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Try xdg-open on the parent directory
+        let parent = PathBuf::from(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or(path);
+        Command::new("xdg-open")
+            .arg(&parent)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| e.to_string())?;
     for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
@@ -375,7 +448,7 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>, depth: u32) {
 pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<HashMap<String, String>, String> {
     validate_repo_path(&path, &state)?;
     let output = Command::new("git")
-        .args(["status", "--porcelain", "-uall"])
+        .args(["status", "--porcelain", "-uall", "-z"])
         .current_dir(&path)
         .output()
         .map_err(|e| e.to_string())?;
@@ -387,15 +460,20 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut result = HashMap::new();
 
-    for line in stdout.lines() {
-        if line.len() < 4 { continue; }
-        let index_status = line.as_bytes()[0];
-        let wt_status = line.as_bytes()[1];
-        let file_path = &line[3..];
+    // With -z flag, entries are NUL-separated and paths are not quoted
+    let entries: Vec<&str> = stdout.split('\0').collect();
+    let mut i = 0;
+    while i < entries.len() {
+        let entry = entries[i];
+        if entry.len() < 4 { i += 1; continue; }
+        let index_status = entry.as_bytes()[0];
+        let wt_status = entry.as_bytes()[1];
+        let file_path = &entry[3..];
 
-        // Handle renames: "R  old -> new"
-        let file_path = if let Some(arrow_pos) = file_path.find(" -> ") {
-            &file_path[arrow_pos + 4..]
+        // For renames/copies, -z puts the original path as the next NUL-separated entry
+        let file_path = if index_status == b'R' || index_status == b'C' {
+            i += 1; // skip the original path
+            file_path
         } else {
             file_path
         };
@@ -415,6 +493,7 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
         };
 
         result.insert(abs_str, status.to_string());
+        i += 1;
     }
 
     Ok(result)

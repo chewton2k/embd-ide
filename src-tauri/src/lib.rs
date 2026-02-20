@@ -30,6 +30,8 @@ pub fn run() {
             fs_commands::move_entries,
             fs_commands::import_external_files,
             fs_commands::paste_entries,
+            fs_commands::duplicate_entry,
+            fs_commands::reveal_in_file_manager,
             fs_commands::get_git_status,
             fs_commands::get_git_ignored,
             fs_commands::list_all_files,
