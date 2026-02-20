@@ -96,6 +96,7 @@
   let unwatchFn: UnwatchFn | null = null;
   let watchDebounce: ReturnType<typeof setTimeout> | null = null;
   let ignoreNextWatch = false;
+  let ignoreNextDocChange = false;
 
   // Per-file last-saved content (what's on disk as far as we know)
   const savedContentCache = new Map<string, string>();
@@ -499,6 +500,10 @@
         ]),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
+            if (ignoreNextDocChange) {
+              ignoreNextDocChange = false;
+              return;
+            }
             const content = update.state.doc.toString();
             updateFileContent(path, content);
             scheduleAutosave(path);
@@ -641,6 +646,29 @@
   $effect(() => {
     if (filePath && editorContainer) {
       loadFile(filePath);
+    }
+  });
+
+  // React to store version changes (e.g. git discard) — force editor to match store content
+  $effect(() => {
+    const file = $openFiles.find(f => f.path === filePath);
+    if (!file || file.version === 0) return;
+    // version > 0 means an external reload happened — push content into editor
+    if (view && currentFilePath === filePath) {
+      const editorContent = view.state.doc.toString();
+      if (editorContent !== file.content) {
+        ignoreNextDocChange = true;
+        const cursorPos = Math.min(view.state.selection.main.head, file.content.length);
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: file.content },
+          selection: { anchor: cursorPos },
+        });
+      }
+      savedContentCache.set(filePath, file.content);
+      // Clear the cached state so it doesn't hold stale content
+      stateCache.delete(filePath);
+      updatePreview(file.content);
+      updateGitGutter(filePath);
     }
   });
 

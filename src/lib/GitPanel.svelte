@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { projectRoot, gitBranch, activeFilePath } from './stores.ts';
+  import { ask } from '@tauri-apps/plugin-dialog';
+  import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh } from './stores.ts';
 
   interface GitFile {
     path: string;       // absolute path
@@ -162,6 +163,67 @@
     try {
       await invoke('git_unstage', { repoPath: root, paths });
       await fetchStatus();
+    } catch { /* ignore */ }
+  }
+
+  async function reloadOpenFiles(discardedFiles: GitFile[]) {
+    const currentOpen = $openFiles;
+    for (const file of discardedFiles) {
+      if (file.status === 'U') {
+        // Untracked file was deleted from disk — close its tab
+        if (currentOpen.some(f => f.path === file.path)) {
+          closeFile(file.path);
+        }
+        continue;
+      }
+      // Tracked file — reload content from disk if open
+      if (currentOpen.some(f => f.path === file.path)) {
+        try {
+          const content = await invoke<string>('read_file_content', { path: file.path });
+          reloadFileContent(file.path, content);
+        } catch { /* file may have been deleted */ }
+      }
+    }
+  }
+
+  async function discardFile(file: GitFile) {
+    const root = $projectRoot;
+    if (!root) return;
+    const confirmed = await ask(
+      `Discard changes to "${file.relPath}"? This cannot be undone.`,
+      { title: 'Discard Changes', kind: 'warning' }
+    );
+    if (!confirmed) return;
+    try {
+      await invoke('git_discard', { repoPath: root, paths: [file.relPath] });
+      if (selectedFile?.path === file.path) {
+        selectedFile = null;
+        diffLines = [];
+      }
+      await reloadOpenFiles([file]);
+      await fetchStatus();
+      triggerFileTreeRefresh();
+    } catch { /* ignore */ }
+  }
+
+  async function discardAll() {
+    const root = $projectRoot;
+    if (!root) return;
+    const filesToDiscard = [...changedFiles];
+    const paths = filesToDiscard.map(f => f.relPath);
+    if (paths.length === 0) return;
+    const confirmed = await ask(
+      `Discard all changes to ${paths.length} file${paths.length !== 1 ? 's' : ''}? This cannot be undone.`,
+      { title: 'Discard All Changes', kind: 'warning' }
+    );
+    if (!confirmed) return;
+    try {
+      await invoke('git_discard', { repoPath: root, paths });
+      selectedFile = null;
+      diffLines = [];
+      await reloadOpenFiles(filesToDiscard);
+      await fetchStatus();
+      triggerFileTreeRefresh();
     } catch { /* ignore */ }
   }
 
@@ -395,7 +457,10 @@
       <div class="section-header">
         <span>Changes ({changedFiles.length})</span>
         {#if changedFiles.length > 0}
-          <button class="section-action" onclick={stageAll} title="Stage All">+ all</button>
+          <div class="section-actions">
+            <button class="section-action" onclick={discardAll} title="Discard All Changes">✕ all</button>
+            <button class="section-action" onclick={stageAll} title="Stage All">+ all</button>
+          </div>
         {/if}
       </div>
       {#each changedFiles as file}
@@ -407,6 +472,7 @@
         >
           <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
           <span class="file-name" title={file.relPath}>{file.relPath}</span>
+          <button class="file-action" onclick={(e: MouseEvent) => { e.stopPropagation(); discardFile(file); }} title="Discard Changes">✕</button>
           <button class="file-action" onclick={(e: MouseEvent) => { e.stopPropagation(); stageFile(file); }} title="Stage">+</button>
         </div>
       {/each}
@@ -587,6 +653,11 @@
   .upstream {
     color: var(--text-muted);
     font-size: 10px;
+  }
+
+  .section-actions {
+    display: flex;
+    gap: 4px;
   }
 
   .section-action {

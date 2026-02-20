@@ -39,6 +39,7 @@ pub fn run() {
             fs_commands::git_diff,
             fs_commands::git_stage,
             fs_commands::git_unstage,
+            fs_commands::git_discard,
             fs_commands::git_commit,
             fs_commands::git_push,
             fs_commands::git_ahead_behind,

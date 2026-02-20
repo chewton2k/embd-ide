@@ -674,6 +674,76 @@ pub fn git_unstage(state: tauri::State<'_, ProjectRootState>, repo_path: String,
 }
 
 #[tauri::command]
+pub fn git_discard(state: tauri::State<'_, ProjectRootState>, repo_path: String, paths: Vec<String>) -> Result<(), String> {
+    validate_repo_path(&repo_path, &state)?;
+    for p in &paths {
+        if p.contains("..") { return Err("Invalid file path".to_string()); }
+    }
+
+    // Separate tracked (modified/deleted) from untracked files
+    let status_output = Command::new("git")
+        .args(["status", "--porcelain", "-z", "-uall"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&status_output.stdout);
+    let mut untracked: Vec<String> = Vec::new();
+    let mut tracked: Vec<String> = Vec::new();
+
+    let entries: Vec<&str> = stdout.split('\0').collect();
+    let mut idx = 0;
+    while idx < entries.len() {
+        let entry = entries[idx];
+        if entry.len() < 4 { idx += 1; continue; }
+        let ix = entry.as_bytes()[0];
+        let wt = entry.as_bytes()[1];
+        let file = &entry[3..];
+
+        // Skip rename's extra entry
+        if ix == b'R' || ix == b'C' {
+            idx += 1;
+        }
+
+        if paths.contains(&file.to_string()) {
+            if ix == b'?' && wt == b'?' {
+                untracked.push(file.to_string());
+            } else {
+                tracked.push(file.to_string());
+            }
+        }
+        idx += 1;
+    }
+
+    // Restore tracked files
+    if !tracked.is_empty() {
+        let mut args = vec!["checkout".to_string(), "--".to_string()];
+        args.extend(tracked);
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).to_string());
+        }
+    }
+
+    // Remove untracked files
+    if !untracked.is_empty() {
+        for file in &untracked {
+            let full_path = PathBuf::from(&repo_path).join(file);
+            if full_path.is_dir() {
+                fs::remove_dir_all(&full_path).map_err(|e| e.to_string())?;
+            } else {
+                fs::remove_file(&full_path).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn git_commit(state: tauri::State<'_, ProjectRootState>, repo_path: String, message: String) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     let output = Command::new("git")

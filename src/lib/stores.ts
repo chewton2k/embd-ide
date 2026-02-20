@@ -6,6 +6,7 @@ export interface OpenFile {
   content: string;
   modified: boolean;
   pinned: boolean;
+  version: number;
 }
 
 export const openFiles = writable<OpenFile[]>([]);
@@ -31,12 +32,13 @@ export function addFile(path: string, name: string) {
       return files;
     }
     activeFilePath.set(path);
-    let updated = [...files, { 
-      path, 
-      name, 
-      content: '', 
+    let updated = [...files, {
+      path,
+      name,
+      content: '',
       modified: false,
-      pinned: false
+      pinned: false,
+      version: 0
     }];
     // Drop the oldest unmodified tab when over the limit
     while (updated.length > MAX_TABS) {
@@ -132,6 +134,22 @@ apiKey.subscribe(key => {
 });
 
 export const projectRoot = writable<string | null>(null);
+
+// Update a file's content from disk after external changes (e.g. git discard)
+export function reloadFileContent(path: string, content: string) {
+  openFiles.update(files =>
+    files.map(f => f.path === path
+      ? { ...f, content, modified: false, version: f.version + 1 }
+      : f
+    )
+  );
+}
+
+// Bump to signal the file tree to refresh
+export const fileTreeRefreshTrigger = writable<number>(0);
+export function triggerFileTreeRefresh() {
+  fileTreeRefreshTrigger.update(n => n + 1);
+}
 export const gitBranch = writable<string | null>(null);
 
 // Autosave settings

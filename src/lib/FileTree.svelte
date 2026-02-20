@@ -5,7 +5,7 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
-  import { projectRoot, hiddenPatterns, renameOpenFile } from './stores.ts';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger } from './stores.ts';
 
   function isValidName(name: string): boolean {
     return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';
@@ -989,11 +989,19 @@
     },
   };
 
+  let unsubTreeRefresh: (() => void) | null = null;
+
   onMount(() => {
     window.addEventListener('mousemove', handleGlobalMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
     window.addEventListener('keydown', handleKeyDown);
     setupExternalDropListeners();
+
+    let first = true;
+    unsubTreeRefresh = fileTreeRefreshTrigger.subscribe(() => {
+      if (first) { first = false; return; }
+      refreshTree();
+    });
   });
 
   onDestroy(() => {
@@ -1003,6 +1011,7 @@
     if (dragExpandTimer) clearTimeout(dragExpandTimer);
     endDrag();
     teardownExternalDropListeners();
+    if (unsubTreeRefresh) unsubTreeRefresh();
     window.removeEventListener('mousemove', handleGlobalMouseMove);
     window.removeEventListener('mouseup', handleGlobalMouseUp);
     window.removeEventListener('keydown', handleKeyDown);
