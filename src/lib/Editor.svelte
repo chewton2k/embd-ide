@@ -6,7 +6,7 @@
   import { get } from 'svelte/store';
   import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, gutter, GutterMarker, ViewPlugin, Decoration, WidgetType } from '@codemirror/view';
   import type { DecorationSet, ViewUpdate } from '@codemirror/view';
-  import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state';
+  import { EditorState, Compartment, RangeSetBuilder, Transaction } from '@codemirror/state';
   import { defaultKeymap, indentWithTab, history, historyKeymap, cursorDocStart, cursorDocEnd, cursorLineBoundaryForward, cursorLineBoundaryBackward, selectDocStart, selectDocEnd, selectLineBoundaryForward, selectLineBoundaryBackward, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, selectCharLeft, selectCharRight, selectLineUp, selectLineDown, deleteLine, cursorPageDown, cursorPageUp } from '@codemirror/commands';
   import { javascript } from '@codemirror/lang-javascript';
   import { python } from '@codemirror/lang-python';
@@ -306,9 +306,11 @@
       // Preserve cursor position
       const cursorPos = Math.min(view.state.selection.main.head, diskContent.length);
 
+      ignoreNextDocChange = true;
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: diskContent },
         selection: { anchor: cursorPos },
+        annotations: Transaction.addToHistory.of(false),
       });
       savedContentCache.set(path, diskContent);
       markFileSaved(path);
@@ -356,8 +358,10 @@
           // Disk changed externally — reload from disk
           savedContentCache.set(path, diskContent);
           if (diskContent !== view.state.doc.toString()) {
+            ignoreNextDocChange = true;
             view.dispatch({
               changes: { from: 0, to: view.state.doc.length, insert: diskContent },
+              annotations: Transaction.addToHistory.of(false),
             });
             markFileSaved(path);
             updatePreview(diskContent);
@@ -662,6 +666,7 @@
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: file.content },
           selection: { anchor: cursorPos },
+          annotations: Transaction.addToHistory.of(false),
         });
       }
       savedContentCache.set(filePath, file.content);
