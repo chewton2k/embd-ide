@@ -18,6 +18,7 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-ask",
+    "drag:default",
     {
       "identifier": "fs:scope",
       "allow": [

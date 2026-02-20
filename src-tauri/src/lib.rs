@@ -12,6 +12,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_drag::init())
         .manage(terminal_state)
         .manage(project_root_state)
         .manage(api_key_state)
@@ -26,6 +27,8 @@ pub fn run() {
             fs_commands::create_folder,
             fs_commands::delete_entries,
             fs_commands::rename_entry,
+            fs_commands::move_entries,
+            fs_commands::import_external_files,
             fs_commands::paste_entries,
             fs_commands::get_git_status,
             fs_commands::list_all_files,

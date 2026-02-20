@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
+  import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import { projectRoot, hiddenPatterns, renameOpenFile } from './stores.ts';
 
   function isValidName(name: string): boolean {
@@ -38,6 +40,112 @@
   let renamingPath = $state<string | null>(null);
   let renameValue = $state('');
   let renameInput: HTMLInputElement | undefined = $state();
+
+  // Undo/redo stack for file operations
+  interface FileOp {
+    type: 'move' | 'rename';
+    // For move: sources moved, destDir they went to, and their original parents
+    sources?: string[];
+    destDir?: string;
+    originalParents?: string[];
+    // For rename: old and new path
+    oldPath?: string;
+    newPath?: string;
+  }
+  let undoStack = $state<FileOp[]>([]);
+  let redoStack = $state<FileOp[]>([]);
+
+  async function undoLastOp() {
+    if (undoStack.length === 0) return;
+    const op = undoStack.pop()!;
+    undoStack = [...undoStack];
+
+    if (op.type === 'move' && op.sources && op.destDir && op.originalParents) {
+      // Move each file back to its original parent
+      for (let i = 0; i < op.sources.length; i++) {
+        const name = op.sources[i].split('/').pop()!;
+        const currentPath = `${op.destDir}/${name}`;
+        const originalParent = op.originalParents[i];
+        try {
+          await invoke('move_entries', { sources: [currentPath], destDir: originalParent });
+        } catch (e) {
+          console.error('Undo move failed:', e);
+        }
+      }
+      // Push reverse op to redo stack
+      redoStack = [...redoStack, op];
+      await refreshTree();
+    } else if (op.type === 'rename' && op.oldPath && op.newPath) {
+      try {
+        await invoke('rename_entry', { oldPath: op.newPath, newPath: op.oldPath });
+        redoStack = [...redoStack, op];
+      } catch (e) {
+        console.error('Undo rename failed:', e);
+      }
+      await refreshTree();
+    }
+  }
+
+  async function redoLastOp() {
+    if (redoStack.length === 0) return;
+    const op = redoStack.pop()!;
+    redoStack = [...redoStack];
+
+    if (op.type === 'move' && op.sources && op.destDir) {
+      try {
+        await invoke('move_entries', { sources: op.sources, destDir: op.destDir });
+        undoStack = [...undoStack, op];
+      } catch (e) {
+        console.error('Redo move failed:', e);
+      }
+      await refreshTree();
+    } else if (op.type === 'rename' && op.oldPath && op.newPath) {
+      try {
+        await invoke('rename_entry', { oldPath: op.oldPath, newPath: op.newPath });
+        undoStack = [...undoStack, op];
+      } catch (e) {
+        console.error('Redo rename failed:', e);
+      }
+      await refreshTree();
+    }
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    // Don't intercept undo/redo when focused on text inputs (e.g. code editor, rename input)
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    // Also skip if inside a contenteditable or the editor area
+    if ((e.target as HTMLElement)?.closest?.('.cm-editor, [contenteditable]')) return;
+
+    const mod = e.metaKey || e.ctrlKey;
+    if (mod && e.key === 'z' && !e.shiftKey) {
+      if (undoStack.length === 0) return; // Let other handlers deal with it
+      e.preventDefault();
+      undoLastOp();
+    } else if (mod && e.key === 'z' && e.shiftKey) {
+      if (redoStack.length === 0) return;
+      e.preventDefault();
+      redoLastOp();
+    }
+  }
+
+  // Drag-and-drop state (using mouse events — HTML5 DnD is intercepted by Tauri's native webview)
+  let draggedPaths = $state<string[]>([]);
+  let dropTargetPath = $state<string | null>(null);
+  let dragExpandTimer: ReturnType<typeof setTimeout> | null = null;
+  let isDragging = $state(false);
+  let dragStartPos = { x: 0, y: 0 };
+  let dragPending = false; // mousedown happened, waiting for enough movement to start drag
+  let dragPendingEntry: FileEntry | null = null;
+  let dragGhost: HTMLElement | null = null;
+
+  // External file drop state (files dragged from OS/Finder)
+  let externalDropPaths = $state<string[]>([]);
+  let isExternalDrag = $state(false);
+  let unlistenDragEnter: UnlistenFn | null = null;
+  let unlistenDragOver: UnlistenFn | null = null;
+  let unlistenDragDrop: UnlistenFn | null = null;
+  let unlistenDragLeave: UnlistenFn | null = null;
 
   // Git status: absolute path -> status code (M=modified, A=staged new, S=staged modified, D=deleted, U=untracked)
   let gitFileStatus = $state<Map<string, string>>(new Map());
@@ -348,6 +456,8 @@
       try {
         await invoke('rename_entry', { oldPath, newPath });
         renameOpenFile(oldPath, newPath, renameValue.trim());
+        undoStack = [...undoStack, { type: 'rename', oldPath, newPath }];
+        redoStack = [];
       } catch (e) {
         console.error('Failed to rename:', e);
       }
@@ -361,6 +471,278 @@
   function cancelRename() {
     renamingPath = null;
     renameValue = '';
+  }
+
+  // Drag-and-drop helpers
+  function isDescendant(parentPath: string, childPath: string): boolean {
+    return childPath.startsWith(parentPath + '/');
+  }
+
+  function getParentDir(path: string): string {
+    return path.substring(0, path.lastIndexOf('/'));
+  }
+
+  async function moveEntries(paths: string[], destDir: string) {
+    // Record original parent dirs for undo
+    const originalParents = paths.map(p => getParentDir(p));
+    try {
+      await invoke('move_entries', { sources: paths, destDir });
+      // Push to undo stack
+      undoStack = [...undoStack, { type: 'move', sources: paths, destDir, originalParents }];
+      redoStack = []; // Clear redo on new action
+    } catch (e) {
+      console.error('Failed to move:', e);
+    }
+    await refreshTree();
+  }
+
+  function handleDragMouseDown(entry: FileEntry, e: MouseEvent) {
+    // Don't initiate drag from inputs or during rename
+    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    if (renamingPath === entry.path) return;
+    if (e.button !== 0) return; // left click only
+
+    dragPending = true;
+    dragPendingEntry = entry;
+    dragStartPos = { x: e.clientX, y: e.clientY };
+    e.preventDefault(); // Prevent text selection from starting
+  }
+
+  function handleGlobalMouseMove(e: MouseEvent) {
+    if (dragPending && dragPendingEntry) {
+      const dx = e.clientX - dragStartPos.x;
+      const dy = e.clientY - dragStartPos.y;
+      // Require 5px of movement to start a drag (avoid accidental drags on click)
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        startInternalDrag(dragPendingEntry, e);
+        dragPending = false;
+        dragPendingEntry = null;
+      }
+      return;
+    }
+
+    if (!isDragging) return;
+
+    // Detect mouse near window edge — hand off to OS drag
+    const edgeThreshold = 10;
+    const nearEdge =
+      e.clientX <= edgeThreshold ||
+      e.clientY <= edgeThreshold ||
+      e.clientX >= window.innerWidth - edgeThreshold ||
+      e.clientY >= window.innerHeight - edgeThreshold;
+
+    if (nearEdge && draggedPaths.length > 0) {
+      const paths = [...draggedPaths];
+      endDrag();
+      startDrag({ item: paths, icon: '' }).catch(() => {});
+      return;
+    }
+
+    // Move ghost element
+    if (dragGhost) {
+      dragGhost.style.left = `${e.clientX + 12}px`;
+      dragGhost.style.top = `${e.clientY - 8}px`;
+    }
+
+    // Find which tree-item we're hovering over
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el) {
+      updateDropTarget(null);
+      return;
+    }
+
+    const treeItem = el.closest('.tree-item') as HTMLElement | null;
+    const treeContent = el.closest('.tree-content') as HTMLElement | null;
+
+    if (treeItem) {
+      const path = treeItem.dataset.path;
+      const isDir = treeItem.dataset.isdir === 'true';
+      if (path) {
+        const targetDir = isDir ? path : getParentDir(path);
+        // Validate: not dropping onto self or descendants
+        for (const dp of draggedPaths) {
+          if (dp === targetDir || isDescendant(dp, targetDir)) {
+            updateDropTarget(null);
+            return;
+          }
+        }
+        updateDropTarget(targetDir);
+
+        // Auto-expand collapsed folder on hover
+        if (isDir && !expandedDirs.has(path)) {
+          if (dragExpandTimer) clearTimeout(dragExpandTimer);
+          dragExpandTimer = setTimeout(() => {
+            const entry = findEntry(files, path);
+            if (entry) toggleDir(entry);
+          }, 600);
+        }
+      }
+    } else if (treeContent && rootPath) {
+      // Hovering on empty area — target is root
+      updateDropTarget(rootPath);
+    } else {
+      updateDropTarget(null);
+    }
+  }
+
+  function updateDropTarget(path: string | null) {
+    if (dropTargetPath === path) return;
+    dropTargetPath = path;
+    if (dragExpandTimer && !path) {
+      clearTimeout(dragExpandTimer);
+      dragExpandTimer = null;
+    }
+  }
+
+  function startInternalDrag(entry: FileEntry, e: MouseEvent) {
+    isDragging = true;
+
+    // Set dragged paths
+    if (selectedPaths.has(entry.path) && selectedPaths.size > 1) {
+      draggedPaths = [...selectedPaths];
+    } else {
+      draggedPaths = [entry.path];
+    }
+
+    // Create ghost element
+    dragGhost = document.createElement('div');
+    dragGhost.className = 'drag-ghost';
+    const count = draggedPaths.length;
+    const name = entry.name;
+    dragGhost.textContent = count > 1 ? `${name} (+${count - 1})` : name;
+    dragGhost.style.left = `${e.clientX + 12}px`;
+    dragGhost.style.top = `${e.clientY - 8}px`;
+    document.body.appendChild(dragGhost);
+
+    // Prevent text selection while dragging
+    document.body.style.userSelect = 'none';
+    window.getSelection()?.removeAllRanges();
+  }
+
+  function handleGlobalMouseUp(e: MouseEvent) {
+    if (dragPending) {
+      // Didn't move enough to start a drag — it was just a click
+      dragPending = false;
+      dragPendingEntry = null;
+      return;
+    }
+
+    if (!isDragging) return;
+
+    if (dropTargetPath && draggedPaths.length > 0) {
+      // Validate again
+      let valid = true;
+      for (const dp of draggedPaths) {
+        if (dp === dropTargetPath || isDescendant(dp, dropTargetPath)) {
+          valid = false;
+          break;
+        }
+        if (getParentDir(dp) === dropTargetPath && draggedPaths.length === 1) {
+          valid = false;
+          break;
+        }
+      }
+      if (valid) {
+        moveEntries(draggedPaths, dropTargetPath);
+      }
+    }
+
+    endDrag();
+  }
+
+  function endDrag() {
+    isDragging = false;
+    draggedPaths = [];
+    dropTargetPath = null;
+    dragPending = false;
+    dragPendingEntry = null;
+    if (dragGhost) {
+      dragGhost.remove();
+      dragGhost = null;
+    }
+    if (dragExpandTimer) {
+      clearTimeout(dragExpandTimer);
+      dragExpandTimer = null;
+    }
+    document.body.style.userSelect = '';
+  }
+
+  // External file drop handling (files from OS/Finder)
+  async function setupExternalDropListeners() {
+    unlistenDragEnter = await listen<{ paths: string[]; position: { x: number; y: number } }>('tauri://drag-enter', (event) => {
+      if (!rootPath) return;
+      externalDropPaths = event.payload.paths;
+      isExternalDrag = true;
+      // Default drop target to root
+      dropTargetPath = rootPath;
+    });
+
+    unlistenDragOver = await listen<{ position: { x: number; y: number } }>('tauri://drag-over', (event) => {
+      if (!isExternalDrag || !rootPath) return;
+      const { x, y } = event.payload.position;
+      // Hit-test to find which folder we're hovering
+      const el = document.elementFromPoint(x, y);
+      if (!el) {
+        dropTargetPath = rootPath;
+        return;
+      }
+      const treeItem = el.closest('.tree-item') as HTMLElement | null;
+      if (treeItem) {
+        const path = treeItem.dataset.path;
+        const isDir = treeItem.dataset.isdir === 'true';
+        if (path) {
+          dropTargetPath = isDir ? path : getParentDir(path);
+          // Auto-expand collapsed folder
+          if (isDir && !expandedDirs.has(path)) {
+            if (dragExpandTimer) clearTimeout(dragExpandTimer);
+            dragExpandTimer = setTimeout(() => {
+              const entry = findEntry(files, path);
+              if (entry) toggleDir(entry);
+            }, 600);
+          }
+          return;
+        }
+      }
+      dropTargetPath = rootPath;
+    });
+
+    unlistenDragDrop = await listen<{ paths: string[]; position: { x: number; y: number } }>('tauri://drag-drop', async (event) => {
+      if (!rootPath) return;
+      const destDir = dropTargetPath || rootPath;
+      const paths = event.payload.paths;
+      if (paths.length > 0) {
+        try {
+          await invoke('import_external_files', { sources: paths, destDir });
+        } catch (e) {
+          console.error('Failed to import external files:', e);
+        }
+        await refreshTree();
+      }
+      isExternalDrag = false;
+      externalDropPaths = [];
+      dropTargetPath = null;
+      if (dragExpandTimer) {
+        clearTimeout(dragExpandTimer);
+        dragExpandTimer = null;
+      }
+    });
+
+    unlistenDragLeave = await listen('tauri://drag-leave', () => {
+      isExternalDrag = false;
+      externalDropPaths = [];
+      dropTargetPath = null;
+      if (dragExpandTimer) {
+        clearTimeout(dragExpandTimer);
+        dragExpandTimer = null;
+      }
+    });
+  }
+
+  function teardownExternalDropListeners() {
+    unlistenDragEnter?.();
+    unlistenDragOver?.();
+    unlistenDragDrop?.();
+    unlistenDragLeave?.();
   }
 
   function findEntry(entries: FileEntry[], path: string): FileEntry | null {
@@ -555,10 +937,23 @@
     },
   };
 
+  onMount(() => {
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('keydown', handleKeyDown);
+    setupExternalDropListeners();
+  });
+
   onDestroy(() => {
     stopWatching();
     stopGitPolling();
     if (watchDebounce) clearTimeout(watchDebounce);
+    if (dragExpandTimer) clearTimeout(dragExpandTimer);
+    endDrag();
+    teardownExternalDropListeners();
+    window.removeEventListener('mousemove', handleGlobalMouseMove);
+    window.removeEventListener('mouseup', handleGlobalMouseUp);
+    window.removeEventListener('keydown', handleKeyDown);
   });
 </script>
 
@@ -629,12 +1024,15 @@
     {/if}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="tree-content" onclick={(e) => {
-      if (e.target === e.currentTarget) {
-        selectedPath = null;
-        selectedPaths = new Set();
-      }
-    }}>
+    <div class="tree-content"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) {
+          selectedPath = null;
+          selectedPaths = new Set();
+        }
+      }}
+      class:drop-target={dropTargetPath === rootPath}
+    >
       {#each files.filter(e => !isHidden(e.name)) as entry}
         {@render fileNode(entry, 0)}
       {/each}
@@ -701,14 +1099,23 @@
 {/if}
 
 {#snippet fileNode(entry: FileEntry, depth: number)}
-  <button
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
     class="tree-item"
     class:is-dir={entry.is_dir}
     class:selected={selectedPath === entry.path || selectedPaths.has(entry.path)}
     class:multi-selected={selectedPaths.has(entry.path)}
+    class:dragging={draggedPaths.includes(entry.path)}
+    class:drop-target={dropTargetPath === entry.path && entry.is_dir}
+    class:drop-target-child={dropTargetPath !== null && getParentDir(entry.path) === dropTargetPath}
     style="padding-left: {8 + depth * 8}px"
+    data-path={entry.path}
+    data-isdir={entry.is_dir}
+    role="treeitem"
+    tabindex="0"
     onclick={(e) => handleFileClick(entry, e)}
     oncontextmenu={(e) => handleContextMenu(e, entry)}
+    onmousedown={(e) => handleDragMouseDown(entry, e)}
   >
     {#if entry.is_dir}
       <span class="chevron" class:expanded={expandedDirs.has(entry.path)}>
@@ -749,7 +1156,7 @@
         <span class="git-badge" style="color: {gitColor}">{gitFileStatus.get(entry.path)}</span>
       {/if}
     {/if}
-  </button>
+  </div>
 
   {#if entry.is_dir && expandedDirs.has(entry.path) && entry.children}
     {#each entry.children.filter(c => !isHidden(c.name)) as child}
@@ -894,6 +1301,8 @@
     margin: 0 3px;
     width: calc(100% - 6px);
     transition: all 0.1s;
+    cursor: default;
+    user-select: none;
   }
 
   .tree-item:hover {
@@ -992,6 +1401,42 @@
   /* Multi-select */
   .tree-item.multi-selected {
     background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+
+  /* Drag-and-drop */
+  .tree-item.dragging {
+    opacity: 0.4;
+  }
+
+  .tree-item.drop-target {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    outline: 1px dashed var(--accent);
+    outline-offset: -1px;
+    border-radius: 3px;
+  }
+
+  .tree-item.drop-target-child {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+
+  .tree-content.drop-target {
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+
+  :global(.drag-ghost) {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    background: var(--bg-secondary, #1e1e2e);
+    color: var(--text-primary, #cdd6f4);
+    border: 1px solid var(--accent, #89b4fa);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-family: inherit;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    opacity: 0.92;
   }
 
   /* Inline rename */

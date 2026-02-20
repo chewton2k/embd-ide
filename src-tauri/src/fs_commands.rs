@@ -189,6 +189,82 @@ pub fn rename_entry(state: tauri::State<'_, ProjectRootState>, old_path: String,
 }
 
 #[tauri::command]
+pub fn move_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+    for src in &sources {
+        validate_path(src, &state)?;
+    }
+    validate_path(&dest_dir, &state)?;
+
+    let dest = fs::canonicalize(&dest_dir).map_err(|e| format!("Invalid destination: {}", e))?;
+    if !dest.is_dir() {
+        return Err("Destination is not a directory".into());
+    }
+
+    for src in &sources {
+        let src_path = fs::canonicalize(src).map_err(|e| format!("Invalid source: {}", e))?;
+        // Prevent moving a folder into itself or its descendants
+        if dest.starts_with(&src_path) {
+            return Err(format!("Cannot move '{}' into itself or a subdirectory", src));
+        }
+        let file_name = src_path.file_name().ok_or("Invalid source file name")?;
+        let dst_path = dest.join(file_name);
+        // Skip if already in the same location
+        if src_path == dst_path {
+            continue;
+        }
+        fs::rename(&src_path, &dst_path).map_err(|e| format!("Failed to move '{}': {}", src, e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_external_files(state: tauri::State<'_, ProjectRootState>, sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+    // Only validate destination is within project root (sources are from outside)
+    validate_path(&dest_dir, &state)?;
+    let dest = PathBuf::from(&dest_dir);
+    if !dest.is_dir() {
+        return Err("Destination is not a directory".to_string());
+    }
+    for src in sources {
+        let src_path = PathBuf::from(&src);
+        if !src_path.exists() {
+            return Err(format!("Source does not exist: {}", src));
+        }
+        let file_name = src_path
+            .file_name()
+            .ok_or_else(|| format!("Invalid source path: {}", src))?;
+        let mut target = dest.join(file_name);
+        // Avoid overwriting — add " copy" suffix if needed
+        if target.exists() {
+            let stem = target.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let mut i = 1;
+            loop {
+                if i > 10_000 {
+                    return Err("Too many copies exist".to_string());
+                }
+                let name = if i == 1 {
+                    format!("{} copy{}", stem, ext)
+                } else {
+                    format!("{} copy {}{}", stem, i, ext)
+                };
+                target = dest.join(&name);
+                if !target.exists() { break; }
+                i += 1;
+            }
+        }
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &target)
+                .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
+        } else {
+            fs::copy(&src_path, &target)
+                .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn paste_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<String>, dest_dir: String) -> Result<(), String> {
     for src in &sources {
         validate_path(src, &state)?;
