@@ -28,6 +28,19 @@
     text: string;
   }
 
+  interface GitLogCommit {
+    hash: string;
+    short_hash: string;
+    author: string;
+    date: string;
+    message: string;
+  }
+
+  interface GitGraphRow {
+    graph: string;
+    commit: GitLogCommit | null;
+  }
+
   let stagedFiles = $state<GitFile[]>([]);
   let changedFiles = $state<GitFile[]>([]);
   let selectedFile = $state<GitFile | null>(null);
@@ -41,6 +54,24 @@
   let commitError = $state('');
   let commitSuccess = $state('');
   let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let showHistory = $state(false);
+  let graphRows = $state<GitGraphRow[]>([]);
+  let historyLoading = $state(false);
+
+  const GRAPH_COLORS = [
+    'var(--accent)',
+    'var(--success)',
+    'var(--warning)',
+    '#e06c75',
+    '#c678dd',
+    '#56b6c2',
+    '#d19a66',
+    '#e5c07b',
+  ];
+
+  function laneColor(col: number): string {
+    return GRAPH_COLORS[col % GRAPH_COLORS.length];
+  }
 
   async function fetchStatus() {
     const root = $projectRoot;
@@ -217,6 +248,68 @@
     isCommitting = false;
   }
 
+  async function fetchHistory() {
+    const root = $projectRoot;
+    if (!root) return;
+    historyLoading = true;
+    try {
+      graphRows = await invoke<GitGraphRow[]>('git_log', { repoPath: root, count: 50 });
+    } catch {
+      graphRows = [];
+    }
+    historyLoading = false;
+  }
+
+  async function toggleHistory() {
+    showHistory = !showHistory;
+    if (showHistory && graphRows.length === 0) {
+      await fetchHistory();
+    }
+  }
+
+  function renderGraphSvg(graph: string): { svg: string; width: number } {
+    const cellW = 12;
+    const cellH = 24;
+    const cols = graph.length;
+    const w = Math.max(cols * cellW, cellW);
+    let paths = '';
+
+    for (let i = 0; i < cols; i++) {
+      const ch = graph[i];
+      const cx = i * cellW + cellW / 2;
+      const cy = cellH / 2;
+      const color = laneColor(Math.floor(i / 2));
+
+      if (ch === '*') {
+        // Commit node: filled circle + vertical line
+        paths += `<line x1="${cx}" y1="0" x2="${cx}" y2="${cy - 4}" stroke="${color}" stroke-width="1.5"/>`;
+        paths += `<line x1="${cx}" y1="${cy + 4}" x2="${cx}" y2="${cellH}" stroke="${color}" stroke-width="1.5"/>`;
+        paths += `<circle cx="${cx}" cy="${cy}" r="3.5" fill="${color}" stroke="${color}" stroke-width="1"/>`;
+      } else if (ch === '|') {
+        // Vertical line
+        paths += `<line x1="${cx}" y1="0" x2="${cx}" y2="${cellH}" stroke="${color}" stroke-width="1.5"/>`;
+      } else if (ch === '/' ) {
+        // Diagonal up-left: from bottom-right to top-left
+        paths += `<line x1="${cx + cellW / 2}" y1="${cellH}" x2="${cx - cellW / 2}" y2="0" stroke="${color}" stroke-width="1.5"/>`;
+      } else if (ch === '\\') {
+        // Diagonal down-right: from top-left area to bottom-right area
+        paths += `<line x1="${cx - cellW / 2}" y1="0" x2="${cx + cellW / 2}" y2="${cellH}" stroke="${color}" stroke-width="1.5"/>`;
+      } else if (ch === '_') {
+        // Horizontal connector
+        paths += `<line x1="${cx - cellW / 2}" y1="${cellH / 2}" x2="${cx + cellW / 2}" y2="${cellH / 2}" stroke="${color}" stroke-width="1.5"/>`;
+      } else if (ch === '.') {
+        // Sometimes used as horizontal connector
+        paths += `<line x1="${cx - cellW / 2}" y1="${cellH / 2}" x2="${cx + cellW / 2}" y2="${cellH / 2}" stroke="${color}" stroke-width="1.5"/>`;
+      }
+      // spaces and other chars: nothing drawn
+    }
+
+    return {
+      svg: `<svg width="${w}" height="${cellH}" viewBox="0 0 ${w} ${cellH}" xmlns="http://www.w3.org/2000/svg">${paths}</svg>`,
+      width: w,
+    };
+  }
+
   onMount(() => {
     fetchStatus();
     pollInterval = setInterval(fetchStatus, 3000);
@@ -348,6 +441,39 @@
         {/each}
       </div>
     {/if}
+
+    <!-- History -->
+    <div class="section">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="section-header history-toggle" onclick={toggleHistory}>
+        <span class="history-chevron" class:open={showHistory}>▶</span>
+        <span>History</span>
+        {#if showHistory}
+          <button class="section-action" onclick={(e: MouseEvent) => { e.stopPropagation(); fetchHistory(); }} title="Refresh">↻</button>
+        {/if}
+      </div>
+      {#if showHistory}
+        {#if historyLoading}
+          <div class="history-loading">Loading...</div>
+        {:else if graphRows.length === 0}
+          <div class="history-loading">No commits yet</div>
+        {:else}
+          <div class="graph-container">
+            {#each graphRows as row}
+              {@const rendered = renderGraphSvg(row.graph)}
+              <div class="graph-row" class:graph-row-commit={row.commit !== null} title={row.commit ? `${row.commit.hash}\n${row.commit.author}\n${row.commit.date}` : ''}>
+                <span class="graph-svg">{@html rendered.svg}</span>
+                {#if row.commit}
+                  <span class="graph-hash">{row.commit.short_hash}</span>
+                  <span class="graph-msg">{row.commit.message}</span>
+                  <span class="graph-date">{row.commit.date}</span>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+    </div>
   </div>
 
   <!-- Commit Section -->
@@ -678,5 +804,80 @@
     font-size: 11px;
     color: var(--success);
     margin-bottom: 4px;
+  }
+
+  /* History */
+  .history-toggle {
+    cursor: pointer;
+    gap: 4px;
+    user-select: none;
+  }
+
+  .history-toggle:hover {
+    background: var(--bg-surface);
+  }
+
+  .history-chevron {
+    font-size: 8px;
+    transition: transform 0.15s;
+    display: inline-block;
+  }
+
+  .history-chevron.open {
+    transform: rotate(90deg);
+  }
+
+  .history-loading {
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .graph-container {
+    overflow-x: auto;
+  }
+
+  .graph-row {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+
+  .graph-row-commit:hover {
+    background: var(--bg-surface);
+  }
+
+  .graph-svg {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    height: 24px;
+  }
+
+  .graph-hash {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    color: var(--accent);
+    flex-shrink: 0;
+    font-size: 10px;
+    margin-left: 4px;
+    margin-right: 8px;
+  }
+
+  .graph-msg {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+  }
+
+  .graph-date {
+    flex-shrink: 0;
+    color: var(--text-muted);
+    font-size: 10px;
+    padding-left: 8px;
+    padding-right: 6px;
   }
 </style>

@@ -1215,7 +1215,7 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 40px 16px;
+    padding: 60px 16px;
     gap: 10px;
     text-align: center;
     color: var(--text-muted);
@@ -1226,7 +1226,7 @@
     width: 40px;
     height: 40px;
     color: var(--accent);
-    opacity: 0.6;
+    opacity: 0.7;
     margin-bottom: 4px;
   }
 

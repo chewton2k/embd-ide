@@ -13,7 +13,7 @@ export const activeFilePath = writable<string | null>(null);
 
 export const activeFile = derived(activeFilePath, ($path) => $path);
 
-const MAX_TABS = 8;
+const MAX_TABS = 9;
 
 export function addFile(path: string, name: string) {
   openFiles.update(files => {
@@ -126,6 +126,9 @@ autosaveDelay.subscribe(v => localStorage.setItem('embd-autosave-delay', String(
 
 // Settings modal visibility
 export const showSettings = writable<boolean>(false);
+
+// Terminal panel visibility
+export const showTerminal = writable<boolean>(true);
 
 // Editor settings
 export const editorFontSize = writable<number>(

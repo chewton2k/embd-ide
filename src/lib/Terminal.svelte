@@ -6,7 +6,7 @@
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import { open } from '@tauri-apps/plugin-shell';
-  import { projectRoot, terminalFontSize, currentThemeId, getTheme } from './stores.ts';
+  import { projectRoot, terminalFontSize, currentThemeId, getTheme, showTerminal } from './stores.ts';
   import { get } from 'svelte/store';
   import '@xterm/xterm/css/xterm.css';
 
@@ -17,6 +17,7 @@
     xterm: XTerm;
     fitAddon: FitAddon;
     unlisten: UnlistenFn;
+    unlistenExit: UnlistenFn;
     resizeObserver: ResizeObserver | null;
   }
 
@@ -83,6 +84,7 @@
     let sessionId: number;
     let name: string;
     let unlisten: UnlistenFn;
+    let unlistenExit: UnlistenFn;
 
     try {
       const result = await invoke<{ id: number; pid: number | null }>('spawn_terminal', {
@@ -95,6 +97,10 @@
 
       unlisten = await listen<string>(`terminal-output-${sessionId}`, (event) => {
         xterm.write(event.payload);
+      });
+
+      unlistenExit = await listen<void>(`terminal-exit-${sessionId}`, () => {
+        killTab(sessionId);
       });
 
       // Send input directly to PTY
@@ -125,6 +131,7 @@
       xterm,
       fitAddon,
       unlisten,
+      unlistenExit,
       resizeObserver,
     };
 
@@ -172,6 +179,7 @@
 
     // Cleanup
     tab.unlisten();
+    tab.unlistenExit();
     tab.resizeObserver?.disconnect();
     tab.xterm.dispose();
     try {
@@ -188,6 +196,7 @@
         switchTab(next.id);
       } else {
         activeTabId = null;
+        showTerminal.set(false);
       }
     }
   }
@@ -237,6 +246,7 @@
   onDestroy(() => {
     for (const tab of tabs) {
       tab.unlisten();
+      tab.unlistenExit();
       tab.resizeObserver?.disconnect();
       tab.xterm.dispose();
     }
@@ -245,7 +255,8 @@
 
 <div class="terminal-panel">
   <div class="terminal-tabs">
-    <div class="terminal-tab-list">
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="terminal-tab-list" onwheel={(e) => { e.preventDefault(); e.currentTarget.scrollLeft += e.deltaY; }}>
       {#each tabs as tab}
         <div
           class="terminal-tab"
@@ -262,12 +273,12 @@
           <button class="tab-close" onclick={(e) => handleCloseClick(e, tab.id)} title="Kill terminal">×</button>
         </div>
       {/each}
+      <button class="new-tab-btn" onclick={createTab} title="New terminal">
+        <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+          <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </button>
     </div>
-    <button class="new-tab-btn" onclick={createTab} title="New terminal">
-      <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-        <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
-    </button>
   </div>
   <div class="terminal-content" bind:this={terminalContainer}></div>
 </div>
@@ -301,7 +312,16 @@
   }
 
   .terminal-tab-list::-webkit-scrollbar {
-    height: 0;
+    height: 3px;
+  }
+
+  .terminal-tab-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .terminal-tab-list::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
   }
 
   .terminal-tab {

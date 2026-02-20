@@ -103,6 +103,7 @@ pub fn spawn_terminal(
 
     // Spawn reader thread — emits "terminal-output" events to the frontend
     let event_name = format!("terminal-output-{}", id);
+    let exit_event_name = format!("terminal-exit-{}", id);
     std::thread::spawn(move || {
         let mut buf = [0u8; 16384];
         let mut pending = Vec::new();
@@ -134,6 +135,8 @@ pub fn spawn_terminal(
             let data = String::from_utf8_lossy(&pending).to_string();
             let _ = app.emit(&event_name, data);
         }
+        // Notify frontend that this terminal session has exited
+        let _ = app.emit(&exit_event_name, ());
     });
 
     Ok(SpawnResult { id, pid })

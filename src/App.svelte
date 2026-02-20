@@ -11,7 +11,7 @@
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
-  import { openFiles, activeFile, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey } from './lib/stores.ts';
+  import { openFiles, activeFile, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey } from './lib/stores.ts';
   import { onMount, onDestroy } from 'svelte';
 
   const viewerExts = new Set([
@@ -28,7 +28,6 @@
     return path.toLowerCase().endsWith('.json');
   }
 
-  let showTerminal = $state(true);
   let showChat = $state(false);
   let showGit = $state(false);
   let showFileSearch = $state(false);
@@ -73,7 +72,7 @@
   }
 
   function toggleTerminal() {
-    showTerminal = !showTerminal;
+    $showTerminal = !$showTerminal;
   }
 
   function toggleChat() {
@@ -214,8 +213,8 @@
     </div>
 
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-row" class:hidden={!showTerminal} onmousedown={startDrag('terminal')}></div>
-    <div class="bottom-panel" class:hidden={!showTerminal} style="height: {terminalHeight}px;">
+    <div class="resize-handle resize-handle-row" class:hidden={!$showTerminal} onmousedown={startDrag('terminal')}></div>
+    <div class="bottom-panel" class:hidden={!$showTerminal} style="height: {terminalHeight}px;">
       <Terminal />
     </div>
   </div>
@@ -268,7 +267,7 @@
         </button>
       {/if}
       <button onclick={toggleTerminal} class="statusbar-btn">
-        | {showTerminal ? 'Hide' : 'Show'} Terminal 
+        | {$showTerminal ? 'Hide' : 'Show'} Terminal 
       </button>
       <button onclick={toggleChat} class="statusbar-btn">
         | {showChat ? 'Hide' : 'Show'} AI 

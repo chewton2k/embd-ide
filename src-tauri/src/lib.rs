@@ -41,6 +41,7 @@ pub fn run() {
             fs_commands::git_push,
             fs_commands::git_ahead_behind,
             fs_commands::git_diff_line_ranges,
+            fs_commands::git_log,
             terminal::spawn_terminal,
             terminal::write_terminal,
             terminal::kill_terminal,

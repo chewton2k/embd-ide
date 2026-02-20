@@ -736,6 +736,81 @@ pub fn git_diff_line_ranges(state: tauri::State<'_, ProjectRootState>, repo_path
     Ok(ranges)
 }
 
+#[derive(Serialize, Clone)]
+pub struct GitLogCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub author: String,
+    pub date: String,
+    pub message: String,
+}
+
+#[derive(Serialize, Clone)]
+pub struct GitGraphRow {
+    pub graph: String,
+    pub commit: Option<GitLogCommit>,
+}
+
+#[tauri::command]
+pub fn git_log(state: tauri::State<'_, ProjectRootState>, repo_path: String, count: Option<u32>) -> Result<Vec<GitGraphRow>, String> {
+    validate_repo_path(&repo_path, &state)?;
+    let limit = count.unwrap_or(50).min(500).to_string();
+    // Use a unique separator unlikely to appear in commit messages
+    let format = format!("%H\x09%h\x09%an\x09%ar\x09%s");
+    let output = Command::new("git")
+        .args(["log", "--graph", &format!("--format=format:{}", format), "--all", "-n", &limit])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(Vec::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut rows = Vec::new();
+
+    for line in stdout.lines() {
+        if let Some(star_pos) = line.find('*') {
+            // Commit line: graph chars before *, commit data after "* "
+            let graph_prefix = &line[..star_pos];
+            let after_star = &line[star_pos + 1..].trim_start();
+            let commit = if !after_star.is_empty() {
+                let parts: Vec<&str> = after_star.splitn(5, '\t').collect();
+                if parts.len() >= 5 {
+                    Some(GitLogCommit {
+                        hash: parts[0].to_string(),
+                        short_hash: parts[1].to_string(),
+                        author: parts[2].to_string(),
+                        date: parts[3].to_string(),
+                        message: parts[4].to_string(),
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            // Reconstruct graph: prefix + "*" + rest of graph chars after the data
+            let mut graph = format!("{}*", graph_prefix);
+            // Pad with spaces from the line structure after the commit node
+            // We need the graph chars that come after * on the same line
+            // In git's output, after "* <commit data>", there are no trailing graph chars
+            // But for merge lines like "|\  ", the graph is the whole line
+            graph = graph.to_string();
+            rows.push(GitGraphRow { graph, commit });
+        } else {
+            // Graph-only line (connector line between commits)
+            rows.push(GitGraphRow {
+                graph: line.to_string(),
+                commit: None,
+            });
+        }
+    }
+
+    Ok(rows)
+}
+
 fn parse_hunk_range(s: &str) -> (u32, u32) {
     let parts: Vec<&str> = s.split(',').collect();
     let start: u32 = parts[0].parse().unwrap_or(0);
