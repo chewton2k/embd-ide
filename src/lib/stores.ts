@@ -357,7 +357,7 @@ export const uiDensity = writable<'compact' | 'comfortable'>(
 uiDensity.subscribe(v => localStorage.setItem('embd-ui-density', v));
 
 // Hidden file/folder patterns (persisted to localStorage)
-const DEFAULT_HIDDEN_PATTERNS = ['node_modules', 'target', '.git'];
+const DEFAULT_HIDDEN_PATTERNS = ['node_modules', 'target', '.git', '.vscode', '.DS_Store'];
 
 function loadHiddenPatterns(): { pattern: string; enabled: boolean }[] {
   const stored = localStorage.getItem('embd-hidden-patterns');
