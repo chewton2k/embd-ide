@@ -4,7 +4,8 @@
   import { watch } from '@tauri-apps/plugin-fs';
   import type { UnwatchFn } from '@tauri-apps/plugin-fs';
   import { get } from 'svelte/store';
-  import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, gutter, GutterMarker } from '@codemirror/view';
+  import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, gutter, GutterMarker, ViewPlugin, Decoration, WidgetType } from '@codemirror/view';
+  import type { DecorationSet, ViewUpdate } from '@codemirror/view';
   import { EditorState, Compartment, RangeSetBuilder } from '@codemirror/state';
   import { defaultKeymap, indentWithTab, history, historyKeymap, cursorDocStart, cursorDocEnd, cursorLineBoundaryForward, cursorLineBoundaryBackward, selectDocStart, selectDocEnd, selectLineBoundaryForward, selectLineBoundaryBackward, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, selectCharLeft, selectCharRight, selectLineUp, selectLineDown, deleteLine, cursorPageDown, cursorPageUp } from '@codemirror/commands';
   import { javascript } from '@codemirror/lang-javascript';
@@ -26,11 +27,11 @@
   import { oCaml } from '@codemirror/legacy-modes/mode/mllike';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-  import { bracketMatching, indentOnInput, foldGutter, foldKeymap } from '@codemirror/language';
+  import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree } from '@codemirror/language';
   import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot } from './stores.ts';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback } from './stores.ts';
 
   let { filePath }: { filePath: string } = $props();
 
@@ -61,6 +62,20 @@
   const modifiedMarker = new ModifiedMarker();
   const deletedMarker = new DeletedMarker();
 
+  // Error Lens widget — renders inline error message at end of line
+  class ErrorWidget extends WidgetType {
+    message: string;
+    constructor(message: string) { super(); this.message = message; }
+    toDOM() {
+      const span = document.createElement('span');
+      span.className = 'cm-error-lens';
+      span.textContent = `  \u26A0 ${this.message}`;
+      return span;
+    }
+    eq(other: ErrorWidget) { return this.message === other.message; }
+    ignoreEvent() { return true; }
+  }
+
   interface DiffRange {
     kind: string;
     start: number;
@@ -73,11 +88,17 @@
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   let saving = $state(false);
 
+  // Per-file undo/redo: cache EditorState keyed by file path
+  const stateCache = new Map<string, EditorState>();
+  let currentFilePath: string | null = null;
+
   // File watcher for external changes
   let unwatchFn: UnwatchFn | null = null;
   let watchDebounce: ReturnType<typeof setTimeout> | null = null;
-  let lastSavedContent: string = '';
   let ignoreNextWatch = false;
+
+  // Per-file last-saved content (what's on disk as far as we know)
+  const savedContentCache = new Map<string, string>();
 
   // Markdown preview
   let isMarkdown = $derived(/\.(md|mdx|markdown)$/i.test(filePath));
@@ -89,6 +110,7 @@
   const tabSizeComp = new Compartment();
   const wordWrapComp = new Compartment();
   const lineNumbersComp = new Compartment();
+  const errorLensComp = new Compartment();
 
   async function updateGitGutter(path: string) {
     if (!view) return;
@@ -97,7 +119,7 @@
     const relPath = path.slice(root.length + 1);
     try {
       const ranges = await invoke<DiffRange[]>('git_diff_line_ranges', { repoPath: root, filePath: relPath });
-      if (!view) return;
+      if (!view || currentFilePath !== path) return;
       const doc = view.state.doc;
       const builder = new RangeSetBuilder<GutterMarker>();
       // RangeSetBuilder requires positions in ascending order
@@ -166,6 +188,67 @@
     }
   }
 
+  function hasErrorLens(path: string): boolean {
+    return /\.(js|jsx|ts|tsx|c|h|cpp|cxx|cc|hpp|hxx|hh|ino|java|kt|kts)$/i.test(path);
+  }
+
+  function buildErrorLensPlugin() {
+    function scanErrors(state: EditorState): DecorationSet {
+      const builder = new RangeSetBuilder<Decoration>();
+      const tree = syntaxTree(state);
+      const seenLines = new Set<number>();
+      const widgets: { pos: number; widget: Decoration }[] = [];
+
+      tree.iterate({
+        enter(node) {
+          if (node.type.isError) {
+            const line = state.doc.lineAt(node.from);
+            if (!seenLines.has(line.number)) {
+              seenLines.add(line.number);
+              const raw = state.doc.sliceString(node.from, node.to).trim();
+              const msg = raw ? `Unexpected: '${raw}'` : 'Syntax error';
+              widgets.push({
+                pos: line.to,
+                widget: Decoration.widget({ widget: new ErrorWidget(msg), side: 1 }),
+              });
+            }
+          }
+        },
+      });
+
+      widgets.sort((a, b) => a.pos - b.pos);
+      for (const w of widgets) builder.add(w.pos, w.pos, w.widget);
+      return builder.finish();
+    }
+
+    return ViewPlugin.fromClass(
+      class {
+        decorations: DecorationSet;
+        private timer: ReturnType<typeof setTimeout> | null = null;
+
+        constructor(view: EditorView) {
+          this.decorations = scanErrors(view.state);
+        }
+
+        update(update: ViewUpdate) {
+          if (update.docChanged) {
+            this.decorations = this.decorations.map(update.changes);
+            if (this.timer) clearTimeout(this.timer);
+            this.timer = setTimeout(() => {
+              this.decorations = scanErrors(update.view.state);
+              update.view.requestMeasure();
+            }, 400);
+          }
+        }
+
+        destroy() {
+          if (this.timer) clearTimeout(this.timer);
+        }
+      },
+      { decorations: (v) => v.decorations }
+    );
+  }
+
   function updatePreview(content: string) {
     if (isMarkdown && showPreview) {
       previewHtml = DOMPurify.sanitize(marked.parse(content) as string);
@@ -209,11 +292,14 @@
   }
 
   async function reloadFromDisk(path: string) {
-    if (!view) return;
+    if (!view || currentFilePath !== path) return;
     try {
       const diskContent = await invoke<string>('read_file_content', { path });
+      // Re-check after await — user may have switched tabs
+      if (!view || currentFilePath !== path) return;
+      const lastSaved = savedContentCache.get(path) ?? '';
       // Only reload if content actually changed from what we know
-      if (diskContent === lastSavedContent) return;
+      if (diskContent === lastSaved) return;
       if (diskContent === view.state.doc.toString()) return;
 
       // Preserve cursor position
@@ -223,7 +309,7 @@
         changes: { from: 0, to: view.state.doc.length, insert: diskContent },
         selection: { anchor: cursorPos },
       });
-      lastSavedContent = diskContent;
+      savedContentCache.set(path, diskContent);
       markFileSaved(path);
       updatePreview(diskContent);
       updateGitGutter(path);
@@ -239,25 +325,67 @@
       autosaveTimer = null;
     }
 
-    try {
-      const content = await invoke<string>('read_file_content', { path });
-      lastSavedContent = content;
-      createEditor(content, path);
-      updatePreview(content);
-      // Load git gutter after editor is created
+    // Save current editor state before switching
+    if (view && currentFilePath) {
+      stateCache.set(currentFilePath, view.state);
+    }
+
+    const cached = stateCache.get(path);
+    if (cached) {
+      // Restore cached state (preserves undo history)
+      if (view) {
+        view.setState(cached);
+      } else {
+        view = new EditorView({ state: cached, parent: editorContainer });
+      }
+      currentFilePath = path;
+      updatePreview(cached.doc.toString());
       updateGitGutter(path);
-      // Start watching for external changes
       startWatching(path);
-    } catch (e) {
-      createEditor(`// Error loading file: ${e}`, path);
+
+      // Background check: verify content against disk (handles external edits)
+      // Compare disk against last SAVED content, not cached editor content.
+      // If they match, disk hasn't changed — keep cached state with unsaved edits intact.
+      try {
+        const diskContent = await invoke<string>('read_file_content', { path });
+        // Re-check after await — user may have switched tabs
+        if (currentFilePath !== path || !view) return;
+        const lastSaved = savedContentCache.get(path) ?? '';
+        if (diskContent !== lastSaved) {
+          // Disk changed externally — reload from disk
+          savedContentCache.set(path, diskContent);
+          if (diskContent !== view.state.doc.toString()) {
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: diskContent },
+            });
+            markFileSaved(path);
+            updatePreview(diskContent);
+            updateGitGutter(path);
+          }
+        }
+      } catch {
+        // File may have been deleted externally
+      }
+    } else {
+      // No cached state — load fresh from disk
+      try {
+        const content = await invoke<string>('read_file_content', { path });
+        savedContentCache.set(path, content);
+        createEditor(content, path);
+        currentFilePath = path;
+        updatePreview(content);
+        updateGitGutter(path);
+        startWatching(path);
+      } catch (e) {
+        createEditor(`// Error loading file: ${e}`, path);
+        currentFilePath = path;
+      }
     }
   }
 
-  function createEditor(content: string, path: string) {
-    if (view) view.destroy();
-
+  function buildState(content: string, path: string): EditorState {
     const lang = getLanguage(path);
-    const state = EditorState.create({
+    return EditorState.create({
       doc: content,
       extensions: [
         lineNumbersComp.of(get(editorLineNumbers) ? lineNumbers() : []),
@@ -279,6 +407,7 @@
         tabSizeComp.of(EditorState.tabSize.of(get(editorTabSize))),
         wordWrapComp.of(get(editorWordWrap) ? EditorView.lineWrapping : []),
         gitGutterComp.of([]),
+        errorLensComp.of(hasErrorLens(path) ? buildErrorLensPlugin() : []),
         keymap.of([
           ...closeBracketsKeymap,
           ...defaultKeymap,
@@ -380,8 +509,16 @@
         }),
       ],
     });
+  }
 
-    view = new EditorView({ state, parent: editorContainer });
+  function createEditor(content: string, path: string) {
+    const state = buildState(content, path);
+
+    if (view) {
+      view.setState(state);
+    } else {
+      view = new EditorView({ state, parent: editorContainer });
+    }
   }
 
   async function saveFile(path: string) {
@@ -396,7 +533,7 @@
     try {
       ignoreNextWatch = true;
       await invoke('write_file_content', { path, content });
-      lastSavedContent = content;
+      savedContentCache.set(path, content);
       markFileSaved(path);
       updateGitGutter(path);
     } catch (e) {
@@ -456,13 +593,33 @@
     }
   }
 
+  let unregisterRenameCallback: (() => void) | null = null;
+
   onMount(() => {
     loadFile(filePath);
     window.addEventListener('keydown', handleGlobalKeydown);
+
+    // Register rename callback to update cache keys
+    unregisterRenameCallback = registerFileRenameCallback((oldPath, newPath) => {
+      const cached = stateCache.get(oldPath);
+      if (cached) {
+        stateCache.delete(oldPath);
+        stateCache.set(newPath, cached);
+      }
+      const savedContent = savedContentCache.get(oldPath);
+      if (savedContent !== undefined) {
+        savedContentCache.delete(oldPath);
+        savedContentCache.set(newPath, savedContent);
+      }
+      if (currentFilePath === oldPath) {
+        currentFilePath = newPath;
+      }
+    });
   });
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleGlobalKeydown);
+    if (unregisterRenameCallback) unregisterRenameCallback();
     stopWatching();
     // Save before destroying if there are pending changes
     if (autosaveTimer) {
@@ -474,12 +631,26 @@
         });
       }
     }
+    stateCache.clear();
+    savedContentCache.clear();
     if (view) view.destroy();
   });
 
   $effect(() => {
     if (filePath && editorContainer) {
       loadFile(filePath);
+    }
+  });
+
+  // Clean up cache entries for files that are no longer open
+  $effect(() => {
+    const files = $openFiles;
+    const openPaths = new Set(files.map(f => f.path));
+    for (const cachedPath of stateCache.keys()) {
+      if (!openPaths.has(cachedPath)) {
+        stateCache.delete(cachedPath);
+        savedContentCache.delete(cachedPath);
+      }
     }
   });
 </script>
@@ -554,6 +725,17 @@
     height: 100%;
     background: var(--error, #f38ba8);
     border-radius: 1px;
+  }
+
+  .editor-wrapper :global(.cm-error-lens) {
+    color: var(--error, #f38ba8);
+    opacity: 0.75;
+    font-style: italic;
+    font-size: 0.88em;
+    padding-left: 2em;
+    pointer-events: none;
+    user-select: none;
+    white-space: pre;
   }
 
   /* Root container — always present */

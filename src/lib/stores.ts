@@ -59,11 +59,23 @@ export function updateFileContent(path: string, content: string) {
   );
 }
 
+type FileRenameCallback = (oldPath: string, newPath: string) => void;
+const fileRenameCallbacks: FileRenameCallback[] = [];
+
+export function registerFileRenameCallback(cb: FileRenameCallback): () => void {
+  fileRenameCallbacks.push(cb);
+  return () => {
+    const idx = fileRenameCallbacks.indexOf(cb);
+    if (idx >= 0) fileRenameCallbacks.splice(idx, 1);
+  };
+}
+
 export function renameOpenFile(oldPath: string, newPath: string, newName: string) {
   openFiles.update(files =>
     files.map(f => f.path === oldPath ? { ...f, path: newPath, name: newName } : f)
   );
   activeFilePath.update(current => current === oldPath ? newPath : current);
+  for (const cb of fileRenameCallbacks) cb(oldPath, newPath);
 }
 
 // Pinned tabs 
