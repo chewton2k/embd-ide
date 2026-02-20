@@ -391,6 +391,8 @@
         lineNumbersComp.of(get(editorLineNumbers) ? lineNumbers() : []),
         highlightActiveLine(),
         drawSelection(),
+        EditorState.allowMultipleSelections.of(true),
+        EditorView.clickAddsSelectionRange.of(e => e.altKey),
         history(),
         closeBrackets(),
         bracketMatching(),
