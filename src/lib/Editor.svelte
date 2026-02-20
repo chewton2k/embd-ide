@@ -23,7 +23,8 @@
   import { StreamLanguage } from '@codemirror/language';
   import { oCaml } from '@codemirror/legacy-modes/mode/mllike';
   import { oneDark } from '@codemirror/theme-one-dark';
-  import { autocompletion } from '@codemirror/autocomplete';
+  import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+  import { bracketMatching, indentOnInput, foldGutter, foldKeymap } from '@codemirror/language';
   import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -201,6 +202,10 @@
         highlightActiveLine(),
         drawSelection(),
         history(),
+        closeBrackets(),
+        bracketMatching(),
+        indentOnInput(),
+        foldGutter(),
         autocompletion(),
         highlightSelectionMatches(),
         ...(lang ? [lang] : []),
@@ -213,9 +218,11 @@
         wordWrapComp.of(get(editorWordWrap) ? EditorView.lineWrapping : []),
         gitGutterComp.of([]),
         keymap.of([
+          ...closeBracketsKeymap,
           ...defaultKeymap,
           ...historyKeymap,
           ...searchKeymap,
+          ...foldKeymap,
           indentWithTab,
           { key: 'Mod-s', run: () => { saveFile(path); return true; } },
           // Emacs navigation
