@@ -28,7 +28,7 @@
   import { oneDark } from '@codemirror/theme-one-dark';
   import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
   import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree } from '@codemirror/language';
-  import { searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
+  import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback } from './stores.ts';
@@ -95,7 +95,7 @@
   // File watcher for external changes
   let unwatchFn: UnwatchFn | null = null;
   let watchDebounce: ReturnType<typeof setTimeout> | null = null;
-  let ignoreNextWatch = false;
+  let ignoreWatchUntil = 0;  // timestamp-based: ignore watcher events until this time
   let ignoreNextDocChange = false;
 
   // Per-file last-saved content (what's on disk as far as we know)
@@ -153,6 +153,284 @@
         view.dispatch({ effects: gitGutterComp.reconfigure([]) });
       }
     }
+  }
+
+  // Custom search panel with match counter and replace count notification
+  function createCustomSearchPanel(panelView: EditorView) {
+    const dom = document.createElement('div');
+    dom.className = 'cm-search cm-panel';
+
+    // Search row
+    const searchRow = document.createElement('div');
+    searchRow.className = 'cm-search-row';
+
+    const searchField = document.createElement('input');
+    searchField.className = 'cm-textfield cm-search-field';
+    searchField.setAttribute('main-field', 'true');
+    searchField.setAttribute('autocapitalize', 'off');
+    searchField.setAttribute('autocorrect', 'off');
+    searchField.setAttribute('spellcheck', 'false');
+    searchField.placeholder = 'Find';
+
+    const matchInfo = document.createElement('span');
+    matchInfo.className = 'cm-search-match-info';
+    matchInfo.textContent = '';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'cm-button cm-search-nav';
+    prevBtn.textContent = '\u2191';
+    prevBtn.title = 'Previous match (Shift+Enter)';
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'cm-button cm-search-nav';
+    nextBtn.textContent = '\u2193';
+    nextBtn.title = 'Next match (Enter)';
+
+    // Toggle buttons
+    const caseBtn = document.createElement('button');
+    caseBtn.className = 'cm-button cm-search-toggle';
+    caseBtn.textContent = 'Aa';
+    caseBtn.title = 'Match case';
+
+    const reBtn = document.createElement('button');
+    reBtn.className = 'cm-button cm-search-toggle';
+    reBtn.textContent = '.*';
+    reBtn.title = 'Regex';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cm-button cm-search-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.textContent = '\u00d7';
+
+    searchRow.append(searchField, matchInfo, prevBtn, nextBtn, caseBtn, reBtn, closeBtn);
+
+    // Replace row
+    const replaceRow = document.createElement('div');
+    replaceRow.className = 'cm-search-row';
+
+    const replaceField = document.createElement('input');
+    replaceField.className = 'cm-textfield cm-search-field';
+    replaceField.setAttribute('autocapitalize', 'off');
+    replaceField.setAttribute('autocorrect', 'off');
+    replaceField.setAttribute('spellcheck', 'false');
+    replaceField.placeholder = 'Replace';
+
+    const replaceBtn = document.createElement('button');
+    replaceBtn.className = 'cm-button';
+    replaceBtn.textContent = 'Replace';
+
+    const replaceAllBtn = document.createElement('button');
+    replaceAllBtn.className = 'cm-button';
+    replaceAllBtn.textContent = 'Replace All';
+
+    const replaceInfo = document.createElement('span');
+    replaceInfo.className = 'cm-search-replace-info';
+    replaceInfo.textContent = '';
+
+    replaceRow.append(replaceField, replaceBtn, replaceAllBtn, replaceInfo);
+
+    dom.append(searchRow, replaceRow);
+
+    // State
+    let caseSensitive = false;
+    let regexp = false;
+    let countTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function buildQuery(): SearchQuery {
+      return new SearchQuery({
+        search: searchField.value,
+        replace: replaceField.value,
+        caseSensitive,
+        regexp,
+      });
+    }
+
+    function countMatchesNow() {
+      const state = panelView.state;
+      const doc = state.doc;
+      const searchText = searchField.value;
+
+      if (!searchText) {
+        matchInfo.textContent = '';
+        return;
+      }
+
+      let totalMatches = 0;
+      let currentIndex = 0;
+      const cursorPos = state.selection.main.from;
+
+      try {
+        if (regexp) {
+          let flags = 'g';
+          if (!caseSensitive) flags += 'i';
+          const re = new RegExp(searchText, flags);
+          const content = doc.toString();
+          let m;
+          while ((m = re.exec(content)) !== null) {
+            if (m[0].length === 0) { re.lastIndex++; continue; }
+            totalMatches++;
+            if (m.index <= cursorPos) currentIndex = totalMatches;
+          }
+        } else {
+          const normalize = caseSensitive ? (s: string) => s : (s: string) => s.toLowerCase();
+          const cursor = new SearchCursor(doc, searchText, 0, doc.length, normalize);
+          cursor.next();
+          while (!cursor.done) {
+            totalMatches++;
+            if (cursor.value.from <= cursorPos) currentIndex = totalMatches;
+            cursor.next();
+          }
+        }
+      } catch {
+        matchInfo.textContent = 'Invalid';
+        return;
+      }
+
+      if (totalMatches === 0) {
+        matchInfo.textContent = 'No results';
+      } else {
+        if (currentIndex === 0) currentIndex = 1;
+        matchInfo.textContent = `${currentIndex}/${totalMatches}`;
+      }
+    }
+
+    // Debounced version — prevents blocking the main thread during rapid typing
+    function scheduleCountMatches() {
+      if (countTimer) clearTimeout(countTimer);
+      countTimer = setTimeout(countMatchesNow, 80);
+    }
+
+    function commit() {
+      panelView.dispatch({ effects: setSearchQuery.of(buildQuery()) });
+      scheduleCountMatches();
+    }
+
+    searchField.addEventListener('input', commit);
+    searchField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          findPrevious(panelView);
+        } else {
+          findNext(panelView);
+        }
+        scheduleCountMatches();
+      } else if (e.key === 'Escape') {
+        closeSearchPanel(panelView);
+      }
+    });
+
+    replaceField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commit();
+        replaceNext(panelView);
+        scheduleCountMatches();
+      } else if (e.key === 'Escape') {
+        closeSearchPanel(panelView);
+      }
+    });
+
+    prevBtn.addEventListener('click', () => {
+      findPrevious(panelView);
+      scheduleCountMatches();
+    });
+
+    nextBtn.addEventListener('click', () => {
+      findNext(panelView);
+      scheduleCountMatches();
+    });
+
+    caseBtn.addEventListener('click', () => {
+      caseSensitive = !caseSensitive;
+      caseBtn.classList.toggle('active', caseSensitive);
+      commit();
+    });
+
+    reBtn.addEventListener('click', () => {
+      regexp = !regexp;
+      reBtn.classList.toggle('active', regexp);
+      commit();
+    });
+
+    closeBtn.addEventListener('click', () => {
+      closeSearchPanel(panelView);
+    });
+
+    replaceBtn.addEventListener('click', () => {
+      commit();
+      replaceNext(panelView);
+      scheduleCountMatches();
+    });
+
+    replaceAllBtn.addEventListener('click', () => {
+      commit();
+      const searchText = searchField.value;
+      if (!searchText) return;
+
+      // Count matches before replacing
+      let totalBefore = 0;
+      const doc = panelView.state.doc;
+      try {
+        if (regexp) {
+          let flags = 'g';
+          if (!caseSensitive) flags += 'i';
+          const re = new RegExp(searchText, flags);
+          const content = doc.toString();
+          let m;
+          while ((m = re.exec(content)) !== null) {
+            if (m[0].length === 0) { re.lastIndex++; continue; }
+            totalBefore++;
+          }
+        } else {
+          const normalize = caseSensitive ? (s: string) => s : (s: string) => s.toLowerCase();
+          const cursor = new SearchCursor(doc, searchText, 0, doc.length, normalize);
+          cursor.next();
+          while (!cursor.done) {
+            totalBefore++;
+            cursor.next();
+          }
+        }
+      } catch {
+        // invalid regex
+      }
+
+      replaceAll(panelView);
+
+      if (totalBefore > 0) {
+        replaceInfo.textContent = `${totalBefore} replaced`;
+        setTimeout(() => { replaceInfo.textContent = ''; }, 3000);
+      }
+
+      scheduleCountMatches();
+    });
+
+    // Pre-fill with selected text
+    const sel = panelView.state.selection.main;
+    if (!sel.empty) {
+      const selectedText = panelView.state.sliceDoc(sel.from, sel.to);
+      if (!selectedText.includes('\n')) {
+        searchField.value = selectedText;
+      }
+    }
+
+    // Initial count
+    setTimeout(countMatchesNow, 0);
+
+    return {
+      dom,
+      mount() {
+        searchField.focus();
+        if (searchField.value) commit();
+      },
+      update(update: ViewUpdate) {
+        // Only re-count on doc or selection changes, debounced to avoid blocking typing
+        if (update.docChanged || update.selectionSet) {
+          scheduleCountMatches();
+        }
+      },
+      top: true,
+    };
   }
 
   function getLanguage(path: string) {
@@ -280,10 +558,9 @@
     await stopWatching();
     try {
       unwatchFn = await watch(path, () => {
-        if (ignoreNextWatch) {
-          ignoreNextWatch = false;
-          return;
-        }
+        // Ignore watcher events for a window after our own saves
+        // (file systems often emit multiple events per write)
+        if (Date.now() < ignoreWatchUntil) return;
         if (watchDebounce) clearTimeout(watchDebounce);
         watchDebounce = setTimeout(() => reloadFromDisk(path), 200);
       }, { recursive: false });
@@ -304,6 +581,9 @@
         savedContentCache.set(path, diskContent);
         return;
       }
+      // If disk content matches what we last saved, this isn't an external
+      // change — the user just typed ahead of the watcher. Don't overwrite.
+      if (diskContent === savedContentCache.get(path)) return;
 
       // Preserve cursor position
       const cursorPos = Math.min(view.state.selection.main.head, diskContent.length);
@@ -407,6 +687,7 @@
         foldGutter(),
         autocompletion(),
         highlightSelectionMatches(),
+        search({ createPanel: createCustomSearchPanel, top: true }),
         ...(lang ? [lang] : []),
         oneDark,
         fontSizeComp.of(EditorView.theme({
@@ -544,14 +825,16 @@
     saving = true;
     const content = view.state.doc.toString();
     try {
-      ignoreNextWatch = true;
+      // Ignore watcher events for 1.5s after save to handle
+      // multiple FS events that many OS's emit per single write
+      ignoreWatchUntil = Date.now() + 1500;
       await invoke('write_file_content', { path, content });
       savedContentCache.set(path, content);
       markFileSaved(path);
       updateGitGutter(path);
     } catch (e) {
       console.error('Failed to save:', e);
-      ignoreNextWatch = false;
+      ignoreWatchUntil = 0;
     }
     saving = false;
   }
@@ -1009,5 +1292,96 @@
     opacity: 1;
     color: var(--text-primary);
     background: var(--bg-surface);
+  }
+
+  /* Custom search panel styles */
+  .editor-wrapper :global(.cm-panel.cm-search) {
+    background: var(--bg-secondary, #1e1e2e);
+    border-bottom: 1px solid var(--border, #45475a);
+    padding: 6px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+  }
+
+  .editor-wrapper :global(.cm-search-row) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .editor-wrapper :global(.cm-search-field) {
+    flex: 1;
+    min-width: 120px;
+    max-width: 260px;
+    background: var(--bg-primary, #11111b);
+    color: var(--text-primary, #cdd6f4);
+    border: 1px solid var(--border, #45475a);
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+
+  .editor-wrapper :global(.cm-search-field:focus) {
+    border-color: var(--accent, #89b4fa);
+  }
+
+  .editor-wrapper :global(.cm-search-match-info) {
+    font-size: 11px;
+    color: var(--text-muted, #a6adc8);
+    min-width: 70px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .editor-wrapper :global(.cm-search-replace-info) {
+    font-size: 11px;
+    color: var(--success, #a6e3a1);
+    white-space: nowrap;
+    margin-left: 4px;
+  }
+
+  .editor-wrapper :global(.cm-search .cm-button) {
+    background: var(--bg-surface, #313244);
+    color: var(--text-primary, #cdd6f4);
+    border: 1px solid var(--border, #45475a);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    cursor: pointer;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  .editor-wrapper :global(.cm-search .cm-button:hover) {
+    background: var(--bg-tertiary, #45475a);
+  }
+
+  .editor-wrapper :global(.cm-search-nav) {
+    padding: 2px 5px !important;
+    font-size: 13px !important;
+    font-weight: bold;
+  }
+
+  .editor-wrapper :global(.cm-search-toggle) {
+    font-size: 11px !important;
+    opacity: 0.5;
+  }
+
+  .editor-wrapper :global(.cm-search-toggle.active) {
+    opacity: 1;
+    background: var(--accent, #89b4fa) !important;
+    color: var(--bg-primary, #11111b) !important;
+    border-color: var(--accent, #89b4fa) !important;
+  }
+
+  .editor-wrapper :global(.cm-search-close) {
+    margin-left: auto;
+    font-size: 16px !important;
+    padding: 0 6px !important;
+    line-height: 1.2;
   }
 </style>
