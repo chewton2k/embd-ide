@@ -5,7 +5,7 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger } from './stores.ts';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned } from './stores.ts';
 
   function isValidName(name: string): boolean {
     return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';
@@ -281,6 +281,8 @@
       projectRoot.set(rootPath);
       // Register project root with backend for path validation
       await invoke('set_project_root', { path: rootPath });
+      // Close all non-pinned tabs when switching projects
+      closeAllUnpinned();
       expandedDirs = new Set();
       await loadDirectory(rootPath);
       await fetchGitStatus();

@@ -114,6 +114,14 @@ export function closeFile(path: string) {
   });
 }
 
+export function closeAllUnpinned() {
+  openFiles.update(files => {
+    const pinned = files.filter(f => f.pinned);
+    activeFilePath.set(pinned.at(-1)?.path ?? null);
+    return pinned;
+  });
+}
+
 export function markFileSaved(path: string) {
   openFiles.update(files =>
     files.map(f => f.path === path ? { ...f, modified: false } : f)

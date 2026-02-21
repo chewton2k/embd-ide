@@ -298,10 +298,12 @@
       const diskContent = await invoke<string>('read_file_content', { path });
       // Re-check after await — user may have switched tabs
       if (!view || currentFilePath !== path) return;
-      const lastSaved = savedContentCache.get(path) ?? '';
-      // Only reload if content actually changed from what we know
-      if (diskContent === lastSaved) return;
-      if (diskContent === view.state.doc.toString()) return;
+      // Only reload if editor content differs from disk
+      if (diskContent === view.state.doc.toString()) {
+        // Disk matches editor — just update our saved cache
+        savedContentCache.set(path, diskContent);
+        return;
+      }
 
       // Preserve cursor position
       const cursorPos = Math.min(view.state.selection.main.head, diskContent.length);
