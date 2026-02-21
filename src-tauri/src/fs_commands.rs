@@ -967,6 +967,86 @@ fn parse_hunk_range(s: &str) -> (u32, u32) {
     (start, count)
 }
 
+#[derive(Serialize, Clone)]
+pub struct BranchInfo {
+    pub name: String,
+    pub is_current: bool,
+    pub is_remote: bool,
+}
+
+#[tauri::command]
+pub fn git_list_branches(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<Vec<BranchInfo>, String> {
+    validate_repo_path(&repo_path, &state)?;
+    let output = Command::new("git")
+        .args(["branch", "-a", "--no-color"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut branches = Vec::new();
+
+    for line in stdout.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() { continue; }
+        // Skip HEAD pointer lines like "remotes/origin/HEAD -> origin/main"
+        if trimmed.contains("->") { continue; }
+
+        let is_current = trimmed.starts_with('*');
+        let name = trimmed.trim_start_matches("* ").trim_start_matches("remotes/").to_string();
+        let is_remote = line.contains("remotes/");
+
+        branches.push(BranchInfo { name, is_current, is_remote });
+    }
+
+    // Sort: current first, then local, then remote
+    branches.sort_by(|a, b| {
+        b.is_current.cmp(&a.is_current)
+            .then(a.is_remote.cmp(&b.is_remote))
+            .then(a.name.cmp(&b.name))
+    });
+
+    Ok(branches)
+}
+
+#[tauri::command]
+pub fn git_checkout_branch(state: tauri::State<'_, ProjectRootState>, repo_path: String, branch: String, is_remote: bool) -> Result<String, String> {
+    validate_repo_path(&repo_path, &state)?;
+    // Sanitize branch name
+    if branch.contains("..") || branch.contains(' ') {
+        return Err("Invalid branch name".to_string());
+    }
+
+    let output = if is_remote {
+        // For remote branches like "origin/feature", track as local "feature"
+        let local_name = branch.split('/').skip(1).collect::<Vec<&str>>().join("/");
+        if local_name.is_empty() {
+            return Err("Invalid remote branch name".to_string());
+        }
+        Command::new("git")
+            .args(["checkout", "--track", &format!("remotes/{}", branch)])
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?
+    } else {
+        Command::new("git")
+            .args(["checkout", &branch])
+            .current_dir(&repo_path)
+            .output()
+            .map_err(|e| e.to_string())?
+    };
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
 #[tauri::command]
 pub fn get_git_branch(path: String) -> Result<Option<String>, String> {
     let mut dir = PathBuf::from(&path);

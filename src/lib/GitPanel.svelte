@@ -59,6 +59,87 @@
   let graphRows = $state<GitGraphRow[]>([]);
   let historyLoading = $state(false);
 
+  // Branch dropdown state
+  interface BranchInfo {
+    name: string;
+    is_current: boolean;
+    is_remote: boolean;
+  }
+  let showBranchDropdown = $state(false);
+  let branchList = $state<BranchInfo[]>([]);
+  let branchSearch = $state('');
+  let branchLoading = $state(false);
+  let branchError = $state('');
+  let branchDropdownEl: HTMLDivElement | undefined = $state();
+  let branchSearchEl: HTMLInputElement | undefined = $state();
+
+  let filteredBranches = $derived(
+    branchSearch
+      ? branchList.filter(b => b.name.toLowerCase().includes(branchSearch.toLowerCase()))
+      : branchList
+  );
+
+  async function toggleBranchDropdown() {
+    showBranchDropdown = !showBranchDropdown;
+    if (showBranchDropdown) {
+      branchSearch = '';
+      branchError = '';
+      branchLoading = true;
+      try {
+        branchList = await invoke<BranchInfo[]>('git_list_branches', { repoPath: $projectRoot });
+      } catch (e) {
+        branchError = String(e);
+        branchList = [];
+      }
+      branchLoading = false;
+      // Focus search input after rendering
+      requestAnimationFrame(() => branchSearchEl?.focus());
+    }
+  }
+
+  async function switchBranch(branch: BranchInfo) {
+    if (branch.is_current) {
+      showBranchDropdown = false;
+      return;
+    }
+    const root = $projectRoot;
+    if (!root) return;
+    branchError = '';
+    try {
+      await invoke<string>('git_checkout_branch', {
+        repoPath: root,
+        branch: branch.name,
+        isRemote: branch.is_remote,
+      });
+      showBranchDropdown = false;
+      // Refresh branch name and status
+      const newBranch = await invoke<string | null>('get_git_branch', { path: root });
+      gitBranch.set(newBranch ?? null);
+      await fetchStatus();
+      if (showHistory) await fetchHistory();
+    } catch (e) {
+      branchError = String(e);
+    }
+  }
+
+  function handleBranchKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      showBranchDropdown = false;
+    }
+  }
+
+  function handleClickOutside(e: MouseEvent) {
+    if (showBranchDropdown && branchDropdownEl && !branchDropdownEl.contains(e.target as Node)) {
+      showBranchDropdown = false;
+    }
+  }
+
+  function autoResizeTextarea(e: Event) {
+    const textarea = e.target as HTMLTextAreaElement;
+    textarea.style.height = 'auto';
+    textarea.style.height = textarea.scrollHeight + 'px';
+  }
+
   const GRAPH_COLORS = [
     'var(--accent)',
     'var(--success)',
@@ -375,6 +456,7 @@
   onMount(() => {
     fetchStatus();
     pollInterval = setInterval(fetchStatus, 3000);
+    document.addEventListener('mousedown', handleClickOutside);
   });
 
   // Refresh source control when the user switches files
@@ -386,6 +468,7 @@
 
   onDestroy(() => {
     if (pollInterval) clearInterval(pollInterval);
+    document.removeEventListener('mousedown', handleClickOutside);
   });
 
   function statusIcon(status: string): string {
@@ -413,20 +496,65 @@
 
 <div class="git-panel">
   <!-- Branch Header -->
-  <div class="section-header branch-header">
-    <div class="branch-info">
-      <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-        <path d="M14.7 7.3L8.7 1.3a1 1 0 0 0-1.4 0L5.7 2.9l1.8 1.8A1.2 1.2 0 0 1 9 5.9v4.3a1.2 1.2 0 1 1-1-.1V6.1L6.3 7.8a1.2 1.2 0 1 1-.9-.5l1.8-1.8-1.8-1.8L1.3 7.3a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0l6-6a1 1 0 0 0 0-1.4z"/>
-      </svg>
-      <span class="branch-name">{$gitBranch ?? 'no branch'}</span>
-      {#if aheadBehind.upstream}
-        <span class="ahead-behind">
-          {#if aheadBehind.ahead > 0}<span class="ahead" title="Commits ahead">↑{aheadBehind.ahead}</span>{/if}
-          {#if aheadBehind.behind > 0}<span class="behind" title="Commits behind">↓{aheadBehind.behind}</span>{/if}
-        </span>
-        <span class="upstream">{aheadBehind.upstream}</span>
-      {/if}
+  <div class="branch-header-wrapper" bind:this={branchDropdownEl}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="section-header branch-header" onclick={toggleBranchDropdown} onkeydown={handleBranchKeydown}>
+      <div class="branch-info">
+        <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
+          <path d="M14.7 7.3L8.7 1.3a1 1 0 0 0-1.4 0L5.7 2.9l1.8 1.8A1.2 1.2 0 0 1 9 5.9v4.3a1.2 1.2 0 1 1-1-.1V6.1L6.3 7.8a1.2 1.2 0 1 1-.9-.5l1.8-1.8-1.8-1.8L1.3 7.3a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0l6-6a1 1 0 0 0 0-1.4z"/>
+        </svg>
+        <span class="branch-name">{$gitBranch ?? 'no branch'}</span>
+        <span class="branch-chevron" class:open={showBranchDropdown}>▾</span>
+        {#if aheadBehind.upstream}
+          <span class="ahead-behind">
+            {#if aheadBehind.ahead > 0}<span class="ahead" title="Commits ahead">↑{aheadBehind.ahead}</span>{/if}
+            {#if aheadBehind.behind > 0}<span class="behind" title="Commits behind">↓{aheadBehind.behind}</span>{/if}
+          </span>
+          <span class="upstream">{aheadBehind.upstream}</span>
+        {/if}
+      </div>
     </div>
+    {#if showBranchDropdown}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="branch-dropdown" onkeydown={handleBranchKeydown}>
+        <input
+          class="branch-search"
+          type="text"
+          placeholder="Search branches..."
+          bind:value={branchSearch}
+          bind:this={branchSearchEl}
+        />
+        {#if branchError}
+          <div class="branch-error">{branchError}</div>
+        {/if}
+        {#if branchLoading}
+          <div class="branch-loading">Loading...</div>
+        {:else}
+          <div class="branch-list">
+            {#each filteredBranches as branch}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div
+                class="branch-item"
+                class:current={branch.is_current}
+                onclick={() => switchBranch(branch)}
+              >
+                <span class="branch-item-indicator">{branch.is_current ? '●' : ''}</span>
+                <span class="branch-item-name">
+                  {#if branch.is_remote}
+                    <span class="branch-remote-prefix">{branch.name.split('/')[0]}/</span>{branch.name.split('/').slice(1).join('/')}
+                  {:else}
+                    {branch.name}
+                  {/if}
+                </span>
+              </div>
+            {/each}
+            {#if filteredBranches.length === 0 && !branchLoading}
+              <div class="branch-loading">No branches found</div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <div class="scroll-area">
@@ -565,7 +693,8 @@
       class="commit-input"
       placeholder="Commit message..."
       bind:value={commitMsg}
-      rows="3"
+      rows="1"
+      oninput={autoResizeTextarea}
     ></textarea>
     <div class="commit-buttons">
       <button
@@ -621,12 +750,21 @@
     z-index: 1;
   }
 
+  .branch-header-wrapper {
+    position: relative;
+  }
+
   .branch-header {
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
     text-transform: none;
     letter-spacing: 0;
     padding: 8px 10px;
+    cursor: pointer;
+  }
+
+  .branch-header:hover {
+    background: var(--bg-surface);
   }
 
   .branch-info {
@@ -639,6 +777,99 @@
   .branch-name {
     font-weight: 600;
     color: var(--text-primary);
+  }
+
+  .branch-chevron {
+    font-size: 10px;
+    color: var(--text-muted);
+    transition: transform 0.15s;
+  }
+
+  .branch-chevron.open {
+    transform: rotate(180deg);
+  }
+
+  .branch-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-top: none;
+    z-index: 100;
+    max-height: 280px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .branch-search {
+    width: 100%;
+    padding: 6px 8px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+  }
+
+  .branch-search::placeholder {
+    color: var(--text-muted);
+  }
+
+  .branch-list {
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .branch-item {
+    display: flex;
+    align-items: center;
+    padding: 4px 10px;
+    cursor: pointer;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+
+  .branch-item:hover {
+    background: var(--bg-surface);
+  }
+
+  .branch-item.current {
+    color: var(--accent);
+  }
+
+  .branch-item-indicator {
+    width: 10px;
+    font-size: 8px;
+    flex-shrink: 0;
+    text-align: center;
+    color: var(--accent);
+  }
+
+  .branch-item-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .branch-remote-prefix {
+    color: var(--text-muted);
+  }
+
+  .branch-loading,
+  .branch-error {
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .branch-error {
+    color: var(--error);
   }
 
   .ahead-behind {
@@ -818,8 +1049,10 @@
     padding: 6px 8px;
     font-size: 12px;
     font-family: inherit;
-    resize: vertical;
+    resize: none;
     min-height: 40px;
+    max-height: 200px;
+    overflow-y: auto;
   }
 
   .commit-input:focus {
