@@ -989,7 +989,7 @@ pub fn git_log(state: tauri::State<'_, ProjectRootState>, repo_path: String, cou
     // Use a unique separator unlikely to appear in commit messages
     let format = format!("%H\x09%h\x09%an\x09%ar\x09%s");
     let output = Command::new("git")
-        .args(["log", "--graph", &format!("--format=format:{}", format), "--all", "-n", &limit])
+        .args(["log", "--graph", &format!("--format=format:{}", format), "-n", &limit])
         .current_dir(&repo_path)
         .output()
         .map_err(|e| e.to_string())?;
