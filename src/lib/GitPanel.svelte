@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { ask } from '@tauri-apps/plugin-dialog';
-  import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh } from './stores.ts';
+  import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh, sharedGitStatus, addFile } from './stores.ts';
 
   interface GitFile {
     path: string;       // absolute path
@@ -44,6 +44,7 @@
 
   let stagedFiles = $state<GitFile[]>([]);
   let changedFiles = $state<GitFile[]>([]);
+  let conflictFiles = $state<GitFile[]>([]);
   let selectedFile = $state<GitFile | null>(null);
   let diffLines = $state<DiffLine[]>([]);
   let commitMsg = $state('');
@@ -54,7 +55,6 @@
   let isPushing = $state(false);
   let commitError = $state('');
   let commitSuccess = $state('');
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
   let showHistory = $state(false);
   let graphRows = $state<GitGraphRow[]>([]);
   let historyLoading = $state(false);
@@ -115,7 +115,7 @@
       // Refresh branch name and status
       const newBranch = await invoke<string | null>('get_git_branch', { path: root });
       gitBranch.set(newBranch ?? null);
-      await fetchStatus();
+      await fetchStatusFromBackend();
       if (showHistory) await fetchHistory();
     } catch (e) {
       branchError = String(e);
@@ -155,39 +155,58 @@
     return GRAPH_COLORS[col % GRAPH_COLORS.length];
   }
 
-  async function fetchStatus() {
+  function processGitStatus(status: Record<string, string>) {
     const root = $projectRoot;
     if (!root) return;
 
-    try {
-      const status = await invoke<Record<string, string>>('get_git_status', { path: root });
-      const staged: GitFile[] = [];
-      const changed: GitFile[] = [];
+    const staged: GitFile[] = [];
+    const changed: GitFile[] = [];
+    const conflicts: GitFile[] = [];
 
-      for (const [absPath, code] of Object.entries(status)) {
-        const relPath = absPath.startsWith(root) ? absPath.slice(root.length + 1) : absPath;
-        const file: GitFile = { path: absPath, relPath, status: code };
+    for (const [absPath, code] of Object.entries(status)) {
+      const relPath = absPath.startsWith(root) ? absPath.slice(root.length + 1) : absPath;
+      const file: GitFile = { path: absPath, relPath, status: code };
 
-        if (code === 'A' || code === 'S') {
-          staged.push(file);
-        } else {
-          changed.push(file);
-        }
+      if (code === 'C') {
+        conflicts.push(file);
+      } else if (code === 'A' || code === 'S') {
+        staged.push(file);
+      } else {
+        changed.push(file);
       }
-
-      staged.sort((a, b) => a.relPath.localeCompare(b.relPath));
-      changed.sort((a, b) => a.relPath.localeCompare(b.relPath));
-      stagedFiles = staged;
-      changedFiles = changed;
-    } catch {
-      // ignore
     }
 
+    staged.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    changed.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    conflicts.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    stagedFiles = staged;
+    changedFiles = changed;
+    conflictFiles = conflicts;
+  }
+
+  async function fetchAheadBehind() {
+    const root = $projectRoot;
+    if (!root) return;
     try {
       aheadBehind = await invoke<AheadBehind>('git_ahead_behind', { repoPath: root });
     } catch {
       aheadBehind = { ahead: 0, behind: 0, upstream: null };
     }
+  }
+
+  // For operations that mutate git state (stage, unstage, commit, etc.)
+  // we need to force-refresh status from the backend
+  async function fetchStatusFromBackend() {
+    const root = $projectRoot;
+    if (!root) return;
+    try {
+      const status = await invoke<Record<string, string>>('get_git_status', { path: root });
+      sharedGitStatus.set(status);
+      processGitStatus(status);
+    } catch {
+      // ignore
+    }
+    await fetchAheadBehind();
   }
 
   async function selectFile(file: GitFile) {
@@ -201,6 +220,7 @@
         repoPath: root,
         filePath: file.relPath,
         staged: isStaged,
+        isUntracked: file.status === 'U',
       });
     } catch {
       diffLines = [];
@@ -212,7 +232,7 @@
     if (!root) return;
     try {
       await invoke('git_stage', { repoPath: root, paths: [file.relPath] });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -221,7 +241,7 @@
     if (!root) return;
     try {
       await invoke('git_unstage', { repoPath: root, paths: [file.relPath] });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -232,7 +252,7 @@
     if (paths.length === 0) return;
     try {
       await invoke('git_stage', { repoPath: root, paths });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -243,7 +263,7 @@
     if (paths.length === 0) return;
     try {
       await invoke('git_unstage', { repoPath: root, paths });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -282,7 +302,7 @@
         diffLines = [];
       }
       await reloadOpenFiles([file]);
-      await fetchStatus();
+      await fetchStatusFromBackend();
       triggerFileTreeRefresh();
     } catch { /* ignore */ }
   }
@@ -303,7 +323,7 @@
       selectedFile = null;
       diffLines = [];
       await reloadOpenFiles(filesToDiscard);
-      await fetchStatus();
+      await fetchStatusFromBackend();
       triggerFileTreeRefresh();
     } catch { /* ignore */ }
   }
@@ -384,7 +404,7 @@
         isPushing = false;
       }
 
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch (e) {
       commitError = `Commit failed: ${e}`;
     }
@@ -453,21 +473,23 @@
     };
   }
 
+  // Subscribe to shared git status from FileTree's poll — no separate polling needed
+  $effect(() => {
+    const status = $sharedGitStatus;
+    processGitStatus(status);
+  });
+
+  let aheadBehindInterval: ReturnType<typeof setInterval> | null = null;
+
   onMount(() => {
-    fetchStatus();
-    pollInterval = setInterval(fetchStatus, 3000);
+    fetchAheadBehind();
+    // Only poll ahead/behind independently (lightweight, not duplicated)
+    aheadBehindInterval = setInterval(fetchAheadBehind, 5000);
     document.addEventListener('mousedown', handleClickOutside);
   });
 
-  // Refresh source control when the user switches files
-  $effect(() => {
-    $activeFilePath;          // track changes
-    fetchStatus();
-    if (showHistory) fetchHistory();
-  });
-
   onDestroy(() => {
-    if (pollInterval) clearInterval(pollInterval);
+    if (aheadBehindInterval) clearInterval(aheadBehindInterval);
     document.removeEventListener('mousedown', handleClickOutside);
   });
 
@@ -478,6 +500,7 @@
       case 'M': return 'M';
       case 'D': return 'D';
       case 'U': return 'U';
+      case 'C': return '!';
       default: return '?';
     }
   }
@@ -489,8 +512,14 @@
       case 'M': return 'var(--warning)';
       case 'D': return 'var(--error)';
       case 'U': return 'var(--success)';
+      case 'C': return 'var(--error)';
       default: return 'var(--text-muted)';
     }
+  }
+
+  function openConflictFile(file: GitFile) {
+    const name = file.relPath.split('/').pop() || file.relPath;
+    addFile(file.path, name);
   }
 </script>
 
@@ -558,6 +587,23 @@
   </div>
 
   <div class="scroll-area">
+    <!-- Merge Conflicts -->
+    {#if conflictFiles.length > 0}
+      <div class="section">
+        <div class="section-header conflict-header">
+          <span>Merge Conflicts ({conflictFiles.length})</span>
+        </div>
+        {#each conflictFiles as file}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="file-row" onclick={() => openConflictFile(file)}>
+            <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
+            <span class="file-name" title={file.relPath}>{file.relPath}</span>
+            <button class="file-action open-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); openConflictFile(file); }}>Open</button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     <!-- Staged Changes -->
     <div class="section">
       <div class="section-header" class:collapsed={stagedFiles.length === 0}>
@@ -884,6 +930,31 @@
   .upstream {
     color: var(--text-muted);
     font-size: 10px;
+  }
+
+  .conflict-header {
+    color: var(--error);
+  }
+
+  .open-btn {
+    opacity: 0;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+
+  .file-row:hover .open-btn {
+    opacity: 1;
+  }
+
+  .open-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
   }
 
   .section-actions {

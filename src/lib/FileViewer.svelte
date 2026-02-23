@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import { invoke, convertFileSrc } from '@tauri-apps/api/core';
   import DOMPurify from 'dompurify';
   import * as pdfjsLib from 'pdfjs-dist';
@@ -140,8 +139,6 @@
   function zoomIn() { zoom = Math.min(500, zoom + 25); }
   function zoomOut() { zoom = Math.max(25, zoom - 25); }
   function zoomReset() { zoom = 100; }
-
-  onMount(() => { loadFile(filePath); });
 
   $effect(() => {
     if (filePath) loadFile(filePath);

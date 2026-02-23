@@ -5,14 +5,23 @@
   let { onClose }: { onClose: () => void } = $props();
 
   let query = $state('');
+  let debouncedQuery = $state('');
   let allFiles = $state<string[]>([]);
   let selectedIndex = $state(0);
   let searchInput: HTMLInputElement | undefined = $state();
   let resultsList: HTMLDivElement | undefined = $state();
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  // Debounce the query to avoid scoring all files on every keystroke
+  $effect(() => {
+    const q = query;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => { debouncedQuery = q; }, 150);
+  });
 
   const filtered = $derived.by(() => {
-    if (!query.trim()) return allFiles.slice(0, 50);
-    const q = query.toLowerCase();
+    if (!debouncedQuery.trim()) return allFiles.slice(0, 50);
+    const q = debouncedQuery.toLowerCase();
     const parts = q.split(/\s+/);
     // Score and filter
     const scored = allFiles

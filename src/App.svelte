@@ -3,6 +3,7 @@
   import Editor from './lib/Editor.svelte';
   import FileViewer from './lib/FileViewer.svelte';
   import JSONViewer from './lib/JSONViewer.svelte';
+  import MergeEditor from './lib/MergeEditor.svelte';
   import Tabs from './lib/Tabs.svelte';
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
@@ -11,8 +12,8 @@
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
-  import { openFiles, activeFile, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey } from './lib/stores.ts';
-  import { onMount, onDestroy } from 'svelte';
+  import { openFiles, activeFile, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus } from './lib/stores.ts';
+  import { onMount } from 'svelte';
 
   const viewerExts = new Set([
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg',
@@ -85,22 +86,6 @@
     if (showGit) showChat = false;
   }
 
-  // Git branch polling
-  let branchInterval: ReturnType<typeof setInterval> | null = null;
-
-  async function fetchGitBranch(root: string | null) {
-    if (!root) {
-      gitBranch.set(null);
-      return;
-    }
-    try {
-      const branch = await invoke<string | null>('get_git_branch', { path: root });
-      gitBranch.set(branch);
-    } catch {
-      gitBranch.set(null);
-    }
-  }
-
   let appVersion = $state('');
 
   onMount(() => {
@@ -110,19 +95,6 @@
     if (storedKey) {
       invoke('set_api_key', { key: storedKey }).catch(() => {});
     }
-    const unsub = projectRoot.subscribe((root) => {
-      fetchGitBranch(root);
-    });
-    // Poll every 3 seconds for branch changes
-    branchInterval = setInterval(() => {
-      const root = $projectRoot;
-      if (root) fetchGitBranch(root);
-    }, 3000);
-    return unsub;
-  });
-
-  onDestroy(() => {
-    if (branchInterval) clearInterval(branchInterval);
   });
 
   // Apply theme colors to CSS custom properties
@@ -190,7 +162,9 @@
     <div class="editor-area" style="flex: 1; min-height: 0;">
       <Tabs />
       <div class="editor-container">
-        {#if $activeFile && isJsonFile($activeFile)}
+        {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
+          <MergeEditor filePath={$activeFile} />
+        {:else if $activeFile && isJsonFile($activeFile)}
           <JSONViewer filePath={$activeFile} />
         {:else if $activeFile && isViewerFile($activeFile)}
           <FileViewer filePath={$activeFile} />

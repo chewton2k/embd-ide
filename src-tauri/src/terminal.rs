@@ -56,10 +56,11 @@ pub fn spawn_terminal(
         }
     }
 
-    // Validate cwd against project root
-    if let Some(ref dir) = cwd {
+    // Validate cwd against project root — require a project to be open
+    {
         let root = project_root.lock().map_err(|e| e.to_string())?;
-        if let Some(ref root_path) = *root {
+        let root_path = root.as_ref().ok_or_else(|| "No project is open. Open a folder first.".to_string())?;
+        if let Some(ref dir) = cwd {
             let canonical = std::fs::canonicalize(dir).map_err(|e| format!("Invalid cwd: {}", e))?;
             if !canonical.starts_with(root_path) {
                 return Err("Access denied: terminal cwd is outside the project directory".to_string());

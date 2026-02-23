@@ -160,6 +160,10 @@ export function triggerFileTreeRefresh() {
 }
 export const gitBranch = writable<string | null>(null);
 
+// Shared git status data — written by FileTree's poll, read by GitPanel
+// Maps absolute path -> status code (M, A, S, D, U)
+export const sharedGitStatus = writable<Record<string, string>>({});
+
 // Autosave settings
 export const autosaveEnabled = writable<boolean>(
   localStorage.getItem('embd-autosave') !== 'false' // default on

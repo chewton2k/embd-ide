@@ -267,7 +267,7 @@
     });
 
     const unsub = projectRoot.subscribe((root) => {
-      if (root !== initializedForRoot && terminalContainer) {
+      if (root && root !== initializedForRoot && terminalContainer) {
         initializedForRoot = root;
         // Kill all existing tabs and start fresh
         for (const tab of [...tabs]) {
@@ -276,11 +276,6 @@
         createTab();
       }
     });
-
-    // Start a default terminal if no project root yet
-    if (tabs.length === 0) {
-      createTab();
-    }
 
     return () => { unsub(); unsubFont(); unsubTheme(); };
   });
@@ -322,7 +317,11 @@
       </button>
     </div>
   </div>
-  <div class="terminal-content" bind:this={terminalContainer}></div>
+  <div class="terminal-content" bind:this={terminalContainer}>
+    {#if tabs.length === 0}
+      <div class="terminal-placeholder">Open a folder to start a terminal session</div>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -451,5 +450,14 @@
 
   .terminal-content :global(.xterm) {
     height: 100%;
+  }
+
+  .terminal-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 13px;
   }
 </style>

@@ -5,7 +5,7 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned } from './stores.ts';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, gitBranch } from './stores.ts';
 
   function isValidName(name: string): boolean {
     return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';
@@ -171,13 +171,18 @@
 
   async function fetchGitStatus() {
     if (!rootPath) return;
+    let newFileStatus: Map<string, string>;
+    let newFolderStatus: Map<string, string>;
+    let newIgnored: Set<string>;
     try {
       const status = await invoke<Record<string, string>>('get_git_status', { path: rootPath });
-      gitFileStatus = new Map(Object.entries(status));
+      // Publish to shared store so GitPanel can use it without a separate poll
+      sharedGitStatus.set(status);
+      newFileStatus = new Map(Object.entries(status));
       // Compute folder statuses
       const folders = new Map<string, string>();
       const priority: Record<string, number> = { M: 3, U: 2, A: 1, S: 1, D: 2 };
-      for (const [filePath, code] of gitFileStatus) {
+      for (const [filePath, code] of newFileStatus) {
         let dir = filePath.substring(0, filePath.lastIndexOf('/'));
         while (dir.length >= (rootPath?.length ?? 0)) {
           const existing = folders.get(dir);
@@ -187,25 +192,48 @@
           dir = dir.substring(0, dir.lastIndexOf('/'));
         }
       }
-      gitFolderStatus = folders;
+      newFolderStatus = folders;
     } catch (_) {
-      gitFileStatus = new Map();
-      gitFolderStatus = new Map();
+      newFileStatus = new Map();
+      newFolderStatus = new Map();
     }
     // Fetch gitignored paths
     try {
       const ignored = await invoke<string[]>('get_git_ignored', { path: rootPath });
-      gitIgnoredPaths = new Set(ignored);
+      newIgnored = new Set(ignored);
     } catch (_) {
-      gitIgnoredPaths = new Set();
+      newIgnored = new Set();
     }
+    // Batch all reactive updates together to avoid multiple re-renders
+    gitFileStatus = newFileStatus;
+    gitFolderStatus = newFolderStatus;
+    gitIgnoredPaths = newIgnored;
+    rebuildIgnoredPrefixes();
+    // Also refresh branch name (eliminates separate poll in App.svelte)
+    try {
+      const branch = await invoke<string | null>('get_git_branch', { path: rootPath });
+      gitBranch.set(branch);
+    } catch (_) {
+      gitBranch.set(null);
+    }
+  }
+
+  // Pre-computed set of ignored directory prefixes (with trailing /) for O(depth) lookup
+  let gitIgnoredPrefixes = $state<string[]>([]);
+
+  function rebuildIgnoredPrefixes() {
+    const prefixes: string[] = [];
+    for (const p of gitIgnoredPaths) {
+      prefixes.push(p + '/');
+    }
+    gitIgnoredPrefixes = prefixes;
   }
 
   function isGitIgnored(path: string): boolean {
     if (gitIgnoredPaths.has(path)) return true;
-    // Check if any parent directory is ignored
-    for (const ignored of gitIgnoredPaths) {
-      if (path.startsWith(ignored + '/')) return true;
+    // Walk up the path checking each ancestor against the prefix list
+    for (const prefix of gitIgnoredPrefixes) {
+      if (path.startsWith(prefix)) return true;
     }
     return false;
   }
@@ -257,21 +285,29 @@
     }
   }
 
+  let refreshInProgress = false;
+
   async function refreshTree() {
     if (!rootPath) return;
-    await loadDirectory(rootPath);
-    // Re-expand previously expanded dirs
-    for (const dir of expandedDirs) {
-      const entry = findEntry(files, dir);
-      if (entry) {
-        try {
-          const children = await invoke<FileEntry[]>('read_dir_tree', { path: entry.path, depth: 1 });
-          entry.children = children;
-        } catch (_) { /* dir may have been deleted */ }
+    if (refreshInProgress) return; // Prevent overlapping refreshes
+    refreshInProgress = true;
+    try {
+      const newFiles = await invoke<FileEntry[]>('read_dir_tree', { path: rootPath, depth: 1 });
+      // Re-expand previously expanded dirs
+      for (const dir of expandedDirs) {
+        const entry = findEntry(newFiles, dir);
+        if (entry) {
+          try {
+            const children = await invoke<FileEntry[]>('read_dir_tree', { path: entry.path, depth: 1 });
+            entry.children = children;
+          } catch (_) { /* dir may have been deleted */ }
+        }
       }
+      files = newFiles;
+      await fetchGitStatus();
+    } finally {
+      refreshInProgress = false;
     }
-    files = [...files];
-    await fetchGitStatus();
   }
 
   async function openFolder() {
@@ -562,7 +598,12 @@
     e.preventDefault(); // Prevent text selection from starting
   }
 
+  let dragRafId: number | null = null;
+
   function handleGlobalMouseMove(e: MouseEvent) {
+    // Fast path: if not dragging or pending, skip immediately
+    if (!dragPending && !isDragging) return;
+
     if (dragPending && dragPendingEntry) {
       const dx = e.clientX - dragStartPos.x;
       const dy = e.clientY - dragStartPos.y;
@@ -577,13 +618,31 @@
 
     if (!isDragging) return;
 
+    // Ghost element moves immediately (cheap, no DOM queries)
+    if (dragGhost) {
+      dragGhost.style.left = `${e.clientX + 12}px`;
+      dragGhost.style.top = `${e.clientY - 8}px`;
+    }
+
+    // Throttle the expensive DOM hit-testing to once per animation frame
+    if (dragRafId) return;
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    dragRafId = requestAnimationFrame(() => {
+      dragRafId = null;
+      if (!isDragging) return;
+      handleDragHitTest(clientX, clientY);
+    });
+  }
+
+  function handleDragHitTest(clientX: number, clientY: number) {
     // Detect mouse near window edge — hand off to OS drag
     const edgeThreshold = 10;
     const nearEdge =
-      e.clientX <= edgeThreshold ||
-      e.clientY <= edgeThreshold ||
-      e.clientX >= window.innerWidth - edgeThreshold ||
-      e.clientY >= window.innerHeight - edgeThreshold;
+      clientX <= edgeThreshold ||
+      clientY <= edgeThreshold ||
+      clientX >= window.innerWidth - edgeThreshold ||
+      clientY >= window.innerHeight - edgeThreshold;
 
     if (nearEdge && draggedPaths.length > 0) {
       const paths = [...draggedPaths];
@@ -592,14 +651,8 @@
       return;
     }
 
-    // Move ghost element
-    if (dragGhost) {
-      dragGhost.style.left = `${e.clientX + 12}px`;
-      dragGhost.style.top = `${e.clientY - 8}px`;
-    }
-
     // Find which tree-item we're hovering over
-    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const el = document.elementFromPoint(clientX, clientY);
     if (!el) {
       updateDropTarget(null);
       return;
@@ -717,6 +770,10 @@
     if (dragExpandTimer) {
       clearTimeout(dragExpandTimer);
       dragExpandTimer = null;
+    }
+    if (dragRafId) {
+      cancelAnimationFrame(dragRafId);
+      dragRafId = null;
     }
     document.body.style.userSelect = '';
   }
