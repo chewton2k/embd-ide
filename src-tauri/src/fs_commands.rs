@@ -569,6 +569,73 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
     Ok(result)
 }
 
+/// Returns a map of abs_path -> status_code for files that differ between HEAD and the upstream
+/// tracking branch. Call after `git fetch` to see incoming remote changes.
+#[tauri::command]
+pub fn get_git_remote_status(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<HashMap<String, String>, String> {
+    validate_repo_path(&path, &state)?;
+
+    // Check if an upstream tracking branch exists
+    let upstream_check = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "@{u}"])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !upstream_check.status.success() {
+        // No upstream branch configured — nothing to show
+        return Ok(HashMap::new());
+    }
+
+    let output = Command::new("git")
+        .args(["diff", "--name-status", "HEAD...@{u}"])
+        .current_dir(&path)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        return Ok(HashMap::new());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut result = HashMap::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() { continue; }
+
+        let mut parts = line.splitn(2, '\t');
+        let status_code = match parts.next() {
+            Some(s) => s.trim(),
+            None => continue,
+        };
+        let file_path = match parts.next() {
+            Some(p) => p.trim(),
+            None => continue,
+        };
+
+        // Normalize status: renames show as R### — treat as A
+        let code = if status_code.starts_with('R') { "A" }
+            else if status_code == "M" { "M" }
+            else if status_code == "A" { "A" }
+            else if status_code == "D" { "D" }
+            else { "M" };
+
+        // For renames, the path field is "old\tnew" — use the new path
+        let actual_path = if status_code.starts_with('R') {
+            file_path.split('\t').last().unwrap_or(file_path)
+        } else {
+            file_path
+        };
+
+        let abs_path = PathBuf::from(&path).join(actual_path);
+        let abs_str = abs_path.to_string_lossy().to_string();
+        result.insert(abs_str, code.to_string());
+    }
+
+    Ok(result)
+}
+
 #[tauri::command]
 pub fn get_git_ignored(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<Vec<String>, String> {
     validate_repo_path(&path, &state)?;

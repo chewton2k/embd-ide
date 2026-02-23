@@ -5,7 +5,7 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, gitBranch } from './stores.ts';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch } from './stores.ts';
 
   function isValidName(name: string): boolean {
     return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';
@@ -166,6 +166,10 @@
   let gitFileStatus = $state<Map<string, string>>(new Map());
   // Derived: folder path -> "highest priority" status of any child
   let gitFolderStatus = $state<Map<string, string>>(new Map());
+  // Remote git status: files changed on upstream tracking branch
+  let gitRemoteFileStatus = $state<Map<string, string>>(new Map());
+  let gitRemoteFolderStatus = $state<Map<string, string>>(new Map());
+
   // Gitignored paths (files and directories)
   let gitIgnoredPaths = $state<Set<string>>(new Set());
 
@@ -197,6 +201,31 @@
       newFileStatus = new Map();
       newFolderStatus = new Map();
     }
+    // Fetch remote status (files changed on upstream after git fetch)
+    let newRemoteFileStatus: Map<string, string>;
+    let newRemoteFolderStatus: Map<string, string>;
+    try {
+      const remoteStatus = await invoke<Record<string, string>>('get_git_remote_status', { path: rootPath });
+      sharedGitRemoteStatus.set(remoteStatus);
+      newRemoteFileStatus = new Map(Object.entries(remoteStatus));
+      // Compute folder propagation for remote status
+      const remoteFolders = new Map<string, string>();
+      const remotePriority: Record<string, number> = { M: 3, A: 2, D: 1 };
+      for (const [filePath, code] of newRemoteFileStatus) {
+        let dir = filePath.substring(0, filePath.lastIndexOf('/'));
+        while (dir.length >= (rootPath?.length ?? 0)) {
+          const existing = remoteFolders.get(dir);
+          if (!existing || (remotePriority[code] ?? 0) > (remotePriority[existing] ?? 0)) {
+            remoteFolders.set(dir, code);
+          }
+          dir = dir.substring(0, dir.lastIndexOf('/'));
+        }
+      }
+      newRemoteFolderStatus = remoteFolders;
+    } catch (_) {
+      newRemoteFileStatus = new Map();
+      newRemoteFolderStatus = new Map();
+    }
     // Fetch gitignored paths
     try {
       const ignored = await invoke<string[]>('get_git_ignored', { path: rootPath });
@@ -207,6 +236,8 @@
     // Batch all reactive updates together to avoid multiple re-renders
     gitFileStatus = newFileStatus;
     gitFolderStatus = newFolderStatus;
+    gitRemoteFileStatus = newRemoteFileStatus;
+    gitRemoteFolderStatus = newRemoteFolderStatus;
     gitIgnoredPaths = newIgnored;
     rebuildIgnoredPrefixes();
     // Also refresh branch name (eliminates separate poll in App.svelte)
@@ -248,6 +279,12 @@
       case 'D': return 'var(--git-deleted, #e06c75)';    // red for deleted
       default: return null;
     }
+  }
+
+  function getGitRemoteStatusColor(path: string, isDir: boolean): string | null {
+    const code = isDir ? gitRemoteFolderStatus.get(path) : gitRemoteFileStatus.get(path);
+    if (!code) return null;
+    return 'var(--git-remote, #94e2d5)'; // teal — distinct from all local status colors
   }
 
   // Git status polling (git operations only modify .git/ which the file watcher doesn't cover)
@@ -1285,7 +1322,15 @@
       />
     {:else}
       {@const gitColor = getGitStatusColor(entry.path, entry.is_dir)}
-      <span class="file-name" class:dir-name={entry.is_dir} style={gitColor ? `color: ${gitColor}` : ''}>{entry.name}</span>
+      {@const remoteColor = getGitRemoteStatusColor(entry.path, entry.is_dir)}
+      {@const nameColor = gitColor || remoteColor}
+      <span class="file-name" class:dir-name={entry.is_dir} style={nameColor ? `color: ${nameColor}` : ''}>{entry.name}</span>
+      {#if !entry.is_dir && gitRemoteFileStatus.has(entry.path)}
+        <span class="git-badge remote-badge" style="color: {remoteColor}">↓{gitRemoteFileStatus.get(entry.path)}</span>
+      {/if}
+      {#if entry.is_dir && gitRemoteFolderStatus.has(entry.path)}
+        <span class="git-badge remote-badge" style="color: {remoteColor}">↓{gitRemoteFolderStatus.get(entry.path)}</span>
+      {/if}
       {#if !entry.is_dir && gitFileStatus.has(entry.path)}
         <span class="git-badge" style="color: {gitColor}">{gitFileStatus.get(entry.path)}</span>
       {/if}
@@ -1505,9 +1550,16 @@
   .git-badge {
     font-size: 9px;
     font-weight: 700;
-    margin-left: auto;
     flex-shrink: 0;
     opacity: 0.8;
+  }
+
+  .git-badge:first-of-type {
+    margin-left: auto;
+  }
+
+  .remote-badge {
+    margin-right: 2px;
   }
 
   /* Create input */
