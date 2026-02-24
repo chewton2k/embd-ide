@@ -36,3 +36,6 @@ brew install rust
 npm run tauri:build
 ```
 Builds the app and moves it to your application folder.
+
+
+### [Feedback Form](https://docs.google.com/forms/d/e/1FAIpQLSe1Dsog4TyfOHtNnQaMMKLqfcnWlTFNW2U9RcAnF-E5PB_NCw/viewform?usp=publish-editor)
