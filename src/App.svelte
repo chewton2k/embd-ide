@@ -12,7 +12,7 @@
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
-  import { openFiles, activeFile, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus } from './lib/stores.ts';
+  import { openFiles, activeFile, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab } from './lib/stores.ts';
   import { onMount } from 'svelte';
 
   const viewerExts = new Set([
@@ -146,6 +146,22 @@
       e.preventDefault();
       showFileSearch = !showFileSearch;
     }
+    // Tab navigation: Ctrl/Cmd+Shift+] or Ctrl/Cmd+Tab → next tab
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === ']') {
+      e.preventDefault();
+      nextTab();
+    }
+    // Tab navigation: Ctrl/Cmd+Shift+[ or Ctrl/Cmd+Shift+Tab → prev tab
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === '[') {
+      e.preventDefault();
+      prevTab();
+    }
+    // Ctrl/Cmd+Tab → next tab, Ctrl/Cmd+Shift+Tab → prev tab
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) prevTab();
+      else nextTab();
+    }
   }
 </script>
 
@@ -180,6 +196,8 @@
               <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
               <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
               <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
+              <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
+              <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
             </div>
           </div>
         {/if}

@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 
 export interface OpenFile {
   path: string;
@@ -112,6 +112,26 @@ export function closeFile(path: string) {
 
     return newFiles;
   });
+}
+
+export function nextTab() {
+  const files = get(openFiles);
+  const ordered = [...files.filter(f => f.pinned), ...files.filter(f => !f.pinned)];
+  if (ordered.length === 0) return;
+  const currentPath = get(activeFilePath);
+  const idx = ordered.findIndex(f => f.path === currentPath);
+  const next = ordered[(idx + 1) % ordered.length];
+  activeFilePath.set(next.path);
+}
+
+export function prevTab() {
+  const files = get(openFiles);
+  const ordered = [...files.filter(f => f.pinned), ...files.filter(f => !f.pinned)];
+  if (ordered.length === 0) return;
+  const currentPath = get(activeFilePath);
+  const idx = ordered.findIndex(f => f.path === currentPath);
+  const prev = ordered[(idx - 1 + ordered.length) % ordered.length];
+  activeFilePath.set(prev.path);
 }
 
 export function closeAllUnpinned() {
