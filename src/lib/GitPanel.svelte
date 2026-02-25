@@ -55,6 +55,9 @@
   let isPushing = $state(false);
   let commitError = $state('');
   let commitSuccess = $state('');
+  let isFetching = $state(false);
+  let isPulling = $state(false);
+  let isPullRebasing = $state(false);
   let showHistory = $state(false);
   let graphRows = $state<GitGraphRow[]>([]);
   let historyLoading = $state(false);
@@ -117,6 +120,29 @@
       gitBranch.set(newBranch ?? null);
       await fetchStatusFromBackend();
       if (showHistory) await fetchHistory();
+    } catch (e) {
+      branchError = String(e);
+    }
+  }
+
+  async function deleteBranch(e: MouseEvent, branch: BranchInfo) {
+    e.stopPropagation();
+    const root = $projectRoot;
+    if (!root) return;
+    const confirmed = await ask(
+      `Delete branch "${branch.name}"? This cannot be undone.`,
+      { title: 'Delete Branch', kind: 'warning' }
+    );
+    if (!confirmed) return;
+    branchError = '';
+    try {
+      await invoke<string>('git_delete_branch', {
+        repoPath: root,
+        branch: branch.name,
+        force: false,
+      });
+      // Refresh branch list
+      branchList = await invoke<BranchInfo[]>('git_list_branches', { repoPath: root });
     } catch (e) {
       branchError = String(e);
     }
@@ -374,6 +400,45 @@
     commitSummary = `This commit changes ${stagedFiles.length} file${stagedFiles.length !== 1 ? 's' : ''}`;
   }
 
+  async function doFetch() {
+    const root = $projectRoot;
+    if (!root) return;
+    isFetching = true;
+    commitError = '';
+    commitSuccess = '';
+    try {
+      await invoke<string>('git_fetch', { repoPath: root });
+      commitSuccess = 'Fetched';
+      await fetchAheadBehind();
+    } catch (e) {
+      commitError = `Fetch failed: ${e}`;
+    }
+    isFetching = false;
+  }
+
+  async function doPull(rebase = false) {
+    const root = $projectRoot;
+    if (!root) return;
+    if (rebase) {
+      isPullRebasing = true;
+    } else {
+      isPulling = true;
+    }
+    commitError = '';
+    commitSuccess = '';
+    try {
+      const cmd = rebase ? 'git_pull_rebase' : 'git_pull';
+      await invoke<string>(cmd, { repoPath: root });
+      commitSuccess = rebase ? 'Pulled (rebase)' : 'Pulled';
+      await fetchStatusFromBackend();
+      triggerFileTreeRefresh();
+    } catch (e) {
+      commitError = `Pull failed: ${e}`;
+    }
+    isPulling = false;
+    isPullRebasing = false;
+  }
+
   async function doCommit(andPush = false) {
     if (!commitMsg.trim() || stagedFiles.length === 0) return;
     const root = $projectRoot;
@@ -575,6 +640,9 @@
                     {branch.name}
                   {/if}
                 </span>
+                {#if !branch.is_current && !branch.is_remote}
+                  <button class="branch-delete-btn" onclick={(e: MouseEvent) => deleteBranch(e, branch)} title="Delete branch">✕</button>
+                {/if}
               </div>
             {/each}
             {#if filteredBranches.length === 0 && !branchLoading}
@@ -584,6 +652,19 @@
         {/if}
       </div>
     {/if}
+  </div>
+
+  <!-- Git Actions -->
+  <div class="git-actions">
+    <button class="git-action-btn" disabled={isFetching} onclick={doFetch} title="Fetch from remote">
+      {isFetching ? 'Fetching...' : 'Fetch'}
+    </button>
+    <button class="git-action-btn" disabled={isPulling} onclick={() => doPull(false)} title="Pull from remote">
+      {isPulling ? 'Pulling...' : 'Pull'}
+    </button>
+    <button class="git-action-btn" disabled={isPullRebasing} onclick={() => doPull(true)} title="Pull with rebase">
+      {isPullRebasing ? 'Rebasing...' : 'Pull Rebase'}
+    </button>
   </div>
 
   <div class="scroll-area">
@@ -907,6 +988,30 @@
     color: var(--text-muted);
   }
 
+  .branch-delete-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 4px;
+    border-radius: 3px;
+    opacity: 0;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    background: none;
+    border: none;
+  }
+
+  .branch-item:hover .branch-delete-btn {
+    opacity: 1;
+  }
+
+  .branch-delete-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--error);
+  }
+
   .branch-loading,
   .branch-error {
     padding: 8px 10px;
@@ -930,6 +1035,36 @@
   .upstream {
     color: var(--text-muted);
     font-size: 10px;
+  }
+
+  .git-actions {
+    display: flex;
+    gap: 4px;
+    padding: 4px 10px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .git-action-btn {
+    flex: 1;
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .git-action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .git-action-btn:not(:disabled):hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
   }
 
   .conflict-header {

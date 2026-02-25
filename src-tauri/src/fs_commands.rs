@@ -927,9 +927,105 @@ pub fn git_push(state: tauri::State<'_, ProjectRootState>, repo_path: String) ->
         .map_err(|e| e.to_string())?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        // If no upstream is set, retry with --set-upstream
+        if stderr.contains("no upstream") || stderr.contains("has no upstream branch") {
+            let branch_output = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(&repo_path)
+                .output()
+                .map_err(|e| e.to_string())?;
+            let branch_name = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+            if branch_name.is_empty() {
+                return Err(stderr);
+            }
+            let retry = Command::new("git")
+                .args(["push", "--set-upstream", "origin", &branch_name])
+                .current_dir(&repo_path)
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !retry.status.success() {
+                return Err(String::from_utf8_lossy(&retry.stderr).to_string());
+            }
+            return Ok(String::from_utf8_lossy(&retry.stderr).to_string());
+        }
         return Err(stderr);
     }
     Ok(String::from_utf8_lossy(&output.stderr).to_string()) // git push outputs to stderr
+}
+
+#[tauri::command]
+pub fn git_fetch(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+    validate_repo_path(&repo_path, &state)?;
+    let output = Command::new("git")
+        .args(["fetch"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stderr).to_string())
+}
+
+#[tauri::command]
+pub fn git_pull(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+    validate_repo_path(&repo_path, &state)?;
+    let output = Command::new("git")
+        .args(["pull"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    Ok(format!("{}{}", stdout, stderr))
+}
+
+#[tauri::command]
+pub fn git_pull_rebase(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+    validate_repo_path(&repo_path, &state)?;
+    let output = Command::new("git")
+        .args(["pull", "--rebase"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    Ok(format!("{}{}", stdout, stderr))
+}
+
+#[tauri::command]
+pub fn git_delete_branch(state: tauri::State<'_, ProjectRootState>, repo_path: String, branch: String, force: bool) -> Result<String, String> {
+    validate_repo_path(&repo_path, &state)?;
+    // Sanitize branch name
+    if branch.contains("..") || branch.contains(' ') {
+        return Err("Invalid branch name".to_string());
+    }
+    // Prevent deleting the current branch
+    let head_output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    let current_branch = String::from_utf8_lossy(&head_output.stdout).trim().to_string();
+    if branch == current_branch {
+        return Err("Cannot delete the currently checked-out branch".to_string());
+    }
+    let flag = if force { "-D" } else { "-d" };
+    let output = Command::new("git")
+        .args(["branch", flag, &branch])
+        .current_dir(&repo_path)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 #[derive(Serialize, Clone)]
