@@ -557,7 +557,8 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
             (b'A', _) => "A",     // staged new file
             (b'R', _) => "A",     // renamed (treat as staged)
             (b'M', b' ') | (b'M', b'\0') => "S", // staged modified only
-            (b'D', _) | (_, b'D') => "D", // deleted
+            (b'D', b' ') | (b'D', b'\0') => "S", // staged deletion
+            (_, b'D') => "D", // unstaged deletion
             (_, b'M') => "M",     // modified in worktree (includes staged + further modified)
             _ => "M",
         };
