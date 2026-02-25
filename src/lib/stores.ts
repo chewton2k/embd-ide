@@ -394,6 +394,48 @@ export const THEMES: ThemePreset[] = [
       termBrightBlack: '#636d83', termBrightWhite: '#9da5b4',
     },
   },
+  {
+    id: 'sandstone',
+    name: 'Sandstone',
+    colors: {
+      bgPrimary: '#f5f0e8', bgSecondary: '#ece5d8', bgTertiary: '#e3dace', bgSurface: '#d9cfc0',
+      textPrimary: '#3e3529', textSecondary: '#5c5143', textMuted: '#8c7f6e',
+      accent: '#b07d3a', accentHover: '#c4913e', border: '#cdc2b0',
+      success: '#5a8a3c', warning: '#c48c2a', error: '#c45040',
+      termBg: '#e3dace', termFg: '#3e3529', termCursor: '#b07d3a', termSelection: '#cdc2b0',
+      termBlack: '#8c7f6e', termRed: '#c45040', termGreen: '#5a8a3c', termYellow: '#c48c2a',
+      termBlue: '#4a7a9b', termMagenta: '#8a5a9b', termCyan: '#4a8a7a', termWhite: '#3e3529',
+      termBrightBlack: '#7a6e5e', termBrightWhite: '#5c5143',
+    },
+  },
+  {
+    id: 'midnight',
+    name: 'Midnight',
+    colors: {
+      bgPrimary: '#0a0a0a', bgSecondary: '#060606', bgTertiary: '#000000', bgSurface: '#161616',
+      textPrimary: '#d4d4d4', textSecondary: '#a0a0a0', textMuted: '#5a5a5a',
+      accent: '#c0c0c0', accentHover: '#e0e0e0', border: '#222222',
+      success: '#a0a0a0', warning: '#909090', error: '#808080',
+      termBg: '#000000', termFg: '#d4d4d4', termCursor: '#c0c0c0', termSelection: '#222222',
+      termBlack: '#333333', termRed: '#d4d4d4', termGreen: '#b0b0b0', termYellow: '#909090',
+      termBlue: '#a0a0a0', termMagenta: '#c0c0c0', termCyan: '#b0b0b0', termWhite: '#d4d4d4',
+      termBrightBlack: '#5a5a5a', termBrightWhite: '#a0a0a0',
+    },
+  },
+  {
+    id: 'ash',
+    name: 'Ash',
+    colors: {
+      bgPrimary: '#2a2a2a', bgSecondary: '#242424', bgTertiary: '#1e1e1e', bgSurface: '#353535',
+      textPrimary: '#d0d0d0', textSecondary: '#a8a8a8', textMuted: '#6e6e6e',
+      accent: '#909090', accentHover: '#a8a8a8', border: '#404040',
+      success: '#8c8c8c', warning: '#7a7a7a', error: '#686868',
+      termBg: '#1e1e1e', termFg: '#d0d0d0', termCursor: '#909090', termSelection: '#404040',
+      termBlack: '#404040', termRed: '#d0d0d0', termGreen: '#b0b0b0', termYellow: '#989898',
+      termBlue: '#a0a0a0', termMagenta: '#b8b8b8', termCyan: '#a8a8a8', termWhite: '#d0d0d0',
+      termBrightBlack: '#6e6e6e', termBrightWhite: '#a8a8a8',
+    },
+  },
 ];
 
 export const currentThemeId = writable<string>(
