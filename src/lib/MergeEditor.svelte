@@ -81,7 +81,12 @@
 
     try {
       const resolved = buildResolvedContent(rawContent, hunks, resolutions);
-      const relPath = filePath.startsWith(root) ? filePath.slice(root.length + 1) : filePath;
+      const normalizedRoot = root.replace(/\/+$/, '');
+      const relPath = filePath === normalizedRoot
+        ? ''
+        : filePath.startsWith(normalizedRoot + '/')
+          ? filePath.slice(normalizedRoot.length + 1)
+          : filePath;
 
       await invoke('git_resolve_conflict', {
         repoPath: root,

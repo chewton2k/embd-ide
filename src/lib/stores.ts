@@ -130,7 +130,7 @@ export function prevTab() {
   if (ordered.length === 0) return;
   const currentPath = get(activeFilePath);
   const idx = ordered.findIndex(f => f.path === currentPath);
-  const prev = idx === 1 ? ordered[ordered.length - 1] : ordered[(idx - 1 + ordered.length) % ordered.length];
+  const prev = idx === -1 ? ordered[ordered.length - 1] : ordered[(idx - 1 + ordered.length) % ordered.length];
   activeFilePath.set(prev.path);
 }
 
