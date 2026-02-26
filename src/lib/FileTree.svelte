@@ -6,6 +6,7 @@
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch } from './stores.ts';
+  import { saveSessionNow } from './session';
 
   function isValidName(name: string): boolean {
     return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';
@@ -18,7 +19,7 @@
     children: FileEntry[] | null;
   }
 
-  let { onFileSelect, onSearchFiles }: { onFileSelect: (path: string, name: string) => void; onSearchFiles?: () => void } = $props();
+  let { onFileSelect, onSearchFiles, onOpenFolder: onOpenFolderProp }: { onFileSelect: (path: string, name: string) => void; onSearchFiles?: () => void; onOpenFolder?: (fn: (path: string) => Promise<void>) => void } = $props();
   let files = $state<FileEntry[]>([]);
   let expandedDirs = $state<Set<string>>(new Set());
   let rootPath = $state<string | null>(null);
@@ -347,20 +348,26 @@
     }
   }
 
+  async function openFolderByPath(path: string) {
+    // Save current session before switching
+    if (rootPath) {
+      saveSessionNow(rootPath);
+    }
+    rootPath = path;
+    projectRoot.set(rootPath);
+    await invoke('set_project_root', { path: rootPath });
+    closeAllUnpinned();
+    expandedDirs = new Set();
+    await loadDirectory(rootPath);
+    await fetchGitStatus();
+    startWatching(rootPath);
+    startGitPolling();
+  }
+
   async function openFolder() {
     const selected = await open({ directory: true, multiple: false });
     if (selected) {
-      rootPath = selected as string;
-      projectRoot.set(rootPath);
-      // Register project root with backend for path validation
-      await invoke('set_project_root', { path: rootPath });
-      // Close all non-pinned tabs when switching projects
-      closeAllUnpinned();
-      expandedDirs = new Set();
-      await loadDirectory(rootPath);
-      await fetchGitStatus();
-      startWatching(rootPath);
-      startGitPolling();
+      await openFolderByPath(selected as string);
     }
   }
 
@@ -1098,6 +1105,9 @@
       if (first) { first = false; return; }
       refreshTree();
     });
+
+    // Expose openFolderByPath to parent
+    onOpenFolderProp?.(openFolderByPath);
   });
 
   onDestroy(() => {

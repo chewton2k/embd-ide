@@ -12,8 +12,12 @@
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
-  import { openFiles, activeFile, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab } from './lib/stores.ts';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { exists } from '@tauri-apps/plugin-fs';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, togglePin } from './lib/stores.ts';
+  import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
   const viewerExts = new Set([
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg',
@@ -27,6 +31,42 @@
 
   function isJsonFile(path: string): boolean {
     return path.toLowerCase().endsWith('.json');
+  }
+
+  let recentProjects = $state<RecentProject[]>([]);
+  let openFolderByPath: ((path: string) => Promise<void>) | null = null;
+
+  function handleOpenFolder(fn: (path: string) => Promise<void>) {
+    openFolderByPath = fn;
+  }
+
+  async function openRecentProject(project: RecentProject) {
+    if (!openFolderByPath) return;
+    const folderExists = await exists(project.path);
+    if (!folderExists) {
+      await removeRecentProject(project.path);
+      recentProjects = recentProjects.filter(p => p.path !== project.path);
+      alert(`Project folder no longer exists:\n${project.path}`);
+      return;
+    }
+    await openFolderByPath(project.path);
+    // Restore session files
+    for (const file of project.session.open_files) {
+      const fileExists = await exists(file.path);
+      if (!fileExists) continue;
+      const name = file.path.split('/').pop() || file.path;
+      addFile(file.path, name);
+      if (file.pinned) {
+        togglePin(file.path);
+      }
+    }
+    // Restore active file
+    if (project.session.active_file) {
+      const activeExists = await exists(project.session.active_file);
+      if (activeExists) {
+        activeFilePath.set(project.session.active_file);
+      }
+    }
   }
 
   let showChat = $state(false);
@@ -89,13 +129,31 @@
 
   let appVersion = $state('');
 
-  onMount(() => {
+  onMount(async () => {
     getVersion().then(v => appVersion = v);
     // Sync stored API key to backend on startup
     const storedKey = localStorage.getItem('embd-api-key');
     if (storedKey) {
       invoke('set_api_key', { key: storedKey }).catch(() => {});
     }
+    // Load recent projects
+    try {
+      recentProjects = await getRecentProjects();
+    } catch { /* ignore */ }
+    // Save session on window close — await the save before destroying
+    const appWindow = getCurrentWindow();
+    await appWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      const root = get(projectRoot);
+      if (root) {
+        try {
+          await saveSessionNow(root);
+        } catch (e) {
+          console.error('Failed to save session on close:', e);
+        }
+      }
+      await appWindow.destroy();
+    });
   });
 
   // Apply theme colors to CSS custom properties
@@ -132,6 +190,14 @@
   // Apply UI density
   $effect(() => {
     document.documentElement.dataset.density = $uiDensity;
+  });
+
+  // Auto-save session when open files or active file changes
+  $effect(() => {
+    // Subscribe to reactive stores
+    const _ = $openFiles;
+    const __ = $activeFile;
+    scheduleSaveSession();
   });
 
   function handleKeydown(e: KeyboardEvent) {
@@ -175,7 +241,7 @@
 <div class="ide-layout">
   <div class="ide-top">
     <div class="sidebar" style="width: {sidebarWidth}px">
-      <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} />
+      <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} onOpenFolder={handleOpenFolder} />
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
@@ -195,6 +261,17 @@
           {:else}
             <div class="welcome">
               <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
+              {#if recentProjects.length > 0}
+                <div class="recent-projects">
+                  <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
+                  {#each recentProjects as project}
+                    <button class="recent-item" onclick={() => openRecentProject(project)}>
+                      <span class="recent-name">{project.name}</span>
+                      <span class="recent-path">{project.path}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
               <p>Open a file from the sidebar to start editing</p>
               <div class="shortcuts">
                 <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
@@ -368,6 +445,47 @@
     flex-direction: column;
     gap: 8px;
     font-size: 12px;
+  }
+
+  .recent-projects {
+    display: flex;
+    flex-direction: column;
+    width: 340px;
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+
+  .recent-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s;
+  }
+
+  .recent-item:hover {
+    border-color: var(--accent);
+  }
+
+  .recent-name {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .recent-path {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
   }
 
   .shortcuts kbd {

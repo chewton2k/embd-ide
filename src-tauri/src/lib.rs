@@ -1,6 +1,9 @@
 mod ai;
 mod fs_commands;
+mod session;
 mod terminal;
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,6 +19,9 @@ pub fn run() {
         .manage(terminal_state)
         .manage(project_root_state)
         .manage(api_key_state)
+        .manage(session::AppStateHandle(std::sync::Mutex::new(
+            session::AppState::default(),
+        )))
         .invoke_handler(tauri::generate_handler![
             fs_commands::set_project_root,
             fs_commands::read_dir_tree,
@@ -59,6 +65,9 @@ pub fn run() {
             terminal::resize_terminal,
             ai::set_api_key,
             ai::ai_chat,
+            session::get_recent_projects,
+            session::save_session,
+            session::remove_recent_project,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -68,6 +77,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // Preload session state from disk
+            let loaded = session::load_state_from_disk(app.handle());
+            let handle = app.state::<session::AppStateHandle>();
+            *handle.0.lock().unwrap() = loaded;
             Ok(())
         })
         .run(tauri::generate_context!())
