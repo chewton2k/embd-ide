@@ -55,7 +55,8 @@
     if (dragging === 'sidebar') {
       sidebarWidth = Math.max(140, Math.min(500, e.clientX));
     } else if (dragging === 'terminal') {
-      const windowH = window.innerHeight - 24; // minus statusbar
+      const sbHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--density-statusbar-height') || '24');
+      const windowH = window.innerHeight - sbHeight;
       terminalHeight = Math.max(100, Math.min(windowH - 150, windowH - e.clientY));
     } else if (dragging === 'chat') {
       chatWidth = Math.max(200, Math.min(600, window.innerWidth - e.clientX));
@@ -172,80 +173,82 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="ide-layout">
-  <div class="sidebar" style="width: {sidebarWidth}px">
-    <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} />
-  </div>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
+  <div class="ide-top">
+    <div class="sidebar" style="width: {sidebarWidth}px">
+      <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} />
+    </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
 
-  <div class="main-area">
-    <div class="editor-area" style="flex: 1; min-height: 0;">
-      <Tabs />
-      <div class="editor-container">
-        {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
-          <MergeEditor filePath={$activeFile} />
-        {:else if $activeFile && isJsonFile($activeFile)}
-          <JSONViewer filePath={$activeFile} />
-        {:else if $activeFile && isViewerFile($activeFile)}
-          <FileViewer filePath={$activeFile} />
-        {:else if $activeFile}
-          <Editor filePath={$activeFile} />
-        {:else}
-          <div class="welcome">
-            <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
-            <p>Open a file from the sidebar to start editing</p>
-            <div class="shortcuts">
-              <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
-              <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
-              <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
-              <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
-              <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
-              <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
-              <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
+    <div class="main-area">
+      <div class="editor-area" style="flex: 1; min-height: 0;">
+        <Tabs />
+        <div class="editor-container">
+          {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
+            <MergeEditor filePath={$activeFile} />
+          {:else if $activeFile && isJsonFile($activeFile)}
+            <JSONViewer filePath={$activeFile} />
+          {:else if $activeFile && isViewerFile($activeFile)}
+            <FileViewer filePath={$activeFile} />
+          {:else if $activeFile}
+            <Editor filePath={$activeFile} />
+          {:else}
+            <div class="welcome">
+              <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
+              <p>Open a file from the sidebar to start editing</p>
+              <div class="shortcuts">
+                <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
+                <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
+                <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
+                <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
+                <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
+                <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
+                <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
+              </div>
             </div>
-          </div>
-        {/if}
+          {/if}
+        </div>
+      </div>
+
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="resize-handle resize-handle-row" class:hidden={!$showTerminal} onmousedown={startDrag('terminal')}></div>
+      <div class="bottom-panel" class:hidden={!$showTerminal} style="height: {terminalHeight}px;">
+        <Terminal />
       </div>
     </div>
 
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-row" class:hidden={!$showTerminal} onmousedown={startDrag('terminal')}></div>
-    <div class="bottom-panel" class:hidden={!$showTerminal} style="height: {terminalHeight}px;">
-      <Terminal />
-    </div>
+    {#if showChat}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="resize-handle resize-handle-col" onmousedown={startDrag('chat')}></div>
+      <div class="chat-panel" style="width: {chatWidth}px">
+        <div class="panel-header">
+          <span>AI Chat</span>
+          <button onclick={toggleChat}>✕</button>
+        </div>
+        <ChatPanel />
+      </div>
+    {/if}
+
+    {#if showGit}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="resize-handle resize-handle-col" onmousedown={startDrag('git')}></div>
+      <div class="git-panel-container" style="width: {gitWidth}px">
+        <div class="panel-header">
+          <span>Source Control</span>
+          <button onclick={toggleGit}>✕</button>
+        </div>
+        <GitPanel />
+      </div>
+    {/if}
+
+    {#if $showSettings}
+      <Settings />
+    {/if}
+
+    {#if showFileSearch}
+      <FileSearch onClose={() => showFileSearch = false} />
+    {/if}
   </div>
-
-  {#if showChat}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-col" onmousedown={startDrag('chat')}></div>
-    <div class="chat-panel" style="width: {chatWidth}px">
-      <div class="panel-header">
-        <span>AI Chat</span>
-        <button onclick={toggleChat}>✕</button>
-      </div>
-      <ChatPanel />
-    </div>
-  {/if}
-
-  {#if showGit}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-col" onmousedown={startDrag('git')}></div>
-    <div class="git-panel-container" style="width: {gitWidth}px">
-      <div class="panel-header">
-        <span>Source Control</span>
-        <button onclick={toggleGit}>✕</button>
-      </div>
-      <GitPanel />
-    </div>
-  {/if}
-
-  {#if $showSettings}
-    <Settings />
-  {/if}
-
-  {#if showFileSearch}
-    <FileSearch onClose={() => showFileSearch = false} />
-  {/if}
 
   <div class="statusbar">
     <div class="statusbar-left">
@@ -298,10 +301,18 @@
 
 <style>
   .ide-layout {
-    display: flex;
+    display: grid;
+    grid-template-rows: 1fr var(--density-statusbar-height, 24px);
     height: 100vh;
     width: 100vw;
-    flex-wrap: wrap;
+    overflow: hidden;
+  }
+
+  .ide-top {
+    display: flex;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .sidebar {
@@ -309,9 +320,9 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 24px);
     overflow: hidden;
     flex-shrink: 0;
+    min-width: 100px;
   }
 
   .main-area {
@@ -319,7 +330,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    height: calc(100vh - 24px);
+    min-height: 0;
   }
 
   .editor-area {
@@ -382,7 +393,6 @@
   .resize-handle-col {
     width: 3px;
     cursor: col-resize;
-    height: calc(100vh - 24px);
   }
 
   .resize-handle-row {
@@ -431,8 +441,9 @@
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 24px);
+    min-height: 0;
     flex-shrink: 0;
+    min-width: 150px;
   }
 
   .git-panel-container {
@@ -440,13 +451,12 @@
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 24px);
+    min-height: 0;
     flex-shrink: 0;
+    min-width: 200px;
   }
 
   .statusbar {
-    width: 100%;
-    height: var(--density-statusbar-height, 24px);
     background: var(--accent);
     color: var(--bg-tertiary);
     display: flex;
@@ -455,18 +465,34 @@
     padding: 0 12px;
     font-size: 12px;
     font-weight: 500;
+    min-width: 0;
+    overflow: hidden;
+    flex-shrink: 0;
   }
 
   .statusbar-left, .statusbar-right {
     display: flex;
     gap: 12px;
     align-items: center;
+    min-width: 0;
+    flex-shrink: 1;
+    overflow: hidden;
+  }
+
+  .statusbar-left {
+    flex: 1;
+  }
+
+  .statusbar-right {
+    flex-shrink: 0;
   }
 
   .statusbar-btn {
     color: var(--bg-tertiary);
     font-size: 12px;
     font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .statusbar-btn:hover {
