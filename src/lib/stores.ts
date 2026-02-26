@@ -259,6 +259,11 @@ export interface ThemeColors {
   termWhite: string;
   termBrightBlack: string;
   termBrightWhite: string;
+  // Optional git-specific overrides (fall back to accent/success/error if unset)
+  gitGraphAccent?: string;
+  diffAdd?: string;
+  diffDel?: string;
+  gitNotification?: string;
 }
 
 export interface ThemePreset {
@@ -434,6 +439,7 @@ export const THEMES: ThemePreset[] = [
       termBlack: '#404040', termRed: '#d0d0d0', termGreen: '#b0b0b0', termYellow: '#989898',
       termBlue: '#a0a0a0', termMagenta: '#b8b8b8', termCyan: '#a8a8a8', termWhite: '#d0d0d0',
       termBrightBlack: '#6e6e6e', termBrightWhite: '#a8a8a8',
+      gitGraphAccent: '#e8a45f', diffAdd: '#a6e3a1', diffDel: '#f38ba8', gitNotification: '#e8a45f',
     },
   },
 ];

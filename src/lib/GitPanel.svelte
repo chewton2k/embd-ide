@@ -167,7 +167,7 @@
   }
 
   const GRAPH_COLORS = [
-    'var(--accent)',
+    'var(--git-graph-accent)',
     'var(--success)',
     'var(--warning)',
     '#e06c75',
@@ -1187,13 +1187,13 @@
   }
 
   .diff-line.add {
-    background: color-mix(in srgb, var(--success) 15%, transparent);
-    color: var(--success);
+    background: color-mix(in srgb, var(--diff-add) 15%, transparent);
+    color: var(--diff-add);
   }
 
   .diff-line.del {
-    background: color-mix(in srgb, var(--error) 15%, transparent);
-    color: var(--error);
+    background: color-mix(in srgb, var(--diff-del) 15%, transparent);
+    color: var(--diff-del);
   }
 
   .diff-line.ctx {
@@ -1320,7 +1320,7 @@
 
   .commit-success {
     font-size: 11px;
-    color: var(--success);
+    color: var(--git-notification);
     margin-bottom: 4px;
   }
 
@@ -1376,7 +1376,7 @@
 
   .graph-hash {
     font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    color: var(--accent);
+    color: var(--git-graph-accent);
     flex-shrink: 0;
     font-size: 10px;
     margin-left: 4px;

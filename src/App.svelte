@@ -115,6 +115,10 @@
     root.style.setProperty('--success', c.success);
     root.style.setProperty('--warning', c.warning);
     root.style.setProperty('--error', c.error);
+    root.style.setProperty('--git-graph-accent', c.gitGraphAccent || c.accent);
+    root.style.setProperty('--diff-add', c.diffAdd || c.success);
+    root.style.setProperty('--diff-del', c.diffDel || c.error);
+    root.style.setProperty('--git-notification', c.gitNotification || c.success);
     root.style.setProperty('--tab-active', c.bgPrimary);
     root.style.setProperty('--tab-inactive', c.bgSecondary);
   });
