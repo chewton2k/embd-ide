@@ -22,7 +22,6 @@ pub fn set_api_key(state: tauri::State<'_, ApiKeyState>, key: String) -> Result<
 pub struct AiRequest {
     pub prompt: String,
     pub context: Option<String>,
-    pub api_key: Option<String>, // kept for backwards compat, prefer stored key
 }
 
 #[derive(Serialize)]
@@ -51,13 +50,11 @@ struct ContentBlock {
 
 #[tauri::command]
 pub async fn ai_chat(state: tauri::State<'_, ApiKeyState>, request: AiRequest) -> Result<String, String> {
-    // Prefer stored key, fall back to request key for backwards compat
     let api_key = {
         let stored = state.lock().map_err(|e| e.to_string())?;
         stored.clone()
     };
     let api_key = api_key
-        .or(request.api_key)
         .ok_or_else(|| "No API key configured. Set it in Settings.".to_string())?;
 
     if api_key.is_empty() {

@@ -23,9 +23,13 @@
       "identifier": "fs:scope",
       "allow": [
         { "path": "$HOME/**" },
-        { "path": "$DESKTOP/**" },
-        { "path": "$DOCUMENT/**" },
-        { "path": "/tmp/**" }
+        { "path": "/tmp/**" },
+        { "path": "/mnt/**" },
+        { "path": "/media/**" },
+        { "path": "/Volumes/**" },
+        { "path": "/opt/**" },
+        { "path": "/var/**" },
+        { "path": "/usr/**" }
       ]
     }
   ]

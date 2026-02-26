@@ -3,6 +3,7 @@
   import Editor from './lib/Editor.svelte';
   import FileViewer from './lib/FileViewer.svelte';
   import JSONViewer from './lib/JSONViewer.svelte';
+  import MergeEditor from './lib/MergeEditor.svelte';
   import Tabs from './lib/Tabs.svelte';
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
@@ -11,8 +12,12 @@
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getVersion } from '@tauri-apps/api/app';
-  import { openFiles, activeFile, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey } from './lib/stores.ts';
-  import { onMount, onDestroy } from 'svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { exists } from '@tauri-apps/plugin-fs';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, togglePin } from './lib/stores.ts';
+  import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
+  import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
 
   const viewerExts = new Set([
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'svg',
@@ -26,6 +31,42 @@
 
   function isJsonFile(path: string): boolean {
     return path.toLowerCase().endsWith('.json');
+  }
+
+  let recentProjects = $state<RecentProject[]>([]);
+  let openFolderByPath: ((path: string) => Promise<void>) | null = null;
+
+  function handleOpenFolder(fn: (path: string) => Promise<void>) {
+    openFolderByPath = fn;
+  }
+
+  async function openRecentProject(project: RecentProject) {
+    if (!openFolderByPath) return;
+    const folderExists = await exists(project.path);
+    if (!folderExists) {
+      await removeRecentProject(project.path);
+      recentProjects = recentProjects.filter(p => p.path !== project.path);
+      alert(`Project folder no longer exists:\n${project.path}`);
+      return;
+    }
+    await openFolderByPath(project.path);
+    // Restore session files
+    for (const file of project.session.open_files) {
+      const fileExists = await exists(file.path);
+      if (!fileExists) continue;
+      const name = file.path.split(/[/\\]/).pop() || file.path;
+      addFile(file.path, name);
+      if (file.pinned) {
+        togglePin(file.path);
+      }
+    }
+    // Restore active file
+    if (project.session.active_file) {
+      const activeExists = await exists(project.session.active_file);
+      if (activeExists) {
+        activeFilePath.set(project.session.active_file);
+      }
+    }
   }
 
   let showChat = $state(false);
@@ -54,7 +95,8 @@
     if (dragging === 'sidebar') {
       sidebarWidth = Math.max(140, Math.min(500, e.clientX));
     } else if (dragging === 'terminal') {
-      const windowH = window.innerHeight - 24; // minus statusbar
+      const sbHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--density-statusbar-height') || '24');
+      const windowH = window.innerHeight - sbHeight;
       terminalHeight = Math.max(100, Math.min(windowH - 150, windowH - e.clientY));
     } else if (dragging === 'chat') {
       chatWidth = Math.max(200, Math.min(600, window.innerWidth - e.clientX));
@@ -85,44 +127,33 @@
     if (showGit) showChat = false;
   }
 
-  // Git branch polling
-  let branchInterval: ReturnType<typeof setInterval> | null = null;
-
-  async function fetchGitBranch(root: string | null) {
-    if (!root) {
-      gitBranch.set(null);
-      return;
-    }
-    try {
-      const branch = await invoke<string | null>('get_git_branch', { path: root });
-      gitBranch.set(branch);
-    } catch {
-      gitBranch.set(null);
-    }
-  }
-
   let appVersion = $state('');
 
-  onMount(() => {
+  onMount(async () => {
     getVersion().then(v => appVersion = v);
     // Sync stored API key to backend on startup
     const storedKey = localStorage.getItem('embd-api-key');
     if (storedKey) {
       invoke('set_api_key', { key: storedKey }).catch(() => {});
     }
-    const unsub = projectRoot.subscribe((root) => {
-      fetchGitBranch(root);
+    // Load recent projects
+    try {
+      recentProjects = await getRecentProjects();
+    } catch { /* ignore */ }
+    // Save session on window close — await the save before destroying
+    const appWindow = getCurrentWindow();
+    await appWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      const root = get(projectRoot);
+      if (root) {
+        try {
+          await saveSessionNow(root);
+        } catch (e) {
+          console.error('Failed to save session on close:', e);
+        }
+      }
+      await appWindow.destroy();
     });
-    // Poll every 3 seconds for branch changes
-    branchInterval = setInterval(() => {
-      const root = $projectRoot;
-      if (root) fetchGitBranch(root);
-    }, 3000);
-    return unsub;
-  });
-
-  onDestroy(() => {
-    if (branchInterval) clearInterval(branchInterval);
   });
 
   // Apply theme colors to CSS custom properties
@@ -143,6 +174,10 @@
     root.style.setProperty('--success', c.success);
     root.style.setProperty('--warning', c.warning);
     root.style.setProperty('--error', c.error);
+    root.style.setProperty('--git-graph-accent', c.gitGraphAccent || c.accent);
+    root.style.setProperty('--diff-add', c.diffAdd || c.success);
+    root.style.setProperty('--diff-del', c.diffDel || c.error);
+    root.style.setProperty('--git-notification', c.gitNotification || c.success);
     root.style.setProperty('--tab-active', c.bgPrimary);
     root.style.setProperty('--tab-inactive', c.bgSecondary);
   });
@@ -155,6 +190,14 @@
   // Apply UI density
   $effect(() => {
     document.documentElement.dataset.density = $uiDensity;
+  });
+
+  // Auto-save session when open files or active file changes
+  $effect(() => {
+    // Subscribe to reactive stores
+    const _ = $openFiles;
+    const __ = $activeFile;
+    scheduleSaveSession();
   });
 
   function handleKeydown(e: KeyboardEvent) {
@@ -174,82 +217,115 @@
       e.preventDefault();
       showFileSearch = !showFileSearch;
     }
+    // Tab navigation: Ctrl/Cmd+Shift+] or Ctrl/Cmd+Tab → next tab
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === ']') {
+      e.preventDefault();
+      nextTab();
+    }
+    // Tab navigation: Ctrl/Cmd+Shift+[ or Ctrl/Cmd+Shift+Tab → prev tab
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === '[') {
+      e.preventDefault();
+      prevTab();
+    }
+    // Ctrl/Cmd+Tab → next tab, Ctrl/Cmd+Shift+Tab → prev tab
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) prevTab();
+      else nextTab();
+    }
   }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="ide-layout">
-  <div class="sidebar" style="width: {sidebarWidth}px">
-    <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} />
-  </div>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
+  <div class="ide-top">
+    <div class="sidebar" style="width: {sidebarWidth}px">
+      <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} onOpenFolder={handleOpenFolder} />
+    </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
 
-  <div class="main-area">
-    <div class="editor-area" style="flex: 1; min-height: 0;">
-      <Tabs />
-      <div class="editor-container">
-        {#if $activeFile && isJsonFile($activeFile)}
-          <JSONViewer filePath={$activeFile} />
-        {:else if $activeFile && isViewerFile($activeFile)}
-          <FileViewer filePath={$activeFile} />
-        {:else if $activeFile}
-          <Editor filePath={$activeFile} />
-        {:else}
-          <div class="welcome">
-            <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
-            <p>Open a file from the sidebar to start editing</p>
-            <div class="shortcuts">
-              <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
-              <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
-              <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
-              <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
-              <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
+    <div class="main-area">
+      <div class="editor-area" style="flex: 1; min-height: 0;">
+        <Tabs />
+        <div class="editor-container">
+          {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
+            <MergeEditor filePath={$activeFile} />
+          {:else if $activeFile && isJsonFile($activeFile)}
+            <JSONViewer filePath={$activeFile} />
+          {:else if $activeFile && isViewerFile($activeFile)}
+            <FileViewer filePath={$activeFile} />
+          {:else if $activeFile}
+            <Editor filePath={$activeFile} />
+          {:else}
+            <div class="welcome">
+              <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
+              {#if recentProjects.length > 0}
+                <div class="recent-projects">
+                  <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
+                  {#each recentProjects as project}
+                    <button class="recent-item" onclick={() => openRecentProject(project)}>
+                      <span class="recent-name">{project.name}</span>
+                      <span class="recent-path">{project.path}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+              <p>Open a file from the sidebar to start editing</p>
+              <div class="shortcuts">
+                <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
+                <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
+                <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
+                <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
+                <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
+                <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
+                <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
+              </div>
             </div>
-          </div>
-        {/if}
+          {/if}
+        </div>
+      </div>
+
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="resize-handle resize-handle-row" class:hidden={!$showTerminal} onmousedown={startDrag('terminal')}></div>
+      <div class="bottom-panel" class:hidden={!$showTerminal} style="height: {terminalHeight}px;">
+        <Terminal />
       </div>
     </div>
 
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-row" class:hidden={!$showTerminal} onmousedown={startDrag('terminal')}></div>
-    <div class="bottom-panel" class:hidden={!$showTerminal} style="height: {terminalHeight}px;">
-      <Terminal />
-    </div>
+    {#if showChat}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="resize-handle resize-handle-col" onmousedown={startDrag('chat')}></div>
+      <div class="chat-panel" style="width: {chatWidth}px">
+        <div class="panel-header">
+          <span>AI Chat</span>
+          <button onclick={toggleChat}>✕</button>
+        </div>
+        <ChatPanel />
+      </div>
+    {/if}
+
+    {#if showGit}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="resize-handle resize-handle-col" onmousedown={startDrag('git')}></div>
+      <div class="git-panel-container" style="width: {gitWidth}px">
+        <div class="panel-header">
+          <span>Source Control</span>
+          <button onclick={toggleGit}>✕</button>
+        </div>
+        <GitPanel />
+      </div>
+    {/if}
+
+    {#if $showSettings}
+      <Settings />
+    {/if}
+
+    {#if showFileSearch}
+      <FileSearch onClose={() => showFileSearch = false} />
+    {/if}
   </div>
-
-  {#if showChat}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-col" onmousedown={startDrag('chat')}></div>
-    <div class="chat-panel" style="width: {chatWidth}px">
-      <div class="panel-header">
-        <span>AI Chat</span>
-        <button onclick={toggleChat}>✕</button>
-      </div>
-      <ChatPanel />
-    </div>
-  {/if}
-
-  {#if showGit}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-col" onmousedown={startDrag('git')}></div>
-    <div class="git-panel-container" style="width: {gitWidth}px">
-      <div class="panel-header">
-        <span>Source Control</span>
-        <button onclick={toggleGit}>✕</button>
-      </div>
-      <GitPanel />
-    </div>
-  {/if}
-
-  {#if $showSettings}
-    <Settings />
-  {/if}
-
-  {#if showFileSearch}
-    <FileSearch onClose={() => showFileSearch = false} />
-  {/if}
 
   <div class="statusbar">
     <div class="statusbar-left">
@@ -302,10 +378,18 @@
 
 <style>
   .ide-layout {
-    display: flex;
+    display: grid;
+    grid-template-rows: 1fr var(--density-statusbar-height, 24px);
     height: 100vh;
     width: 100vw;
-    flex-wrap: wrap;
+    overflow: hidden;
+  }
+
+  .ide-top {
+    display: flex;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .sidebar {
@@ -313,9 +397,9 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 24px);
     overflow: hidden;
     flex-shrink: 0;
+    min-width: 100px;
   }
 
   .main-area {
@@ -323,7 +407,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
-    height: calc(100vh - 24px);
+    min-height: 0;
   }
 
   .editor-area {
@@ -363,6 +447,47 @@
     font-size: 12px;
   }
 
+  .recent-projects {
+    display: flex;
+    flex-direction: column;
+    width: 340px;
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+
+  .recent-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.15s;
+  }
+
+  .recent-item:hover {
+    border-color: var(--accent);
+  }
+
+  .recent-name {
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .recent-path {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
   .shortcuts kbd {
     background: var(--bg-surface);
     padding: 2px 6px;
@@ -386,7 +511,6 @@
   .resize-handle-col {
     width: 3px;
     cursor: col-resize;
-    height: calc(100vh - 24px);
   }
 
   .resize-handle-row {
@@ -435,8 +559,9 @@
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 24px);
+    min-height: 0;
     flex-shrink: 0;
+    min-width: 150px;
   }
 
   .git-panel-container {
@@ -444,13 +569,12 @@
     border-left: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 24px);
+    min-height: 0;
     flex-shrink: 0;
+    min-width: 200px;
   }
 
   .statusbar {
-    width: 100%;
-    height: var(--density-statusbar-height, 24px);
     background: var(--accent);
     color: var(--bg-tertiary);
     display: flex;
@@ -459,18 +583,34 @@
     padding: 0 12px;
     font-size: 12px;
     font-weight: 500;
+    min-width: 0;
+    overflow: hidden;
+    flex-shrink: 0;
   }
 
   .statusbar-left, .statusbar-right {
     display: flex;
     gap: 12px;
     align-items: center;
+    min-width: 0;
+    flex-shrink: 1;
+    overflow: hidden;
+  }
+
+  .statusbar-left {
+    flex: 1;
+  }
+
+  .statusbar-right {
+    flex-shrink: 0;
   }
 
   .statusbar-btn {
     color: var(--bg-tertiary);
     font-size: 12px;
     font-weight: 500;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
   .statusbar-btn:hover {

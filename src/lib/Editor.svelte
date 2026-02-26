@@ -528,10 +528,17 @@
     );
   }
 
+  let previewTimer: ReturnType<typeof setTimeout> | null = null;
+
   function updatePreview(content: string) {
-    if (isMarkdown && showPreview) {
-      previewHtml = DOMPurify.sanitize(marked.parse(content) as string);
+    if (previewTimer) {
+      clearTimeout(previewTimer);
+      previewTimer = null;
     }
+    if (!isMarkdown || !showPreview) return;
+    previewTimer = setTimeout(() => {
+      previewHtml = DOMPurify.sanitize(marked.parse(content) as string);
+    }, 300);
   }
 
   function scheduleAutosave(path: string) {
@@ -892,7 +899,6 @@
   let unregisterRenameCallback: (() => void) | null = null;
 
   onMount(() => {
-    loadFile(filePath);
     window.addEventListener('keydown', handleGlobalKeydown);
 
     // Register rename callback to update cache keys
@@ -917,6 +923,7 @@
     window.removeEventListener('keydown', handleGlobalKeydown);
     if (unregisterRenameCallback) unregisterRenameCallback();
     stopWatching();
+    if (previewTimer) clearTimeout(previewTimer);
     // Save before destroying if there are pending changes
     if (autosaveTimer) {
       clearTimeout(autosaveTimer);

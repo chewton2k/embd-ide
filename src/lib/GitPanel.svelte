@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { ask } from '@tauri-apps/plugin-dialog';
-  import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh } from './stores.ts';
+  import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh, sharedGitStatus, addFile } from './stores.ts';
 
   interface GitFile {
     path: string;       // absolute path
@@ -44,6 +44,7 @@
 
   let stagedFiles = $state<GitFile[]>([]);
   let changedFiles = $state<GitFile[]>([]);
+  let conflictFiles = $state<GitFile[]>([]);
   let selectedFile = $state<GitFile | null>(null);
   let diffLines = $state<DiffLine[]>([]);
   let commitMsg = $state('');
@@ -54,7 +55,9 @@
   let isPushing = $state(false);
   let commitError = $state('');
   let commitSuccess = $state('');
-  let pollInterval: ReturnType<typeof setInterval> | null = null;
+  let isFetching = $state(false);
+  let isPullRunning = $state(false);
+  let isPullRebase = $state(false);
   let showHistory = $state(false);
   let graphRows = $state<GitGraphRow[]>([]);
   let historyLoading = $state(false);
@@ -115,8 +118,31 @@
       // Refresh branch name and status
       const newBranch = await invoke<string | null>('get_git_branch', { path: root });
       gitBranch.set(newBranch ?? null);
-      await fetchStatus();
+      await fetchStatusFromBackend();
       if (showHistory) await fetchHistory();
+    } catch (e) {
+      branchError = String(e);
+    }
+  }
+
+  async function deleteBranch(e: MouseEvent, branch: BranchInfo) {
+    e.stopPropagation();
+    const root = $projectRoot;
+    if (!root) return;
+    const confirmed = await ask(
+      `Delete branch "${branch.name}"? This cannot be undone.`,
+      { title: 'Delete Branch', kind: 'warning' }
+    );
+    if (!confirmed) return;
+    branchError = '';
+    try {
+      await invoke<string>('git_delete_branch', {
+        repoPath: root,
+        branch: branch.name,
+        force: false,
+      });
+      // Refresh branch list
+      branchList = await invoke<BranchInfo[]>('git_list_branches', { repoPath: root });
     } catch (e) {
       branchError = String(e);
     }
@@ -141,7 +167,7 @@
   }
 
   const GRAPH_COLORS = [
-    'var(--accent)',
+    'var(--git-graph-accent)',
     'var(--success)',
     'var(--warning)',
     '#e06c75',
@@ -155,39 +181,58 @@
     return GRAPH_COLORS[col % GRAPH_COLORS.length];
   }
 
-  async function fetchStatus() {
+  function processGitStatus(status: Record<string, string>) {
     const root = $projectRoot;
     if (!root) return;
 
-    try {
-      const status = await invoke<Record<string, string>>('get_git_status', { path: root });
-      const staged: GitFile[] = [];
-      const changed: GitFile[] = [];
+    const staged: GitFile[] = [];
+    const changed: GitFile[] = [];
+    const conflicts: GitFile[] = [];
 
-      for (const [absPath, code] of Object.entries(status)) {
-        const relPath = absPath.startsWith(root) ? absPath.slice(root.length + 1) : absPath;
-        const file: GitFile = { path: absPath, relPath, status: code };
+    for (const [absPath, code] of Object.entries(status)) {
+      const relPath = absPath.startsWith(root) ? absPath.slice(root.length + 1) : absPath;
+      const file: GitFile = { path: absPath, relPath, status: code };
 
-        if (code === 'A' || code === 'S') {
-          staged.push(file);
-        } else {
-          changed.push(file);
-        }
+      if (code === 'C') {
+        conflicts.push(file);
+      } else if (code === 'A' || code === 'S') {
+        staged.push(file);
+      } else {
+        changed.push(file);
       }
-
-      staged.sort((a, b) => a.relPath.localeCompare(b.relPath));
-      changed.sort((a, b) => a.relPath.localeCompare(b.relPath));
-      stagedFiles = staged;
-      changedFiles = changed;
-    } catch {
-      // ignore
     }
 
+    staged.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    changed.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    conflicts.sort((a, b) => a.relPath.localeCompare(b.relPath));
+    stagedFiles = staged;
+    changedFiles = changed;
+    conflictFiles = conflicts;
+  }
+
+  async function fetchAheadBehind() {
+    const root = $projectRoot;
+    if (!root) return;
     try {
       aheadBehind = await invoke<AheadBehind>('git_ahead_behind', { repoPath: root });
     } catch {
       aheadBehind = { ahead: 0, behind: 0, upstream: null };
     }
+  }
+
+  // For operations that mutate git state (stage, unstage, commit, etc.)
+  // we need to force-refresh status from the backend
+  async function fetchStatusFromBackend() {
+    const root = $projectRoot;
+    if (!root) return;
+    try {
+      const status = await invoke<Record<string, string>>('get_git_status', { path: root });
+      sharedGitStatus.set(status);
+      processGitStatus(status);
+    } catch {
+      // ignore
+    }
+    await fetchAheadBehind();
   }
 
   async function selectFile(file: GitFile) {
@@ -201,6 +246,7 @@
         repoPath: root,
         filePath: file.relPath,
         staged: isStaged,
+        isUntracked: file.status === 'U',
       });
     } catch {
       diffLines = [];
@@ -212,7 +258,7 @@
     if (!root) return;
     try {
       await invoke('git_stage', { repoPath: root, paths: [file.relPath] });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -221,7 +267,7 @@
     if (!root) return;
     try {
       await invoke('git_unstage', { repoPath: root, paths: [file.relPath] });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -232,7 +278,7 @@
     if (paths.length === 0) return;
     try {
       await invoke('git_stage', { repoPath: root, paths });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -243,7 +289,7 @@
     if (paths.length === 0) return;
     try {
       await invoke('git_unstage', { repoPath: root, paths });
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch { /* ignore */ }
   }
 
@@ -282,7 +328,7 @@
         diffLines = [];
       }
       await reloadOpenFiles([file]);
-      await fetchStatus();
+      await fetchStatusFromBackend();
       triggerFileTreeRefresh();
     } catch { /* ignore */ }
   }
@@ -303,7 +349,7 @@
       selectedFile = null;
       diffLines = [];
       await reloadOpenFiles(filesToDiscard);
-      await fetchStatus();
+      await fetchStatusFromBackend();
       triggerFileTreeRefresh();
     } catch { /* ignore */ }
   }
@@ -354,6 +400,42 @@
     commitSummary = `This commit changes ${stagedFiles.length} file${stagedFiles.length !== 1 ? 's' : ''}`;
   }
 
+  async function doFetch() {
+    const root = $projectRoot;
+    if (!root) return;
+    isFetching = true;
+    commitError = '';
+    commitSuccess = '';
+    try {
+      await invoke<string>('git_fetch', { repoPath: root });
+      commitSuccess = 'Fetched';
+      await fetchAheadBehind();
+    } catch (e) {
+      commitError = `Fetch failed: ${e}`;
+    }
+    isFetching = false;
+  }
+
+  async function doPull(rebase = false) {
+    const root = $projectRoot;
+    if (!root || isPullRunning) return;
+    isPullRunning = true;
+    isPullRebase = rebase;
+    commitError = '';
+    commitSuccess = '';
+    try {
+      const cmd = rebase ? 'git_pull_rebase' : 'git_pull';
+      await invoke<string>(cmd, { repoPath: root });
+      commitSuccess = rebase ? 'Pulled (rebase)' : 'Pulled';
+      await fetchStatusFromBackend();
+      triggerFileTreeRefresh();
+    } catch (e) {
+      commitError = `Pull failed: ${e}`;
+    } finally {
+      isPullRunning = false;
+    }
+  }
+
   async function doCommit(andPush = false) {
     if (!commitMsg.trim() || stagedFiles.length === 0) return;
     const root = $projectRoot;
@@ -384,7 +466,7 @@
         isPushing = false;
       }
 
-      await fetchStatus();
+      await fetchStatusFromBackend();
     } catch (e) {
       commitError = `Commit failed: ${e}`;
     }
@@ -453,21 +535,23 @@
     };
   }
 
+  // Subscribe to shared git status from FileTree's poll — no separate polling needed
+  $effect(() => {
+    const status = $sharedGitStatus;
+    processGitStatus(status);
+  });
+
+  let aheadBehindInterval: ReturnType<typeof setInterval> | null = null;
+
   onMount(() => {
-    fetchStatus();
-    pollInterval = setInterval(fetchStatus, 3000);
+    fetchAheadBehind();
+    // Only poll ahead/behind independently (lightweight, not duplicated)
+    aheadBehindInterval = setInterval(fetchAheadBehind, 5000);
     document.addEventListener('mousedown', handleClickOutside);
   });
 
-  // Refresh source control when the user switches files
-  $effect(() => {
-    $activeFilePath;          // track changes
-    fetchStatus();
-    if (showHistory) fetchHistory();
-  });
-
   onDestroy(() => {
-    if (pollInterval) clearInterval(pollInterval);
+    if (aheadBehindInterval) clearInterval(aheadBehindInterval);
     document.removeEventListener('mousedown', handleClickOutside);
   });
 
@@ -478,6 +562,7 @@
       case 'M': return 'M';
       case 'D': return 'D';
       case 'U': return 'U';
+      case 'C': return '!';
       default: return '?';
     }
   }
@@ -489,8 +574,14 @@
       case 'M': return 'var(--warning)';
       case 'D': return 'var(--error)';
       case 'U': return 'var(--success)';
+      case 'C': return 'var(--error)';
       default: return 'var(--text-muted)';
     }
+  }
+
+  function openConflictFile(file: GitFile) {
+    const name = file.relPath.split('/').pop() || file.relPath;
+    addFile(file.path, name);
   }
 </script>
 
@@ -546,6 +637,9 @@
                     {branch.name}
                   {/if}
                 </span>
+                {#if !branch.is_current && !branch.is_remote}
+                  <button class="branch-delete-btn" onclick={(e: MouseEvent) => deleteBranch(e, branch)} title="Delete branch">✕</button>
+                {/if}
               </div>
             {/each}
             {#if filteredBranches.length === 0 && !branchLoading}
@@ -557,7 +651,37 @@
     {/if}
   </div>
 
+  <!-- Git Actions -->
+  <div class="git-actions">
+    <button class="git-action-btn" disabled={isFetching} onclick={doFetch} title="Fetch from remote">
+      {isFetching ? 'Fetching...' : 'Fetch'}
+    </button>
+    <button class="git-action-btn" disabled={isPullRunning} onclick={() => doPull(false)} title="Pull from remote">
+      {isPullRunning && !isPullRebase ? 'Pulling...' : 'Pull'}
+    </button>
+    <button class="git-action-btn" disabled={isPullRunning} onclick={() => doPull(true)} title="Pull with rebase">
+      {isPullRunning && isPullRebase ? 'Rebasing...' : 'Pull Rebase'}
+    </button>
+  </div>
+
   <div class="scroll-area">
+    <!-- Merge Conflicts -->
+    {#if conflictFiles.length > 0}
+      <div class="section">
+        <div class="section-header conflict-header">
+          <span>Merge Conflicts ({conflictFiles.length})</span>
+        </div>
+        {#each conflictFiles as file}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="file-row" onclick={() => openConflictFile(file)}>
+            <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
+            <span class="file-name" title={file.relPath}>{file.relPath}</span>
+            <button class="file-action open-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); openConflictFile(file); }}>Open</button>
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     <!-- Staged Changes -->
     <div class="section">
       <div class="section-header" class:collapsed={stagedFiles.length === 0}>
@@ -861,6 +985,30 @@
     color: var(--text-muted);
   }
 
+  .branch-delete-btn {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 4px;
+    border-radius: 3px;
+    opacity: 0;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    background: none;
+    border: none;
+  }
+
+  .branch-item:hover .branch-delete-btn {
+    opacity: 1;
+  }
+
+  .branch-delete-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--error);
+  }
+
   .branch-loading,
   .branch-error {
     padding: 8px 10px;
@@ -884,6 +1032,61 @@
   .upstream {
     color: var(--text-muted);
     font-size: 10px;
+  }
+
+  .git-actions {
+    display: flex;
+    gap: 4px;
+    padding: 4px 10px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .git-action-btn {
+    flex: 1;
+    padding: 3px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+  }
+
+  .git-action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .git-action-btn:not(:disabled):hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+  }
+
+  .conflict-header {
+    color: var(--error);
+  }
+
+  .open-btn {
+    opacity: 0;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+
+  .file-row:hover .open-btn {
+    opacity: 1;
+  }
+
+  .open-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
   }
 
   .section-actions {
@@ -981,13 +1184,13 @@
   }
 
   .diff-line.add {
-    background: color-mix(in srgb, var(--success) 15%, transparent);
-    color: var(--success);
+    background: color-mix(in srgb, var(--diff-add) 15%, transparent);
+    color: var(--diff-add);
   }
 
   .diff-line.del {
-    background: color-mix(in srgb, var(--error) 15%, transparent);
-    color: var(--error);
+    background: color-mix(in srgb, var(--diff-del) 15%, transparent);
+    color: var(--diff-del);
   }
 
   .diff-line.ctx {
@@ -1114,7 +1317,7 @@
 
   .commit-success {
     font-size: 11px;
-    color: var(--success);
+    color: var(--git-notification);
     margin-bottom: 4px;
   }
 
@@ -1170,7 +1373,7 @@
 
   .graph-hash {
     font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    color: var(--accent);
+    color: var(--git-graph-accent);
     flex-shrink: 0;
     font-size: 10px;
     margin-left: 4px;

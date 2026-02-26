@@ -43,7 +43,7 @@
 
     try {
       const response = await invoke<string>('ai_chat', {
-        request: { prompt, context: context || null, api_key: key || null }
+        request: { prompt, context: context || null }
       });
       const assistantMsg: ChatMessage = { role: 'assistant', content: response };
       chatMessages.update(msgs => [...msgs, assistantMsg]);

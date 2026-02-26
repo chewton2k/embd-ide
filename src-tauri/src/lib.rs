@@ -1,6 +1,9 @@
 mod ai;
 mod fs_commands;
+mod session;
 mod terminal;
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,6 +19,9 @@ pub fn run() {
         .manage(terminal_state)
         .manage(project_root_state)
         .manage(api_key_state)
+        .manage(session::AppStateHandle(std::sync::Mutex::new(
+            session::AppState::default(),
+        )))
         .invoke_handler(tauri::generate_handler![
             fs_commands::set_project_root,
             fs_commands::read_dir_tree,
@@ -33,6 +39,7 @@ pub fn run() {
             fs_commands::duplicate_entry,
             fs_commands::reveal_in_file_manager,
             fs_commands::get_git_status,
+            fs_commands::get_git_remote_status,
             fs_commands::get_git_ignored,
             fs_commands::list_all_files,
             fs_commands::get_git_branch,
@@ -42,17 +49,25 @@ pub fn run() {
             fs_commands::git_discard,
             fs_commands::git_commit,
             fs_commands::git_push,
+            fs_commands::git_fetch,
+            fs_commands::git_pull,
+            fs_commands::git_pull_rebase,
+            fs_commands::git_delete_branch,
             fs_commands::git_ahead_behind,
             fs_commands::git_diff_line_ranges,
             fs_commands::git_log,
             fs_commands::git_list_branches,
             fs_commands::git_checkout_branch,
+            fs_commands::git_resolve_conflict,
             terminal::spawn_terminal,
             terminal::write_terminal,
             terminal::kill_terminal,
             terminal::resize_terminal,
             ai::set_api_key,
             ai::ai_chat,
+            session::get_recent_projects,
+            session::save_session,
+            session::remove_recent_project,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -62,6 +77,14 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // Preload session state from disk
+            let loaded = session::load_state_from_disk(app.handle())
+                .unwrap_or_default();
+            let handle = app.state::<session::AppStateHandle>();
+            let mut guard = handle.0.lock().map_err(|e| {
+                format!("failed to lock app state during setup: {e}")
+            })?;
+            *guard = loaded;
             Ok(())
         })
         .run(tauri::generate_context!())

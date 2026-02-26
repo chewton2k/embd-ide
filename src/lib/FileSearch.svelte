@@ -5,14 +5,26 @@
   let { onClose }: { onClose: () => void } = $props();
 
   let query = $state('');
+  let debouncedQuery = $state('');
   let allFiles = $state<string[]>([]);
   let selectedIndex = $state(0);
   let searchInput: HTMLInputElement | undefined = $state();
   let resultsList: HTMLDivElement | undefined = $state();
+  let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  // Debounce the query to avoid scoring all files on every keystroke
+  $effect(() => {
+    const q = query;
+    if (searchDebounce) clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => { debouncedQuery = q; }, 150);
+    return () => {
+      if (searchDebounce) clearTimeout(searchDebounce);
+    }
+  });
 
   const filtered = $derived.by(() => {
-    if (!query.trim()) return allFiles.slice(0, 50);
-    const q = query.toLowerCase();
+    if (!debouncedQuery.trim()) return allFiles.slice(0, 50);
+    const q = debouncedQuery.toLowerCase();
     const parts = q.split(/\s+/);
     // Score and filter
     const scored = allFiles
@@ -92,8 +104,8 @@
   }
 
   function highlightMatch(text: string): string {
-    if (!query.trim()) return escapeHtml(text);
-    const parts = query.toLowerCase().split(/\s+/);
+    if (!debouncedQuery.trim()) return escapeHtml(text);
+    const parts = debouncedQuery.toLowerCase().split(/\s+/);
     let result = escapeHtml(text);
     for (const part of parts) {
       const regex = new RegExp(`(${escapeRegex(part)})`, 'gi');

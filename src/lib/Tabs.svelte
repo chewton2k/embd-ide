@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles } from './stores.ts';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus } from './stores.ts';
 
   let tabsBar: HTMLDivElement | undefined = $state();
 
@@ -43,6 +43,7 @@
       class="tab"
       class:active={$activeFilePath === file.path}
       class:pinned={file.pinned}
+      class:conflict={$sharedGitStatus[file.path] === 'C'}
       role="tab"
       tabindex="0"
       title={file.path}
@@ -106,6 +107,10 @@
     background: var(--tab-active);
     color: var(--text-primary);
     border-bottom: 2px solid var(--accent);
+  }
+
+  .tab.conflict {
+    border-bottom: 2px solid var(--error);
   }
 
   .tab-name {
