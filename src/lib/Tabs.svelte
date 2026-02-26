@@ -113,10 +113,6 @@
     border-bottom: 2px solid var(--error);
   }
 
-  .tab.conflict.active {
-    border-bottom: 2px solid var(--error);
-  }
-
   .tab-name {
     display: flex;
     align-items: center;

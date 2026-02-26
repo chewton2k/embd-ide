@@ -5,7 +5,7 @@ embd ships with 12 built-in themes. You can also add your own by editing the sou
 ## Adding a Custom Theme
 
 1. Open `src/lib/stores.ts`
-2. Find the `THEMES` array (around line 275)
+2. Find the `THEMES` array
 3. Add a new entry to the array:
 
 ```ts

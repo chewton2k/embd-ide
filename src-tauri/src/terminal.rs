@@ -56,17 +56,20 @@ pub fn spawn_terminal(
         }
     }
 
-    // Validate cwd against project root — require a project to be open
-    {
+    // Validate cwd against project root — require a project to be open.
+    // When cwd is None, default to the project root so callers cannot bypass containment.
+    let cwd = {
         let root = project_root.lock().map_err(|e| e.to_string())?;
         let root_path = root.as_ref().ok_or_else(|| "No project is open. Open a folder first.".to_string())?;
-        if let Some(ref dir) = cwd {
-            let canonical = std::fs::canonicalize(dir).map_err(|e| format!("Invalid cwd: {}", e))?;
-            if !canonical.starts_with(root_path) {
-                return Err("Access denied: terminal cwd is outside the project directory".to_string());
-            }
+        let cwd_path = cwd.as_ref().map(std::path::PathBuf::from);
+        let dir_to_check = cwd_path.as_deref().unwrap_or(root_path.as_path());
+        let canonical = std::fs::canonicalize(dir_to_check)
+            .map_err(|e| format!("Invalid cwd: {}", e))?;
+        if !canonical.starts_with(root_path) {
+            return Err("Access denied: terminal cwd is outside the project directory".to_string());
         }
-    }
+        Some(canonical)
+    };
 
     let pty_system = native_pty_system();
 

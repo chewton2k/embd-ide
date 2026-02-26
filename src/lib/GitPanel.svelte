@@ -56,8 +56,8 @@
   let commitError = $state('');
   let commitSuccess = $state('');
   let isFetching = $state(false);
-  let isPulling = $state(false);
-  let isPullRebasing = $state(false);
+  let isPullRunning = $state(false);
+  let isPullRebase = $state(false);
   let showHistory = $state(false);
   let graphRows = $state<GitGraphRow[]>([]);
   let historyLoading = $state(false);
@@ -418,12 +418,9 @@
 
   async function doPull(rebase = false) {
     const root = $projectRoot;
-    if (!root) return;
-    if (rebase) {
-      isPullRebasing = true;
-    } else {
-      isPulling = true;
-    }
+    if (!root || isPullRunning) return;
+    isPullRunning = true;
+    isPullRebase = rebase;
     commitError = '';
     commitSuccess = '';
     try {
@@ -434,9 +431,9 @@
       triggerFileTreeRefresh();
     } catch (e) {
       commitError = `Pull failed: ${e}`;
+    } finally {
+      isPullRunning = false;
     }
-    isPulling = false;
-    isPullRebasing = false;
   }
 
   async function doCommit(andPush = false) {
@@ -659,11 +656,11 @@
     <button class="git-action-btn" disabled={isFetching} onclick={doFetch} title="Fetch from remote">
       {isFetching ? 'Fetching...' : 'Fetch'}
     </button>
-    <button class="git-action-btn" disabled={isPulling} onclick={() => doPull(false)} title="Pull from remote">
-      {isPulling ? 'Pulling...' : 'Pull'}
+    <button class="git-action-btn" disabled={isPullRunning} onclick={() => doPull(false)} title="Pull from remote">
+      {isPullRunning && !isPullRebase ? 'Pulling...' : 'Pull'}
     </button>
-    <button class="git-action-btn" disabled={isPullRebasing} onclick={() => doPull(true)} title="Pull with rebase">
-      {isPullRebasing ? 'Rebasing...' : 'Pull Rebase'}
+    <button class="git-action-btn" disabled={isPullRunning} onclick={() => doPull(true)} title="Pull with rebase">
+      {isPullRunning && isPullRebase ? 'Rebasing...' : 'Pull Rebase'}
     </button>
   </div>
 

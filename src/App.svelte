@@ -54,7 +54,7 @@
     for (const file of project.session.open_files) {
       const fileExists = await exists(file.path);
       if (!fileExists) continue;
-      const name = file.path.split('/').pop() || file.path;
+      const name = file.path.split(/[/\\]/).pop() || file.path;
       addFile(file.path, name);
       if (file.pinned) {
         togglePin(file.path);

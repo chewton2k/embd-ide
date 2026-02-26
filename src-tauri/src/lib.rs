@@ -78,9 +78,13 @@ pub fn run() {
                 )?;
             }
             // Preload session state from disk
-            let loaded = session::load_state_from_disk(app.handle());
+            let loaded = session::load_state_from_disk(app.handle())
+                .unwrap_or_default();
             let handle = app.state::<session::AppStateHandle>();
-            *handle.0.lock().unwrap() = loaded;
+            let mut guard = handle.0.lock().map_err(|e| {
+                format!("failed to lock app state during setup: {e}")
+            })?;
+            *guard = loaded;
             Ok(())
         })
         .run(tauri::generate_context!())

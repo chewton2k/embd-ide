@@ -16,6 +16,8 @@
     leftLine?: string;
     rightLine?: string;
     hunk?: ConflictHunk;
+    hunkIndex?: number;
+    isHunkStart?: boolean;
     side?: 'current' | 'incoming';
     rowIndex?: number;
   }
@@ -43,6 +45,8 @@
             type: 'context',
             leftLine: hunk.currentLines[r] ?? '',
             rightLine: hunk.incomingLines[r] ?? '',
+            hunkIndex: hunk.index,
+            isHunkStart: r === 0,
           });
         }
       } else {
@@ -54,6 +58,8 @@
             leftLine: r < hunk.currentLines.length ? hunk.currentLines[r] : undefined,
             rightLine: r < hunk.incomingLines.length ? hunk.incomingLines[r] : undefined,
             hunk,
+            hunkIndex: hunk.index,
+            isHunkStart: r === 0,
             rowIndex: r,
           });
         }
@@ -70,16 +76,6 @@
     }
 
     return result;
-  });
-
-  // Track which hunks we've already rendered action buttons for
-  let renderedHunkActions = $derived.by(() => {
-    const seen = new Set<number>();
-    return (hunkIndex: number) => {
-      if (seen.has(hunkIndex)) return false;
-      seen.add(hunkIndex);
-      return true;
-    };
   });
 
   let leftPane: HTMLDivElement | undefined = $state();
@@ -115,18 +111,22 @@
       {/each}
     </div>
     <div class="sbs-actions-column">
-      {#each hunks as hunk}
-        {@const resolved = resolutions.get(hunk.index)}
-        <div class="sbs-hunk-actions">
-          {#if resolved}
-            <span class="resolved-badge-small">{resolved}</span>
-            <button class="sbs-action-btn" onclick={() => onUnresolve(hunk.index)} title="Undo">↩</button>
-          {:else}
-            <button class="sbs-action-btn current-btn" onclick={() => onResolve(hunk.index, 'current')} title="Accept Current">←</button>
-            <button class="sbs-action-btn both-btn" onclick={() => onResolve(hunk.index, 'both')} title="Accept Both">⇄</button>
-            <button class="sbs-action-btn incoming-btn" onclick={() => onResolve(hunk.index, 'incoming')} title="Accept Incoming">→</button>
-          {/if}
-        </div>
+      {#each rows as row}
+        {#if row.hunkIndex != null && row.isHunkStart}
+          {@const resolved = resolutions.get(row.hunkIndex)}
+          <div class="sbs-hunk-actions">
+            {#if resolved}
+              <span class="resolved-badge-small">{resolved}</span>
+              <button class="sbs-action-btn" onclick={() => onUnresolve(row.hunkIndex!)} title="Undo">↩</button>
+            {:else}
+              <button class="sbs-action-btn current-btn" onclick={() => onResolve(row.hunkIndex!, 'current')} title="Accept Current">←</button>
+              <button class="sbs-action-btn both-btn" onclick={() => onResolve(row.hunkIndex!, 'both')} title="Accept Both">⇄</button>
+              <button class="sbs-action-btn incoming-btn" onclick={() => onResolve(row.hunkIndex!, 'incoming')} title="Accept Incoming">→</button>
+            {/if}
+          </div>
+        {:else}
+          <div class="sbs-line context">{'\u200b'}</div>
+        {/if}
       {/each}
     </div>
     <div class="sbs-pane" bind:this={rightPane} onscroll={() => syncScroll('right')}>

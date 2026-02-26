@@ -319,7 +319,7 @@
   </div>
   <div class="terminal-content" bind:this={terminalContainer}>
     {#if tabs.length === 0}
-      <div class="terminal-placeholder">Open a folder to start a terminal session</div>
+      <div class="terminal-placeholder">click + to start a terminal session</div>
     {/if}
   </div>
 </div>

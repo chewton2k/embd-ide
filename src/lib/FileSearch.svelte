@@ -17,6 +17,9 @@
     const q = query;
     if (searchDebounce) clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => { debouncedQuery = q; }, 150);
+    return () => {
+      if (searchDebounce) clearTimeout(searchDebounce);
+    }
   });
 
   const filtered = $derived.by(() => {
@@ -101,8 +104,8 @@
   }
 
   function highlightMatch(text: string): string {
-    if (!query.trim()) return escapeHtml(text);
-    const parts = query.toLowerCase().split(/\s+/);
+    if (!debouncedQuery.trim()) return escapeHtml(text);
+    const parts = debouncedQuery.toLowerCase().split(/\s+/);
     let result = escapeHtml(text);
     for (const part of parts) {
       const regex = new RegExp(`(${escapeRegex(part)})`, 'gi');

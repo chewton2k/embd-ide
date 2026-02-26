@@ -22,13 +22,22 @@
   let totalConflicts = $derived(hunks.length);
   let allResolved = $derived(resolvedCount === totalConflicts && totalConflicts > 0);
 
+  let loadRequestId = 0;
+
   async function loadFile() {
+    const requestId = ++loadRequestId;
     try {
-      rawContent = await invoke<string>('read_file_content', { path: filePath });
-      hunks = parseConflicts(rawContent);
+      const content = await invoke<string>('read_file_content', { path: filePath });
+      if (requestId !== loadRequestId) return;
+      rawContent = content;
+      hunks = parseConflicts(content);
       resolutions = new Map();
       error = '';
     } catch (e) {
+      if (requestId !== loadRequestId) return;
+      rawContent = '';
+      hunks = [];
+      resolutions = new Map();
       error = `Failed to load file: ${e}`;
     }
   }

@@ -32,11 +32,12 @@ pub struct AppStateHandle(pub Mutex<AppState>);
 const MAX_RECENT: usize = 3;
 const MAX_SESSION_FILES: usize = 20;
 
-fn state_path(app: &AppHandle) -> std::path::PathBuf {
-    app.path()
+fn state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app
+        .path()
         .app_data_dir()
-        .expect("failed to resolve app_data_dir")
-        .join("state.json")
+        .map_err(|e| format!("failed to resolve app_data_dir: {e}"))?;
+    Ok(dir.join("state.json"))
 }
 
 /// Validate that a project path is absolute and doesn't contain traversal sequences.
@@ -54,17 +55,17 @@ fn validate_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn load_state_from_disk(app: &AppHandle) -> AppState {
-    let path = state_path(app);
+pub fn load_state_from_disk(app: &AppHandle) -> Result<AppState, String> {
+    let path = state_path(app)?;
     match std::fs::read_to_string(&path) {
-        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
-        Err(_) => AppState::default(),
+        Ok(contents) => Ok(serde_json::from_str(&contents).unwrap_or_default()),
+        Err(_) => Ok(AppState::default()),
     }
 }
 
 /// Atomic write: write to a temp file in the same directory, then rename.
 fn save_state_to_disk(app: &AppHandle, state: &AppState) -> Result<(), String> {
-    let path = state_path(app);
+    let path = state_path(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("failed to create state dir: {e}"))?;
     }
@@ -96,45 +97,53 @@ pub fn save_session(
     // Cap open_files to prevent unbounded growth
     session.open_files.truncate(MAX_SESSION_FILES);
 
-    let handle = app.state::<AppStateHandle>();
-    let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+    let state_snapshot = {
+        let handle = app.state::<AppStateHandle>();
+        let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
 
-    let name = std::path::Path::new(&project_path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| project_path.clone());
+        let name = std::path::Path::new(&project_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| project_path.clone());
 
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
-    // Upsert: remove existing entry for this path
-    guard.recent_projects.retain(|p| p.path != project_path);
+        // Upsert: remove existing entry for this path
+        guard.recent_projects.retain(|p| p.path != project_path);
 
-    // Insert at front (most recent first)
-    guard.recent_projects.insert(
-        0,
-        RecentProject {
-            path: project_path,
-            name,
-            last_opened: now,
-            session,
-        },
-    );
+        // Insert at front (most recent first)
+        guard.recent_projects.insert(
+            0,
+            RecentProject {
+                path: project_path,
+                name,
+                last_opened: now,
+                session,
+            },
+        );
 
-    // Truncate to max
-    guard.recent_projects.truncate(MAX_RECENT);
+        // Truncate to max
+        guard.recent_projects.truncate(MAX_RECENT);
 
-    save_state_to_disk(&app, &guard)
+        guard.clone()
+    }; // guard dropped here, mutex unlocked
+
+    save_state_to_disk(&app, &state_snapshot)
 }
 
 #[tauri::command]
 pub fn remove_recent_project(app: AppHandle, project_path: String) -> Result<(), String> {
     validate_path(&project_path)?;
 
-    let handle = app.state::<AppStateHandle>();
-    let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
-    guard.recent_projects.retain(|p| p.path != project_path);
-    save_state_to_disk(&app, &guard)
+    let state_snapshot = {
+        let handle = app.state::<AppStateHandle>();
+        let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+        guard.recent_projects.retain(|p| p.path != project_path);
+        guard.clone()
+    }; // guard dropped here, mutex unlocked
+
+    save_state_to_disk(&app, &state_snapshot)
 }

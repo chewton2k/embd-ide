@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Path, PathBuf, Component};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use base64::Engine;
@@ -85,18 +85,27 @@ fn validate_repo_path(repo_path: &str, state: &tauri::State<'_, ProjectRootState
 /// Validate a relative file path used in git commands.
 /// Rejects absolute paths, traversal sequences, and NUL bytes.
 fn validate_git_file_path(file_path: &str) -> Result<(), String> {
-    if file_path.contains("..") {
-        return Err("Invalid file path: traversal not allowed".to_string());
-    }
-    if file_path.starts_with('/') || file_path.starts_with('\\') {
-        return Err("Invalid file path: absolute paths not allowed".to_string());
-    }
-    // Reject Windows drive letters (e.g. "C:\")
-    if file_path.len() >= 2 && file_path.as_bytes()[1] == b':' {
-        return Err("Invalid file path: absolute paths not allowed".to_string());
+    if file_path.is_empty() {
+        return Err("Invalid file path: path cannot be empty".to_string());
     }
     if file_path.contains('\0') {
         return Err("Invalid file path: null bytes not allowed".to_string());
+    }
+  
+    let path = Path::new(file_path);
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                return Err("Invalid file path: traversal not allowed".to_string());
+            }
+            Component::RootDir | Component::Prefix(_) => {
+                return Err("Invalid file path: absolute paths not allowed".to_string());
+            }
+            Component::Normal(name) if name.eq_ignore_ascii_case(".git") => {
+                return Err("Invalid file path: .git paths are not allowed".to_string());
+            }
+            _ => {}
+        }
     }
     Ok(())
 }
@@ -277,8 +286,14 @@ pub fn import_external_files(state: tauri::State<'_, ProjectRootState>, sources:
         }
         // Block importing from sensitive directories
         let canonical_src = fs::canonicalize(&src_path).map_err(|e| format!("Invalid source: {}", e))?;
-        let src_str = canonical_src.to_string_lossy();
-        if src_str.contains("/.ssh") || src_str.contains("/.gnupg") || src_str.contains("/.aws") {
+        let blocked = [".ssh", ".gnupg", ".aws"];
+        let is_sensitive = canonical_src.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::Normal(name) if blocked.iter().any(|b| name == std::ffi::OsStr::new(b))
+            )
+        });
+        if is_sensitive {
             return Err(format!("Cannot import from sensitive directory: {}", src));
         }
         let file_name = src_path

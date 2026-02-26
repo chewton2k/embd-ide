@@ -531,12 +531,14 @@
   let previewTimer: ReturnType<typeof setTimeout> | null = null;
 
   function updatePreview(content: string) {
-    if (isMarkdown && showPreview) {
-      if (previewTimer) clearTimeout(previewTimer);
-      previewTimer = setTimeout(() => {
-        previewHtml = DOMPurify.sanitize(marked.parse(content) as string);
-      }, 300);
+    if (previewTimer) {
+      clearTimeout(previewTimer);
+      previewTimer = null;
     }
+    if (!isMarkdown || !showPreview) return;
+    previewTimer = setTimeout(() => {
+      previewHtml = DOMPurify.sanitize(marked.parse(content) as string);
+    }, 300);
   }
 
   function scheduleAutosave(path: string) {

@@ -199,6 +199,7 @@
       }
       newFolderStatus = folders;
     } catch (_) {
+      sharedGitStatus.set({});
       newFileStatus = new Map();
       newFolderStatus = new Map();
     }
@@ -224,6 +225,7 @@
       }
       newRemoteFolderStatus = remoteFolders;
     } catch (_) {
+      sharedGitRemoteStatus.set({});
       newRemoteFileStatus = new Map();
       newRemoteFolderStatus = new Map();
     }
@@ -351,7 +353,11 @@
   async function openFolderByPath(path: string) {
     // Save current session before switching
     if (rootPath) {
-      saveSessionNow(rootPath);
+      try {
+        await saveSessionNow(rootPath);
+      } catch (e) {
+        console.error('Failed to save session before folder switch:', e);
+      }
     }
     rootPath = path;
     projectRoot.set(rootPath);
@@ -367,7 +373,16 @@
   async function openFolder() {
     const selected = await open({ directory: true, multiple: false });
     if (selected) {
-      await openFolderByPath(selected as string);
+      try {
+        await openFolderByPath(selected as string);
+      } catch (e) {
+        const msg = String(e);
+        if (msg.includes('scope') || msg.includes('not allowed')) {
+          console.error(`Cannot open folder: path "${selected}" is outside the allowed filesystem scope.`);
+        } else {
+          console.error('Failed to open folder:', e);
+        }
+      }
     }
   }
 
