@@ -100,7 +100,7 @@ export const unpinnedFiles = derived(openFiles, files =>
 export function closeFile(path: string) {
   openFiles.update(files => {
     const file = files.find(f => f.path === path);
-    if (file?.pinned) return files; // 🚫 don’t close pinned
+    if (file?.pinned) return files; // don’t close pinned
 
     const newFiles = files.filter(f => f.path !== path);
 

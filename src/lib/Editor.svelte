@@ -405,6 +405,14 @@
       scheduleCountMatches();
     });
 
+    // Close panel on Escape from anywhere within it
+    dom.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSearchPanel(panelView);
+      }
+    });
+
     // Pre-fill with selected text
     const sel = panelView.state.selection.main;
     if (!sel.empty) {
@@ -617,8 +625,9 @@
       autosaveTimer = null;
     }
 
-    // Save current editor state before switching
+    // Close any open search panel and save current editor state before switching
     if (view && currentFilePath) {
+      closeSearchPanel(view);
       stateCache.set(currentFilePath, view.state);
     }
 
@@ -881,18 +890,37 @@
   function handleGlobalKeydown(e: KeyboardEvent) {
     // Cmd/Ctrl+F: focus editor and open search panel
     if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-      if (view) {
-        e.preventDefault();
-        view.focus();
-        openSearchPanel(view);
-        // Disable autocapitalize on the search inputs
-        requestAnimationFrame(() => {
-          view.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
-            input.setAttribute('autocapitalize', 'off');
-            input.setAttribute('autocorrect', 'off');
-          });
-        });
+      if (!view) return;
+
+      // Only handle if this editor (or its search panel) contains focus,
+      // or if no other editor has focus (fallback for sidebar/external focus)
+      const active = document.activeElement;
+      const thisEditorHasFocus = editorContainer?.contains(active) || view.hasFocus;
+      const anyEditorHasFocus = !!active?.closest('.editor-wrapper');
+      if (!thisEditorHasFocus && anyEditorHasFocus) return;
+
+      e.preventDefault();
+
+      // If the search panel is already open, just focus its input
+      const existingPanel = editorContainer?.querySelector('.cm-panel.cm-search');
+      if (existingPanel) {
+        const searchInput = existingPanel.querySelector<HTMLInputElement>('input.cm-search-field[main-field]');
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
       }
+
+      view.focus();
+      openSearchPanel(view);
+      // Disable autocapitalize on the search inputs
+      requestAnimationFrame(() => {
+        view.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
+          input.setAttribute('autocapitalize', 'off');
+          input.setAttribute('autocorrect', 'off');
+        });
+      });
     }
   }
 
