@@ -5,9 +5,13 @@
     editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers,
     terminalFontSize,
     currentThemeId, THEMES, uiFontSize, uiDensity,
+    maxRecentProjects, maxTabs,
   } from './stores.ts';
+  import { save, open } from '@tauri-apps/plugin-dialog';
+  import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 
   let newPattern = $state('');
+  let exportImportStatus = $state('');
 
   function addPattern() {
     const pat = newPattern.trim();
@@ -48,6 +52,73 @@
     { label: '2s', value: 2000 },
     { label: '5s', value: 5000 },
   ];
+
+  const EXPORT_KEYS = [
+    'embd-autosave', 'embd-autosave-delay',
+    'embd-editor-font-size', 'embd-editor-tab-size', 'embd-editor-word-wrap', 'embd-editor-line-numbers',
+    'embd-terminal-font-size',
+    'embd-theme',
+    'embd-ui-font-size', 'embd-ui-density',
+    'embd-hidden-patterns',
+    'embd-max-recent-projects', 'embd-max-tabs',
+  ];
+
+  const STORE_MAP: Record<string, { store: any; parse: (v: string) => any }> = {
+    'embd-autosave':              { store: autosaveEnabled,   parse: v => v !== 'false' },
+    'embd-autosave-delay':        { store: autosaveDelay,     parse: v => parseInt(v, 10) },
+    'embd-editor-font-size':      { store: editorFontSize,    parse: v => parseInt(v, 10) },
+    'embd-editor-tab-size':       { store: editorTabSize,     parse: v => parseInt(v, 10) },
+    'embd-editor-word-wrap':      { store: editorWordWrap,    parse: v => v === 'true' },
+    'embd-editor-line-numbers':   { store: editorLineNumbers, parse: v => v !== 'false' },
+    'embd-terminal-font-size':    { store: terminalFontSize,  parse: v => parseInt(v, 10) },
+    'embd-theme':                 { store: currentThemeId,    parse: v => v },
+    'embd-ui-font-size':          { store: uiFontSize,        parse: v => parseInt(v, 10) },
+    'embd-ui-density':            { store: uiDensity,         parse: v => v },
+    'embd-hidden-patterns':       { store: hiddenPatterns,    parse: v => JSON.parse(v) },
+    'embd-max-recent-projects':   { store: maxRecentProjects, parse: v => parseInt(v, 10) },
+    'embd-max-tabs':              { store: maxTabs,           parse: v => parseInt(v, 10) },
+  };
+
+  async function exportSettings() {
+    const data: Record<string, string> = {};
+    for (const key of EXPORT_KEYS) {
+      const val = localStorage.getItem(key);
+      if (val !== null) data[key] = val;
+    }
+
+    const path = await save({
+      defaultPath: 'embd-settings.json',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (!path) return;
+
+    await writeTextFile(path, JSON.stringify(data, null, 2));
+    exportImportStatus = 'Settings exported';
+    setTimeout(() => exportImportStatus = '', 3000);
+  }
+
+  async function importSettings() {
+    const path = await open({
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      multiple: false,
+      directory: false,
+    });
+    if (!path) return;
+
+    const text = await readTextFile(path as string);
+    const data = JSON.parse(text) as Record<string, string>;
+
+    for (const [key, val] of Object.entries(data)) {
+      if (!key.startsWith('embd-') || key === 'embd-api-key') continue;
+      localStorage.setItem(key, val);
+      const mapping = STORE_MAP[key];
+      if (mapping) {
+        mapping.store.set(mapping.parse(val));
+      }
+    }
+    exportImportStatus = 'Settings imported';
+    setTimeout(() => exportImportStatus = '', 3000);
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -219,6 +290,29 @@
 
       <div class="divider"></div>
 
+      <!-- Session -->
+      <section class="section">
+        <h3>Session</h3>
+        <div class="setting-row">
+          <span class="setting-label">Max Recent Projects</span>
+          <div class="stepper">
+            <button class="stepper-btn" onclick={() => maxRecentProjects.update(v => Math.max(0, v - 1))}>-</button>
+            <span class="stepper-value">{$maxRecentProjects}</span>
+            <button class="stepper-btn" onclick={() => maxRecentProjects.update(v => Math.min(30, v + 1))}>+</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Max Open Tabs</span>
+          <div class="stepper">
+            <button class="stepper-btn" onclick={() => maxTabs.update(v => Math.max(1, v - 1))}>-</button>
+            <span class="stepper-value">{$maxTabs}</span>
+            <button class="stepper-btn" onclick={() => maxTabs.update(v => Math.min(30, v + 1))}>+</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
       <!-- File Visibility -->
       <section class="section">
         <h3>File Visibility</h3>
@@ -253,6 +347,21 @@
             onkeydown={(e) => { if (e.key === 'Enter') addPattern(); }}
           />
           <button class="add-btn" onclick={addPattern}>Add</button>
+        </div>
+      </section>
+
+      <div class="divider"></div>
+
+      <!-- Export / Import -->
+      <section class="section">
+        <h3>Export / Import</h3>
+        <p class="section-desc">Save your settings to a file or restore them from a previous export.</p>
+        <div class="export-import-row">
+          <button class="export-btn" onclick={exportSettings}>Export</button>
+          <button class="import-btn" onclick={importSettings}>Import</button>
+          {#if exportImportStatus}
+            <span class="export-import-status">{exportImportStatus}</span>
+          {/if}
         </div>
       </section>
     </div>
@@ -664,5 +773,44 @@
   .active-name {
     color: var(--accent);
     font-weight: 600;
+  }
+
+  /* Export / Import */
+  .export-import-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .export-btn,
+  .import-btn {
+    padding: 6px 16px;
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .export-btn {
+    background: var(--accent);
+    color: var(--bg-tertiary);
+  }
+
+  .export-btn:hover {
+    opacity: 0.9;
+  }
+
+  .import-btn {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+
+  .import-btn:hover {
+    background: var(--border);
+  }
+
+  .export-import-status {
+    font-size: 11px;
+    color: var(--success);
   }
 </style>

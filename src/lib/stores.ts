@@ -23,7 +23,16 @@ export const activeFileModified = derived(
   }
 );
 
-const MAX_TABS = 9;
+// Session limits (persisted)
+export const maxRecentProjects = writable<number>(
+  parseInt(localStorage.getItem('embd-max-recent-projects') || '3', 10)
+);
+export const maxTabs = writable<number>(
+  parseInt(localStorage.getItem('embd-max-tabs') || '9', 10)
+);
+
+maxRecentProjects.subscribe(v => localStorage.setItem('embd-max-recent-projects', String(v)));
+maxTabs.subscribe(v => localStorage.setItem('embd-max-tabs', String(v)));
 
 export function addFile(path: string, name: string) {
   openFiles.update(files => {
@@ -40,8 +49,9 @@ export function addFile(path: string, name: string) {
       pinned: false,
       version: 0
     }];
+    const limit = get(maxTabs);
     // Drop the oldest unmodified tab when over the limit
-    while (updated.length > MAX_TABS) {
+    while (updated.length > limit) {
       const oldest = updated.find(
         f => !f.pinned && !f.modified && f.path !== path
       );

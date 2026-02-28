@@ -29,7 +29,6 @@ pub struct AppState {
 
 pub struct AppStateHandle(pub Mutex<AppState>);
 
-const MAX_RECENT: usize = 3;
 const MAX_SESSION_FILES: usize = 20;
 
 fn state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -91,6 +90,7 @@ pub fn save_session(
     app: AppHandle,
     project_path: String,
     mut session: SessionData,
+    max_recent: usize,
 ) -> Result<(), String> {
     validate_path(&project_path)?;
 
@@ -125,8 +125,8 @@ pub fn save_session(
             },
         );
 
-        // Truncate to max
-        guard.recent_projects.truncate(MAX_RECENT);
+        // Truncate to max (clamped to 0..=30)
+        guard.recent_projects.truncate(max_recent.min(30));
 
         guard.clone()
     }; // guard dropped here, mutex unlocked

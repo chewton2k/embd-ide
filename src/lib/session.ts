@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
-import { openFiles, activeFilePath, projectRoot } from './stores';
+import { openFiles, activeFilePath, projectRoot, maxRecentProjects } from './stores';
 
 export interface SessionFile {
   path: string;
@@ -45,7 +45,8 @@ export function scheduleSaveSession(): void {
     const root = get(projectRoot);
     if (!root) return;
     const session = buildSessionData();
-    invoke('save_session', { projectPath: root, session }).catch(console.error);
+    const maxRecent = get(maxRecentProjects);
+    invoke('save_session', { projectPath: root, session, maxRecent }).catch(console.error);
   }, 750);
 }
 
@@ -56,5 +57,6 @@ export async function saveSessionNow(projectPath: string): Promise<void> {
     debounceTimer = null;
   }
   const session = buildSessionData();
-  await invoke('save_session', { projectPath, session });
+  const maxRecent = get(maxRecentProjects);
+  await invoke('save_session', { projectPath, session, maxRecent });
 }

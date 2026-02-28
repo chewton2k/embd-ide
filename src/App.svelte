@@ -34,6 +34,7 @@
   }
 
   let recentProjects = $state<RecentProject[]>([]);
+  let showAllRecent = $state(false);
   let openFolderByPath: ((path: string) => Promise<void>) | null = null;
 
   function handleOpenFolder(fn: (path: string) => Promise<void>) {
@@ -200,6 +201,14 @@
     scheduleSaveSession();
   });
 
+  // Refresh recent projects when returning to the welcome screen
+  $effect(() => {
+    if ($activeFile === null) {
+      showAllRecent = false;
+      getRecentProjects().then(p => recentProjects = p).catch(() => {});
+    }
+  });
+
   function handleKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === '`') {
       e.preventDefault();
@@ -260,16 +269,20 @@
             <Editor filePath={$activeFile} />
           {:else}
             <div class="welcome">
-              <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
               {#if recentProjects.length > 0}
                 <div class="recent-projects">
                   <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
-                  {#each recentProjects as project}
+                  {#each (showAllRecent ? recentProjects : recentProjects.slice(0, 3)) as project}
                     <button class="recent-item" onclick={() => openRecentProject(project)}>
                       <span class="recent-name">{project.name}</span>
                       <span class="recent-path">{project.path}</span>
                     </button>
                   {/each}
+                  {#if recentProjects.length > 3}
+                    <button class="show-more-btn" onclick={() => showAllRecent = !showAllRecent}>
+                      {showAllRecent ? 'Show less' : `Show more (${recentProjects.length - 3})`}
+                    </button>
+                  {/if}
                 </div>
               {/if}
               <p>Open a file from the sidebar to start editing</p>
@@ -453,6 +466,8 @@
     width: 340px;
     gap: 4px;
     margin-bottom: 12px;
+    max-height: 240px;
+    overflow-y: auto;
   }
 
   .recent-item {
@@ -486,6 +501,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+  }
+
+  .show-more-btn {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .show-more-btn:hover {
+    color: var(--accent);
   }
 
   .shortcuts kbd {
