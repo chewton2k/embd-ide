@@ -236,6 +236,11 @@
   }
 
   async function selectFile(file: GitFile) {
+    if (selectedFile?.path === file.path) {
+      selectedFile = null;
+      diffLines = [];
+      return;
+    }
     selectedFile = file;
     const root = $projectRoot;
     if (!root) return;
