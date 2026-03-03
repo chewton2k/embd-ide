@@ -129,6 +129,7 @@
   }
 
   let appVersion = $state('');
+  let isClosing = false;
 
   onMount(async () => {
     getVersion().then(v => appVersion = v);
@@ -144,11 +145,18 @@
     // Save session on window close — await the save before destroying
     const appWindow = getCurrentWindow();
     await appWindow.onCloseRequested(async (event) => {
+      if (isClosing) return;
+      isClosing = true;
       event.preventDefault();
       const root = get(projectRoot);
       if (root) {
         try {
-          await saveSessionNow(root);
+          await Promise.race([
+            saveSessionNow(root),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Save timeout')), 5000)
+            ),
+          ]);
         } catch (e) {
           console.error('Failed to save session on close:', e);
         }
