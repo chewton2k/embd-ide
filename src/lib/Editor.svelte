@@ -22,16 +22,17 @@
   import { sql } from '@codemirror/lang-sql';
   import { xml } from '@codemirror/lang-xml';
   import { prolog } from 'codemirror-lang-prolog';
+  // @ts-ignore — no type declarations shipped
   import { scheme } from 'codemirror-lang-scheme';
   import { StreamLanguage } from '@codemirror/language';
   import { oCaml } from '@codemirror/legacy-modes/mode/mllike';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-  import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree } from '@codemirror/language';
+  import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree, ensureSyntaxTree } from '@codemirror/language';
   import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback } from './stores.ts';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback } from './stores';
 
   let { filePath }: { filePath: string } = $props();
 
@@ -482,18 +483,43 @@
   function buildErrorLensPlugin() {
     function scanErrors(state: EditorState): DecorationSet {
       const builder = new RangeSetBuilder<Decoration>();
-      const tree = syntaxTree(state);
+      // Use ensureSyntaxTree to wait for a fully-parsed tree (up to 500ms).
+      // syntaxTree() can return an incomplete tree which produces false error nodes.
+      const tree = ensureSyntaxTree(state, state.doc.length, 500);
+      if (!tree) return Decoration.none;
+
       const seenLines = new Set<number>();
       const widgets: { pos: number; widget: Decoration }[] = [];
 
       tree.iterate({
         enter(node) {
           if (node.type.isError) {
+            // Skip zero-length error nodes — these are parser recovery artifacts,
+            // not actual syntax errors in the source text.
+            if (node.from === node.to) return;
+
+            const raw = state.doc.sliceString(node.from, node.to).trim();
+            if (!raw) return;
+
+            // Skip false positives from JSX parsing: property access (.foo),
+            // closing braces/parens/brackets, and other common JSX artifacts.
+            if (/^[.}\])]/.test(raw) || /^[</>]+$/.test(raw)) return;
+
+            // Check parent context — errors inside JSX elements/attributes
+            // are almost always parser recovery false positives.
+            let parent = node.node.parent;
+            while (parent) {
+              const name = parent.type.name;
+              if (name === 'JSXElement' || name === 'JSXOpenTag' || name === 'JSXAttribute'
+                  || name === 'JSXEscape' || name === 'JSXFragmentTag'
+                  || name === 'JSXSelfClosingTag' || name === 'JSXSpreadAttribute') return;
+              parent = parent.parent;
+            }
+
             const line = state.doc.lineAt(node.from);
             if (!seenLines.has(line.number)) {
               seenLines.add(line.number);
-              const raw = state.doc.sliceString(node.from, node.to).trim();
-              const msg = raw ? `Unexpected: '${raw}'` : 'Syntax error';
+              const msg = `Unexpected: '${raw}'`;
               widgets.push({
                 pos: line.to,
                 widget: Decoration.widget({ widget: new ErrorWidget(msg), side: 1 }),
@@ -514,7 +540,12 @@
         private timer: ReturnType<typeof setTimeout> | null = null;
 
         constructor(view: EditorView) {
-          this.decorations = scanErrors(view.state);
+          this.decorations = Decoration.none;
+          // Delay initial scan to let the parser finish
+          this.timer = setTimeout(() => {
+            this.decorations = scanErrors(view.state);
+            view.requestMeasure();
+          }, 500);
         }
 
         update(update: ViewUpdate) {
@@ -916,7 +947,7 @@
       openSearchPanel(view);
       // Disable autocapitalize on the search inputs
       requestAnimationFrame(() => {
-        view.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
+        view?.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
           input.setAttribute('autocapitalize', 'off');
           input.setAttribute('autocorrect', 'off');
         });

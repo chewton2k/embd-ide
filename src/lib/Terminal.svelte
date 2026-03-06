@@ -6,7 +6,7 @@
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import { open } from '@tauri-apps/plugin-shell';
-  import { projectRoot, terminalFontSize, currentThemeId, getTheme, showTerminal } from './stores.ts';
+  import { projectRoot, terminalFontSize, currentThemeId, getTheme, showTerminal } from './stores';
   import { get } from 'svelte/store';
   import '@xterm/xterm/css/xterm.css';
 

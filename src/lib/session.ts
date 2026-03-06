@@ -23,6 +23,11 @@ export async function getRecentProjects(): Promise<RecentProject[]> {
   return invoke<RecentProject[]>('get_recent_projects');
 }
 
+export async function findRecentProject(path: string): Promise<RecentProject | null> {
+  const projects = await getRecentProjects();
+  return projects.find(p => p.path === path) ?? null;
+}
+
 export async function removeRecentProject(path: string): Promise<void> {
   return invoke('remove_recent_project', { projectPath: path });
 }

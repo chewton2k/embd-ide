@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { chatMessages, apiKey, activeFile, openFiles, type ChatMessage } from './stores.ts';
+  import { chatMessages, apiKey, activeFile, openFiles, type ChatMessage } from './stores';
   import { get } from 'svelte/store';
 
   let input = $state('');

@@ -5,8 +5,9 @@
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch } from './stores.ts';
-  import { saveSessionNow } from './session';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath } from './stores';
+  import { saveSessionNow, findRecentProject } from './session';
+  import { exists } from '@tauri-apps/plugin-fs';
 
   function isValidName(name: string): boolean {
     return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';
@@ -19,7 +20,7 @@
     children: FileEntry[] | null;
   }
 
-  let { onFileSelect, onSearchFiles, onOpenFolder: onOpenFolderProp }: { onFileSelect: (path: string, name: string) => void; onSearchFiles?: () => void; onOpenFolder?: (fn: (path: string) => Promise<void>) => void } = $props();
+  let { onFileSelect, onSearchFiles, onOpenFolder: onOpenFolderProp }: { onFileSelect: (path: string, name: string) => void; onSearchFiles?: () => void; onOpenFolder?: (fn: (path: string, restoreSession?: boolean) => Promise<void>) => void } = $props();
   let files = $state<FileEntry[]>([]);
   let expandedDirs = $state<Set<string>>(new Set());
   let rootPath = $state<string | null>(null);
@@ -350,7 +351,7 @@
     }
   }
 
-  async function openFolderByPath(path: string) {
+  async function openFolderByPath(path: string, restoreSession: boolean = true) {
     // Save current session before switching
     if (rootPath) {
       try {
@@ -368,6 +369,30 @@
     await fetchGitStatus();
     startWatching(rootPath);
     startGitPolling();
+
+    // Restore saved session if this folder is in recent projects
+    if (restoreSession) {
+      try {
+        const project = await findRecentProject(path);
+        if (project && project.session.open_files.length > 0) {
+          for (const file of project.session.open_files) {
+            const fileExists = await exists(file.path);
+            if (!fileExists) continue;
+            const name = file.path.split(/[/\\]/).pop() || file.path;
+            addFile(file.path, name);
+            if (file.pinned) togglePin(file.path);
+          }
+          if (project.session.active_file) {
+            const activeExists = await exists(project.session.active_file);
+            if (activeExists) {
+              activeFilePath.set(project.session.active_file);
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to restore session:', e);
+      }
+    }
   }
 
   async function openFolder() {

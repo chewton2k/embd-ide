@@ -120,7 +120,7 @@
         canvas.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
 
         const ctx = canvas.getContext('2d')!;
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
 
         pdfContainer.appendChild(canvas);
       }

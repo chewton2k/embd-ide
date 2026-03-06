@@ -14,7 +14,7 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, togglePin } from './lib/stores.ts';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab } from './lib/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -35,9 +35,9 @@
 
   let recentProjects = $state<RecentProject[]>([]);
   let showAllRecent = $state(false);
-  let openFolderByPath: ((path: string) => Promise<void>) | null = null;
+  let openFolderByPath: ((path: string, restoreSession?: boolean) => Promise<void>) | null = null;
 
-  function handleOpenFolder(fn: (path: string) => Promise<void>) {
+  function handleOpenFolder(fn: (path: string, restoreSession?: boolean) => Promise<void>) {
     openFolderByPath = fn;
   }
 
@@ -50,24 +50,8 @@
       alert(`Project folder no longer exists:\n${project.path}`);
       return;
     }
+    // Session restoration is handled inside openFolderByPath
     await openFolderByPath(project.path);
-    // Restore session files
-    for (const file of project.session.open_files) {
-      const fileExists = await exists(file.path);
-      if (!fileExists) continue;
-      const name = file.path.split(/[/\\]/).pop() || file.path;
-      addFile(file.path, name);
-      if (file.pinned) {
-        togglePin(file.path);
-      }
-    }
-    // Restore active file
-    if (project.session.active_file) {
-      const activeExists = await exists(project.session.active_file);
-      if (activeExists) {
-        activeFilePath.set(project.session.active_file);
-      }
-    }
   }
 
   let showChat = $state(false);

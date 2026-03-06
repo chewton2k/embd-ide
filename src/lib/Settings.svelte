@@ -6,7 +6,7 @@
     terminalFontSize,
     currentThemeId, THEMES, uiFontSize, uiDensity,
     maxRecentProjects, maxTabs,
-  } from './stores.ts';
+  } from './stores';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
 

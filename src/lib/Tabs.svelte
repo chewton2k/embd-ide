@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus } from './stores.ts';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus } from './stores';
 
   let tabsBar: HTMLDivElement | undefined = $state();
 
