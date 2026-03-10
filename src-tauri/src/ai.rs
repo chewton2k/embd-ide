@@ -22,30 +22,35 @@ pub fn set_api_key(state: tauri::State<'_, ApiKeyState>, key: String) -> Result<
 pub struct AiRequest {
     pub prompt: String,
     pub context: Option<String>,
+    pub model: Option<String>,
 }
 
 #[derive(Serialize)]
-struct ClaudeMessage {
+struct OpenRouterMessage {
     role: String,
     content: String,
 }
 
 #[derive(Serialize)]
-struct ClaudeRequest {
+struct OpenRouterRequest {
     model: String,
     max_tokens: u32,
-    messages: Vec<ClaudeMessage>,
-    system: Option<String>,
+    messages: Vec<OpenRouterMessage>,
 }
 
 #[derive(Deserialize)]
-struct ClaudeResponse {
-    content: Vec<ContentBlock>,
+struct OpenRouterResponse {
+    choices: Vec<OpenRouterChoice>,
 }
 
 #[derive(Deserialize)]
-struct ContentBlock {
-    text: Option<String>,
+struct OpenRouterChoice {
+    message: OpenRouterChoiceMessage,
+}
+
+#[derive(Deserialize)]
+struct OpenRouterChoiceMessage {
+    content: Option<String>,
 }
 
 #[tauri::command]
@@ -70,21 +75,28 @@ pub async fn ai_chat(state: tauri::State<'_, ApiKeyState>, request: AiRequest) -
         user_content = format!("Code context:\n```\n{}\n```\n\n{}", ctx, user_content);
     }
 
-    let body = ClaudeRequest {
-        model: "claude-sonnet-4-20250514".to_string(),
+    let model = request.model
+        .unwrap_or_else(|| "openrouter/free".to_string());
+
+    let body = OpenRouterRequest {
+        model,
         max_tokens: 4096,
-        messages: vec![ClaudeMessage {
-            role: "user".to_string(),
-            content: user_content,
-        }],
-        system: Some(system_prompt.to_string()),
+        messages: vec![
+            OpenRouterMessage {
+                role: "system".to_string(),
+                content: system_prompt.to_string(),
+            },
+            OpenRouterMessage {
+                role: "user".to_string(),
+                content: user_content,
+            },
+        ],
     };
 
     let client = reqwest::Client::new();
     let response = client
-        .post("https://api.anthropic.com/v1/messages")
-        .header("x-api-key", &api_key)
-        .header("anthropic-version", "2023-06-01")
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
         .header("content-type", "application/json")
         .json(&body)
         .send()
@@ -93,17 +105,18 @@ pub async fn ai_chat(state: tauri::State<'_, ApiKeyState>, request: AiRequest) -
 
     if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("API error: {}", status));
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status, body));
     }
 
-    let claude_response: ClaudeResponse = response
+    let or_response: OpenRouterResponse = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
-    claude_response
-        .content
+    or_response
+        .choices
         .first()
-        .and_then(|block| block.text.clone())
+        .and_then(|c| c.message.content.clone())
         .ok_or_else(|| "Empty response from AI".to_string())
 }

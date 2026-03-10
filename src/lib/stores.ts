@@ -165,10 +165,15 @@ export interface ChatMessage {
 
 export const chatMessages = writable<ChatMessage[]>([]);
 export const apiKey = writable<string>(localStorage.getItem('embd-api-key') || '');
+export const aiModel = writable<string>(localStorage.getItem('embd-ai-model') || 'openrouter/free');
 
 apiKey.subscribe(key => {
   if (key) localStorage.setItem('embd-api-key', key);
   else localStorage.removeItem('embd-api-key');
+});
+
+aiModel.subscribe(model => {
+  if (model) localStorage.setItem('embd-ai-model', model);
 });
 
 export const projectRoot = writable<string | null>(null);
