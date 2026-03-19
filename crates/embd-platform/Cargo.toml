@@ -1,0 +1,15 @@
+[package]
+name = "embd-platform"
+version = "0.1.0"
+edition = "2021"
+description = "Platform services: filesystem, git, search, OS integration"
+
+[dependencies]
+embd-core = { path = "../embd-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+trash = "5"
+dirs = "5"
+ignore = "0.4"
+notify = "7"
+notify-debouncer-mini = "0.5"

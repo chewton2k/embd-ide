@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/embd-core",
+    "crates/embd-editor",
+    "crates/embd-workspace",
+    "crates/embd-platform",
+    "crates/embd-commands",
+    "src-tauri", "crates/embd-app",
+]

@@ -1,0 +1,8 @@
+[package]
+name = "embd-commands"
+version = "0.1.0"
+edition = "2021"
+description = "Command registry and action dispatch system"
+
+[dependencies]
+embd-core = { path = "../embd-core" }
