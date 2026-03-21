@@ -29,6 +29,7 @@ impl GitPanelData {
 }
 
 /// Events emitted by git panel buttons
+#[allow(dead_code)]
 pub enum GitAction {
     StageFile(String),
     UnstageFile(String),
@@ -73,6 +74,7 @@ pub fn refresh_git(root: &Path) -> GitPanelData {
     }
 }
 
+#[allow(dead_code)]
 pub fn execute_action(root: &Path, action: &GitAction) -> Result<String, String> {
     let repo = GitRepo::new(root);
     match action {
@@ -109,6 +111,7 @@ pub fn execute_action(root: &Path, action: &GitAction) -> Result<String, String>
     }
 }
 
+#[allow(dead_code)]
 fn relative_to(path: &str, root: &Path) -> String {
     let root_str = root.to_str().unwrap_or("");
     path.strip_prefix(root_str)
@@ -122,7 +125,7 @@ pub fn status_color(code: &str) -> Hsla {
         "M" => Colors::warning(),
         "A" | "S" => Colors::success(),
         "D" => Colors::error(),
-        "U" => Colors::text_muted(),
+        "U" => Colors::text_faint(),
         "C" => Colors::error(),
         _ => Colors::text(),
     }
@@ -144,57 +147,69 @@ pub fn status_label(code: &str) -> &'static str {
 pub fn render_git_panel(
     data: &GitPanelData,
     commit_msg: &str,
-    panel_width: f32,
     root: &Path,
     diff_text: &str,
 ) -> impl IntoElement {
-    let branch_text = data.branch.as_deref().unwrap_or("(detached)").to_string();
+    let branch_text = data.branch.as_deref().unwrap_or("detached").to_string();
     let root_str = root.to_str().unwrap_or("").to_string();
 
     let mut ahead_behind = String::new();
     if data.ahead > 0 || data.behind > 0 {
-        ahead_behind = format!(" ↑{} ↓{}", data.ahead, data.behind);
+        ahead_behind = format!("↑{} ↓{}", data.ahead, data.behind);
     }
 
     div()
         .id("git-panel")
-        .w(px(panel_width))
-        .h_full()
-        .flex_shrink_0()
+        .size_full()
         .bg(Colors::bg_surface())
         .border_l_1()
         .border_color(Colors::border())
         .flex()
         .flex_col()
         .overflow_hidden()
-        // Header
+        // Header — branch + ahead/behind
         .child(
             div()
-                .px(px(12.0))
-                .py(px(10.0))
-                .flex()
-                .items_center()
-                .justify_between()
-                .child(
-                    div().text_xs().text_color(Colors::text_muted()).child("SOURCE CONTROL"),
-                ),
-        )
-        // Branch
-        .child(
-            div()
-                .px(px(12.0))
-                .pb(px(8.0))
+                .h(px(32.0))
+                .px(px(14.0))
                 .flex()
                 .items_center()
                 .gap(px(6.0))
-                .child(div().text_sm().text_color(Colors::accent()).child(branch_text))
-                .child(div().text_xs().text_color(Colors::text_muted()).child(ahead_behind)),
+                .border_b_1()
+                .border_color(Colors::border_subtle())
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(Colors::text_faint())
+                        .child("SOURCE CONTROL"),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(Colors::text_faint())
+                        .child("·"),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(Colors::accent_dim())
+                        .child(branch_text),
+                )
+                .when(!ahead_behind.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .text_xs()
+                            .text_color(Colors::text_faint())
+                            .child(ahead_behind.clone()),
+                    )
+                }),
         )
         // Action buttons
         .child(
             div()
-                .px(px(12.0))
-                .pb(px(8.0))
+                .px(px(10.0))
+                .py(px(6.0))
                 .flex()
                 .gap(px(4.0))
                 .child(action_btn("Fetch"))
@@ -202,19 +217,19 @@ pub fn render_git_panel(
                 .child(action_btn("Push")),
         )
         // Staged section
-        .child(render_file_section("Staged Changes", &data.staged, true, &root_str))
+        .child(render_file_section("Staged", &data.staged, true, &root_str))
         // Changes section
         .child(render_file_section("Changes", &data.changed, false, &root_str))
         // Diff preview
         .child(if !diff_text.is_empty() {
             div()
                 .id("diff-preview")
-                .max_h(px(200.0))
+                .max_h(px(180.0))
                 .overflow_y_scroll()
                 .mx(px(8.0))
-                .mb(px(8.0))
+                .mb(px(6.0))
                 .bg(Colors::bg_base())
-                .rounded(px(4.0))
+                .rounded(px(3.0))
                 .p(px(8.0))
                 .text_xs()
                 .font_family("monospace")
@@ -224,9 +239,9 @@ pub fn render_git_panel(
                     } else if line.starts_with('-') && !line.starts_with("---") {
                         Colors::error()
                     } else if line.starts_with("@@") {
-                        Colors::accent()
+                        Colors::accent_dim()
                     } else {
-                        Colors::text_muted()
+                        Colors::text_faint()
                     };
                     div().text_color(color).child(line.to_string())
                 }))
@@ -238,24 +253,25 @@ pub fn render_git_panel(
         .child(
             div()
                 .mt_auto()
-                .p(px(12.0))
+                .px(px(10.0))
+                .py(px(10.0))
                 .flex()
                 .flex_col()
-                .gap(px(8.0))
+                .gap(px(6.0))
                 .border_t_1()
-                .border_color(Colors::border())
+                .border_color(Colors::border_subtle())
                 .child(
                     div()
-                        .h(px(60.0))
+                        .h(px(52.0))
                         .w_full()
                         .bg(Colors::bg_base())
                         .border_1()
                         .border_color(Colors::border())
-                        .rounded(px(4.0))
+                        .rounded(px(3.0))
                         .p(px(8.0))
-                        .text_sm()
+                        .text_xs()
                         .text_color(if commit_msg.is_empty() {
-                            Colors::text_muted()
+                            Colors::text_faint()
                         } else {
                             Colors::text()
                         })
@@ -268,17 +284,18 @@ pub fn render_git_panel(
                 .child(
                     div()
                         .id("commit-btn")
-                        .h(px(28.0))
+                        .h(px(26.0))
                         .w_full()
-                        .bg(Colors::accent())
-                        .rounded(px(4.0))
+                        .bg(Colors::accent_dim())
+                        .rounded(px(3.0))
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_sm()
-                        .text_color(Colors::bg_base())
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(Colors::text())
                         .cursor_pointer()
-                        .hover(|s| s.opacity(0.9))
+                        .hover(|s| s.bg(Colors::accent()))
                         .child("Commit"),
                 ),
         )
@@ -287,13 +304,13 @@ pub fn render_git_panel(
 fn action_btn(label: &str) -> impl IntoElement {
     div()
         .px(px(8.0))
-        .py(px(4.0))
+        .py(px(3.0))
         .bg(Colors::bg_base())
-        .rounded(px(4.0))
+        .rounded(px(3.0))
         .text_xs()
-        .text_color(Colors::text_muted())
+        .text_color(Colors::text_faint())
         .cursor_pointer()
-        .hover(|s| s.text_color(Colors::text()).bg(Colors::surface_hover()))
+        .hover(|s| s.text_color(Colors::text_muted()).bg(Colors::surface_hover()))
         .child(label.to_string())
 }
 
@@ -324,17 +341,19 @@ fn render_file_section(
             };
 
             div()
-                .px(px(12.0))
+                .px(px(10.0))
                 .py(px(2.0))
+                .mx(px(4.0))
+                .rounded(px(3.0))
                 .flex()
                 .items_center()
                 .gap(px(4.0))
-                .text_sm()
+                .text_xs()
                 .hover(|s| s.bg(Colors::surface_hover()))
                 .cursor_pointer()
                 .child(
                     div()
-                        .w(px(14.0))
+                        .w(px(12.0))
                         .text_xs()
                         .text_color(status_color(code))
                         .child(status_label(code).to_string()),
@@ -344,14 +363,14 @@ fn render_file_section(
                         .flex_1()
                         .flex()
                         .items_center()
-                        .gap(px(4.0))
+                        .gap(px(6.0))
                         .overflow_hidden()
-                        .child(div().text_color(Colors::text()).child(filename))
+                        .child(div().text_color(Colors::text_muted()).child(filename))
                         .when(!dir.is_empty(), |d| {
                             d.child(
                                 div()
                                     .text_xs()
-                                    .text_color(Colors::text_muted())
+                                    .text_color(Colors::text_faint())
                                     .child(dir),
                             )
                         }),
@@ -364,7 +383,7 @@ fn render_file_section(
                         .child(if is_staged {
                             div()
                                 .text_xs()
-                                .text_color(Colors::text_muted())
+                                .text_color(Colors::text_faint())
                                 .cursor_pointer()
                                 .hover(|s| s.text_color(Colors::error()))
                                 .child("−")
@@ -376,7 +395,7 @@ fn render_file_section(
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(Colors::text_muted())
+                                        .text_color(Colors::text_faint())
                                         .cursor_pointer()
                                         .hover(|s| s.text_color(Colors::success()))
                                         .child("+"),
@@ -384,7 +403,7 @@ fn render_file_section(
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(Colors::text_muted())
+                                        .text_color(Colors::text_faint())
                                         .cursor_pointer()
                                         .hover(|s| s.text_color(Colors::error()))
                                         .child("✕"),
@@ -401,34 +420,29 @@ fn render_file_section(
         .flex_col()
         .child(
             div()
-                .px(px(12.0))
-                .py(px(6.0))
+                .px(px(14.0))
+                .py(px(5.0))
                 .flex()
                 .items_center()
                 .justify_between()
                 .text_xs()
-                .text_color(Colors::text_muted())
-                .child(format!("{} ({})", title, count))
+                .text_color(Colors::text_faint())
+                .child(format!("{} {}", title, count))
                 .child(if is_staged {
                     div()
                         .text_xs()
-                        .text_color(Colors::text_muted())
+                        .text_color(Colors::text_faint())
                         .cursor_pointer()
                         .hover(|s| s.text_color(Colors::error()))
-                        .child("− all")
+                        .child("−")
                         .into_any_element()
                 } else {
                     div()
-                        .flex()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(Colors::text_muted())
-                                .cursor_pointer()
-                                .hover(|s| s.text_color(Colors::success()))
-                                .child("+ all"),
-                        )
+                        .text_xs()
+                        .text_color(Colors::text_faint())
+                        .cursor_pointer()
+                        .hover(|s| s.text_color(Colors::success()))
+                        .child("+")
                         .into_any_element()
                 }),
         )
