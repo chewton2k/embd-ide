@@ -7,4 +7,6 @@ members = [
     "crates/embd-platform",
     "crates/embd-commands",
     "crates/embd-app",
+    "crates/xtask",
 ]
+default-members = ["crates/embd-app"]
