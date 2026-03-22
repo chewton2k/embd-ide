@@ -1,10 +1,13 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use gpui::*;
 use gpui::prelude::FluentBuilder as _;
 use gpui_component::Root;
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::Sizable;
+use gpui_component::menu::ContextMenuExt;
 use gpui_component::resizable::{h_resizable, v_resizable, resizable_panel};
 use gpui_component::list::ListItem;
 use gpui_component::tree::{tree, TreeItem, TreeState};
@@ -13,6 +16,7 @@ use embd_platform::fs::{FileEntry, ProjectFs};
 use embd_platform::git::GitRepo;
 use embd_platform::search::find_files;
 
+use crate::assets;
 use crate::git_panel::{self, GitPanelData};
 use crate::terminal::{TerminalEvent, TerminalPane};
 use crate::theme::Colors;
@@ -32,6 +36,21 @@ actions!(
         NextTab,
         PrevTab,
         ToggleSearchModal,
+        // Context menu actions
+        CtxNewFile,
+        CtxNewFolder,
+        CtxOpenInTerminal,
+        CtxCut,
+        CtxCopy,
+        CtxDuplicate,
+        CtxPaste,
+        CtxRename,
+        CtxTrash,
+        CtxDelete,
+        CtxRevealInFinder,
+        CtxOpenDefaultApp,
+        CtxCopyPath,
+        CtxCopyRelativePath,
     ]
 );
 
@@ -79,6 +98,18 @@ pub struct WorkspaceView {
 
     // Search debouncing: only apply results from the latest query
     search_generation: u64,
+
+    // Context menu state
+    context_path: Arc<Mutex<Option<String>>>,
+    clipboard_path: Option<(String, bool)>, // (path, is_cut)
+
+    // Tree items (kept in sync with TreeState for expansion state tracking)
+    tree_items: Vec<TreeItem>,
+
+    // Inline creation state: (parent_dir, is_directory)
+    creating: Option<(String, bool)>,
+    create_input: Entity<InputState>,
+
 }
 
 impl WorkspaceView {
@@ -87,6 +118,7 @@ impl WorkspaceView {
         search_input: Entity<InputState>,
         commit_input: Entity<InputState>,
         terminal_pane: Entity<TerminalPane>,
+        create_input: Entity<InputState>,
         cx: &mut Context<Self>,
     ) -> Self {
         Self {
@@ -113,6 +145,11 @@ impl WorkspaceView {
             last_opened_path: None,
             pending_open: None,
             search_generation: 0,
+            context_path: Arc::new(Mutex::new(None)),
+            clipboard_path: None,
+            tree_items: Vec::new(),
+            creating: None,
+            create_input,
         }
     }
 
@@ -244,6 +281,13 @@ impl WorkspaceView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Escape during inline creation cancels it
+        if self.creating.is_some() && event.keystroke.key.as_str() == "escape" {
+            self.cancel_creating(cx);
+            self.focus_handle.focus(window);
+            return;
+        }
+
         if !self.search_visible {
             return;
         }
@@ -265,6 +309,11 @@ impl WorkspaceView {
                         self.open_file_deferred(&path);
                         cx.notify();
                     }
+                } else {
+                    // No results or empty query — close search
+                    self.search_visible = false;
+                    self.focus_handle.focus(window);
+                    cx.notify();
                 }
             }
             "up" => {
@@ -321,6 +370,325 @@ impl WorkspaceView {
         .detach();
     }
 
+    // ── Context menu handlers ───────────────────────────────────────
+
+    fn refresh_tree(&mut self, cx: &mut Context<Self>) {
+        if let Some(ref fs) = self.project_fs {
+            let mut expanded = HashSet::new();
+            collect_expanded_ids(&self.tree_items, &mut expanded);
+            let creating_parent = self.creating.as_ref().map(|(dir, _)| dir.as_str());
+
+            if let Ok(entries) = fs.read_dir_tree(fs.root(), 3) {
+                let root_path = fs.root().to_string_lossy().to_string();
+                let root_name = Path::new(&root_path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                let is_root_target = creating_parent.is_some_and(|p| p == root_path);
+                let mut child_items = build_tree_items(&entries, &expanded, creating_parent);
+                if is_root_target {
+                    child_items.insert(0, TreeItem::new("__creating__", ""));
+                }
+                let root_item = TreeItem::new(root_path.clone(), root_name)
+                    .children(child_items)
+                    .expanded(true);
+                let items = vec![root_item];
+                self.tree_items = items.clone();
+                self.tree_state.update(cx, |state, cx| {
+                    state.set_items(items, cx);
+                });
+            }
+        }
+    }
+
+    fn ctx_new_file(&mut self, _: &CtxNewFile, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let dir = if Path::new(&path).is_dir() {
+            path
+        } else {
+            Path::new(&path).parent().unwrap().to_string_lossy().to_string()
+        };
+        self.creating = Some((dir, false));
+        self.create_input.update(cx, |s, cx| {
+            s.set_value("", window, cx);
+            s.focus(window, cx);
+        });
+        self.refresh_tree(cx);
+        cx.notify();
+    }
+
+    fn ctx_new_folder(&mut self, _: &CtxNewFolder, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let dir = if Path::new(&path).is_dir() {
+            path
+        } else {
+            Path::new(&path).parent().unwrap().to_string_lossy().to_string()
+        };
+        self.creating = Some((dir, true));
+        self.create_input.update(cx, |s, cx| {
+            s.set_value("", window, cx);
+            s.focus(window, cx);
+        });
+        self.refresh_tree(cx);
+        cx.notify();
+    }
+
+    fn finish_creating(&mut self, cx: &mut Context<Self>) {
+        let Some((parent_dir, is_dir)) = self.creating.take() else { return };
+        let name = self.create_input.read(cx).value().to_string();
+        if name.is_empty() {
+            // Empty name — cancel
+            self.refresh_tree(cx);
+            cx.notify();
+            return;
+        }
+        let full_path = Path::new(&parent_dir).join(&name);
+        if is_dir {
+            let _ = std::fs::create_dir(&full_path);
+        } else {
+            let _ = std::fs::write(&full_path, "");
+        }
+        self.refresh_tree(cx);
+        if !is_dir {
+            self.open_file_deferred(&full_path.to_string_lossy());
+        }
+        cx.notify();
+    }
+
+    fn cancel_creating(&mut self, cx: &mut Context<Self>) {
+        if self.creating.is_some() {
+            self.creating = None;
+            self.refresh_tree(cx);
+            cx.notify();
+        }
+    }
+
+    fn on_create_event(&mut self, _: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        match event {
+            InputEvent::PressEnter { .. } => self.finish_creating(cx),
+            InputEvent::Blur => self.cancel_creating(cx),
+            _ => {}
+        }
+    }
+
+    fn ctx_reveal_in_finder(&mut self, _: &CtxRevealInFinder, _w: &mut Window, _cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let _ = std::process::Command::new("open").args(["-R", &path]).spawn();
+    }
+
+    fn ctx_open_default_app(&mut self, _: &CtxOpenDefaultApp, _w: &mut Window, _cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let _ = std::process::Command::new("open").arg(&path).spawn();
+    }
+
+    fn ctx_open_in_terminal(&mut self, _: &CtxOpenInTerminal, _w: &mut Window, _cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let dir = if Path::new(&path).is_dir() {
+            path
+        } else {
+            Path::new(&path).parent().unwrap().to_string_lossy().to_string()
+        };
+        let _ = std::process::Command::new("open").args(["-a", "Terminal", &dir]).spawn();
+    }
+
+    fn ctx_cut(&mut self, _: &CtxCut, _w: &mut Window, _cx: &mut Context<Self>) {
+        if let Some(path) = self.context_path.lock().unwrap().clone() {
+            self.clipboard_path = Some((path, true));
+        }
+    }
+
+    fn ctx_copy(&mut self, _: &CtxCopy, _w: &mut Window, _cx: &mut Context<Self>) {
+        if let Some(path) = self.context_path.lock().unwrap().clone() {
+            self.clipboard_path = Some((path, false));
+        }
+    }
+
+    fn ctx_duplicate(&mut self, _: &CtxDuplicate, _w: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let src = Path::new(&path);
+        let parent = src.parent().unwrap();
+        let stem = src.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        let ext = src
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default();
+        let mut copy_name = format!("{} copy{}", stem, ext);
+        let mut i = 2;
+        while parent.join(&copy_name).exists() {
+            copy_name = format!("{} copy {}{}", stem, i, ext);
+            i += 1;
+        }
+        if src.is_dir() {
+            let _ = std::process::Command::new("cp")
+                .args(["-R", &path, &parent.join(&copy_name).to_string_lossy()])
+                .output();
+        } else {
+            let _ = std::fs::copy(&path, parent.join(&copy_name));
+        }
+        self.refresh_tree(cx);
+        cx.notify();
+    }
+
+    fn ctx_paste(&mut self, _: &CtxPaste, _w: &mut Window, cx: &mut Context<Self>) {
+        let Some((src_path, is_cut)) = self.clipboard_path.clone() else { return };
+        let Some(target_path) = self.context_path.lock().unwrap().clone() else { return };
+        let target_dir = if Path::new(&target_path).is_dir() {
+            target_path
+        } else {
+            Path::new(&target_path).parent().unwrap().to_string_lossy().to_string()
+        };
+        let src = Path::new(&src_path);
+        let filename = src.file_name().unwrap().to_string_lossy().to_string();
+        let dest = Path::new(&target_dir).join(&filename);
+        if is_cut {
+            let _ = std::fs::rename(&src_path, &dest);
+            self.clipboard_path = None;
+        } else if src.is_dir() {
+            let _ = std::process::Command::new("cp")
+                .args(["-R", &src_path, &dest.to_string_lossy()])
+                .output();
+        } else {
+            let _ = std::fs::copy(&src_path, &dest);
+        }
+        self.refresh_tree(cx);
+        cx.notify();
+    }
+
+    fn ctx_copy_path(&mut self, _: &CtxCopyPath, _w: &mut Window, cx: &mut Context<Self>) {
+        if let Some(path) = self.context_path.lock().unwrap().clone() {
+            cx.write_to_clipboard(ClipboardItem::new_string(path));
+        }
+    }
+
+    fn ctx_copy_relative_path(&mut self, _: &CtxCopyRelativePath, _w: &mut Window, cx: &mut Context<Self>) {
+        if let Some(path) = self.context_path.lock().unwrap().clone() {
+            let relative = if let Some(ref root) = self.project_root {
+                Path::new(&path)
+                    .strip_prefix(root)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or(path)
+            } else {
+                path
+            };
+            cx.write_to_clipboard(ClipboardItem::new_string(relative));
+        }
+    }
+
+    fn ctx_rename(&mut self, _: &CtxRename, _w: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let old_name = Path::new(&path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let path_clone = path.clone();
+
+        let (tx, rx) = flume::bounded(1);
+        std::thread::spawn(move || {
+            let output = std::process::Command::new("osascript")
+                .args([
+                    "-e",
+                    &format!(
+                        "text returned of (display dialog \"Rename:\" default answer \"{}\")",
+                        old_name
+                    ),
+                ])
+                .output();
+            if let Ok(out) = output {
+                let new_name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !new_name.is_empty() {
+                    let _ = tx.send(new_name);
+                }
+            }
+        });
+
+        cx.spawn(async move |this, cx| {
+            if let Ok(new_name) = rx.recv_async().await {
+                let _ = this.update(cx, |this, cx| {
+                    let src = Path::new(&path_clone);
+                    let dest = src.parent().unwrap().join(&new_name);
+                    if std::fs::rename(src, &dest).is_ok() {
+                        let old_path = path_clone.clone();
+                        let new_path = dest.to_string_lossy().to_string();
+                        if let Some(state) = this.editor_states.remove(&old_path) {
+                            this.editor_states.insert(new_path.clone(), state);
+                            if let Some(pos) = this.tab_order.iter().position(|p| p == &old_path) {
+                                this.tab_order[pos] = new_path.clone();
+                            }
+                            if this.active_file.as_deref() == Some(&old_path) {
+                                this.active_file = Some(new_path);
+                            }
+                        }
+                        this.refresh_tree(cx);
+                    }
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn ctx_trash(&mut self, _: &CtxTrash, _w: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        self.tab_order.retain(|p| p != &path);
+        self.editor_states.remove(&path);
+        self.modified_files.remove(&path);
+        if self.active_file.as_deref() == Some(&path) {
+            self.active_file = self.tab_order.last().cloned();
+        }
+        let _ = std::process::Command::new("osascript")
+            .args([
+                "-e",
+                &format!(
+                    "tell app \"Finder\" to delete POSIX file \"{}\"",
+                    path
+                ),
+            ])
+            .output();
+        self.refresh_tree(cx);
+        cx.notify();
+    }
+
+    fn ctx_delete(&mut self, _: &CtxDelete, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = self.context_path.lock().unwrap().clone() else { return };
+        let filename = Path::new(&path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let rx = window.prompt(
+            PromptLevel::Warning,
+            &format!("Delete {}?", filename),
+            None,
+            &[PromptButton::cancel("Cancel"), PromptButton::ok("Delete")],
+            cx,
+        );
+
+        cx.spawn(async move |this, cx| {
+            if let Ok(1) = rx.await {
+                let _ = this.update(cx, |this, cx| {
+                    this.tab_order.retain(|p| p != &path);
+                    this.editor_states.remove(&path);
+                    this.modified_files.remove(&path);
+                    if this.active_file.as_deref() == Some(&path) {
+                        this.active_file = this.tab_order.last().cloned();
+                    }
+                    let p = Path::new(&path);
+                    if p.is_dir() {
+                        let _ = std::fs::remove_dir_all(p);
+                    } else {
+                        let _ = std::fs::remove_file(p);
+                    }
+                    this.refresh_tree(cx);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     // ── Project loading ─────────────────────────────────────────────
 
     fn load_project(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -340,7 +708,18 @@ impl WorkspaceView {
             }
         };
 
-        let tree_items = file_entries_to_tree_items(&entries);
+        let root_path = path.to_string_lossy().to_string();
+        let root_name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let child_items = file_entries_to_tree_items(&entries);
+        let root_item = TreeItem::new(root_path, root_name)
+            .children(child_items)
+            .expanded(true);
+        let tree_items = vec![root_item];
+        self.tree_items = tree_items.clone();
         self.tree_state.update(cx, |state, cx| {
             state.set_items(tree_items, cx);
         });
@@ -507,6 +886,10 @@ impl WorkspaceView {
     fn render_sidebar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let has_project = self.project_fs.is_some();
         let git_map = self.git_status_map.clone();
+        let context_path = self.context_path.clone();
+        let focus = self.focus_handle.clone();
+        let creating = self.creating.clone();
+        let create_input_for_tree = self.create_input.clone();
 
         let project_name = self
             .project_root
@@ -566,6 +949,7 @@ impl WorkspaceView {
                     ),
             )
             .child(if has_project {
+                let focus_for_menu = focus.clone();
                 div()
                     .flex_1()
                     .overflow_hidden()
@@ -578,6 +962,36 @@ impl WorkspaceView {
                             let label = item.label.clone();
                             let path_id = item.id.to_string();
 
+                            // Inline creation placeholder
+                            if path_id == "__creating__" {
+                                let is_creating_dir = creating.as_ref().map(|(_, d)| *d).unwrap_or(false);
+                                let icon = if is_creating_dir { "icons/folder.svg" } else { "icons/file.svg" };
+                                return ListItem::new(ix)
+                                    .pl(px(12.0 * depth as f32 + 10.0))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .w_full()
+                                            .gap(px(5.0))
+                                            .items_center()
+                                            .text_xs()
+                                            .text_color(Colors::text_muted())
+                                            .child(
+                                                svg()
+                                                    .path(icon)
+                                                    .size(px(14.0))
+                                                    .flex_shrink_0()
+                                                    .text_color(assets::icon_color(icon)),
+                                            )
+                                            .child(
+                                                Input::new(&create_input_for_tree)
+                                                    .appearance(false)
+                                                    .bordered(false)
+                                                    .xsmall(),
+                                            ),
+                                    );
+                            }
+
                             let git_code = git_map.get(&path_id).cloned();
                             let status_char = git_code
                                 .as_deref()
@@ -588,11 +1002,14 @@ impl WorkspaceView {
                                 .map(git_panel::status_color)
                                 .unwrap_or(Colors::text());
 
-                            let prefix = if is_dir {
-                                if entry.is_expanded() { "▾ " } else { "▸ " }
-                            } else {
-                                "  "
-                            };
+                            let icon_path = assets::icon_for_path(
+                                &path_id,
+                                is_dir,
+                                entry.is_expanded(),
+                            );
+
+                            let ctx_path = context_path.clone();
+                            let ctx_str = path_id.clone();
 
                             ListItem::new(ix)
                                 .selected(selected)
@@ -600,7 +1017,8 @@ impl WorkspaceView {
                                 .child(
                                     div()
                                         .flex()
-                                        .gap(px(4.0))
+                                        .w_full()
+                                        .gap(px(5.0))
                                         .items_center()
                                         .text_xs()
                                         .text_color(if is_dir {
@@ -610,7 +1028,13 @@ impl WorkspaceView {
                                         } else {
                                             Colors::text_muted()
                                         })
-                                        .child(prefix)
+                                        .child(
+                                            svg()
+                                                .path(icon_path)
+                                                .size(px(14.0))
+                                                .flex_shrink_0()
+                                                .text_color(assets::icon_color(icon_path)),
+                                        )
                                         .child(label)
                                         .when(!status_char.is_empty() && !is_dir, |d: Div| {
                                             d.child(
@@ -621,10 +1045,34 @@ impl WorkspaceView {
                                                     .text_color(status_color)
                                                     .child(status_char.to_string()),
                                             )
+                                        })
+                                        .on_mouse_down(MouseButton::Right, move |_, _, _| {
+                                            *ctx_path.lock().unwrap() = Some(ctx_str.clone());
                                         }),
                                 )
                         }),
                     )
+                    .context_menu(move |menu, _window, _cx| {
+                        menu.action_context(focus_for_menu.clone())
+                            .menu("New File", Box::new(CtxNewFile))
+                            .menu("New Folder", Box::new(CtxNewFolder))
+                            .separator()
+                            .menu("Reveal in Finder", Box::new(CtxRevealInFinder))
+                            .menu("Open in Default App", Box::new(CtxOpenDefaultApp))
+                            .menu("Open in Terminal", Box::new(CtxOpenInTerminal))
+                            .separator()
+                            .menu("Cut", Box::new(CtxCut))
+                            .menu("Copy", Box::new(CtxCopy))
+                            .menu("Duplicate", Box::new(CtxDuplicate))
+                            .menu("Paste", Box::new(CtxPaste))
+                            .separator()
+                            .menu("Copy Path", Box::new(CtxCopyPath))
+                            .menu("Copy Relative Path", Box::new(CtxCopyRelativePath))
+                            .separator()
+                            .menu("Rename", Box::new(CtxRename))
+                            .menu("Trash", Box::new(CtxTrash))
+                            .menu("Delete", Box::new(CtxDelete))
+                    })
                     .into_any_element()
             } else {
                 div()
@@ -639,7 +1087,7 @@ impl WorkspaceView {
             })
     }
 
-    fn render_search_overlay(&self, _cx: &Context<Self>) -> impl IntoElement {
+    fn render_search_overlay(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let max_visible = 12;
 
         div()
@@ -648,11 +1096,16 @@ impl WorkspaceView {
             .absolute()
             .top_0()
             .left_0()
-            .bg(hsla(0.0, 0.0, 0.0, 0.5))
+            .bg(hsla(0.0, 0.0, 0.0, 0.0))
             .flex()
             .flex_col()
             .items_center()
             .pt(px(60.0))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                this.search_visible = false;
+                this.focus_handle.focus(window);
+                cx.notify();
+            }))
             .child(
                 div()
                     .id("search-modal")
@@ -665,6 +1118,10 @@ impl WorkspaceView {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
+                    // Stop clicks inside the modal from reaching the backdrop
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
                     // Search input
                     .child(
                         div()
@@ -875,8 +1332,8 @@ impl Render for WorkspaceView {
         // Process any pending file opens (needs window for InputState creation)
         self.process_pending_open(window, cx);
 
-        // Focus management — don't steal focus when search overlay is open
-        if !self.search_visible && !self.focus_handle.contains_focused(window, cx) {
+        // Focus management — don't steal focus when search overlay or inline creation is active
+        if !self.search_visible && self.creating.is_none() && !self.focus_handle.contains_focused(window, cx) {
             self.focus_handle.focus(window);
         }
 
@@ -915,6 +1372,7 @@ impl Render for WorkspaceView {
                         .unwrap_or("untitled")
                         .to_string();
                     let modified = self.modified_files.get(path).copied().unwrap_or(false);
+                    let tab_icon = assets::icon_for_path(path, false, false);
 
                     div()
                         .id(SharedString::from(format!("tab-{}", i)))
@@ -923,7 +1381,7 @@ impl Render for WorkspaceView {
                         .cursor_pointer()
                         .flex()
                         .items_center()
-                        .gap(px(4.0))
+                        .gap(px(5.0))
                         .hover(|s| s.bg(Colors::surface_hover()))
                         .text_color(if is_active {
                             Colors::text()
@@ -934,6 +1392,13 @@ impl Render for WorkspaceView {
                             d.bg(Colors::bg_base())
                                 .rounded_t(px(4.0))
                         })
+                        .child(
+                            svg()
+                                .path(tab_icon)
+                                .size(px(13.0))
+                                .flex_shrink_0()
+                                .text_color(assets::icon_color(tab_icon)),
+                        )
                         .child(name)
                         .when(modified, |d| {
                             d.child(
@@ -1123,6 +1588,20 @@ impl Render for WorkspaceView {
             .on_action(cx.listener(Self::next_tab))
             .on_action(cx.listener(Self::prev_tab))
             .on_action(cx.listener(Self::toggle_search))
+            .on_action(cx.listener(Self::ctx_new_file))
+            .on_action(cx.listener(Self::ctx_new_folder))
+            .on_action(cx.listener(Self::ctx_reveal_in_finder))
+            .on_action(cx.listener(Self::ctx_open_default_app))
+            .on_action(cx.listener(Self::ctx_open_in_terminal))
+            .on_action(cx.listener(Self::ctx_cut))
+            .on_action(cx.listener(Self::ctx_copy))
+            .on_action(cx.listener(Self::ctx_duplicate))
+            .on_action(cx.listener(Self::ctx_paste))
+            .on_action(cx.listener(Self::ctx_copy_path))
+            .on_action(cx.listener(Self::ctx_copy_relative_path))
+            .on_action(cx.listener(Self::ctx_rename))
+            .on_action(cx.listener(Self::ctx_trash))
+            .on_action(cx.listener(Self::ctx_delete))
             .on_key_down(cx.listener(Self::handle_search_keys))
             .child(self.render_titlebar())
             .child(
@@ -1156,6 +1635,42 @@ fn file_entries_to_tree_items(entries: &[FileEntry]) -> Vec<TreeItem> {
             item
         })
         .collect()
+}
+
+/// Build tree items preserving expansion state and optionally inserting a creation placeholder.
+fn build_tree_items(
+    entries: &[FileEntry],
+    expanded: &HashSet<String>,
+    creating_parent: Option<&str>,
+) -> Vec<TreeItem> {
+    entries
+        .iter()
+        .map(|entry| {
+            let is_target = creating_parent.is_some_and(|p| entry.path == p);
+            let mut item = TreeItem::new(entry.path.clone(), entry.name.clone());
+            if let Some(ref children) = entry.children {
+                let mut child_items = build_tree_items(children, expanded, creating_parent);
+                if is_target {
+                    child_items.insert(0, TreeItem::new("__creating__", ""));
+                }
+                item = item.children(child_items);
+                if expanded.contains(&entry.path) || is_target {
+                    item = item.expanded(true);
+                }
+            }
+            item
+        })
+        .collect()
+}
+
+/// Recursively collect IDs of expanded folders from stored tree items.
+fn collect_expanded_ids(items: &[TreeItem], set: &mut HashSet<String>) {
+    for item in items {
+        if item.is_expanded() {
+            set.insert(item.id.to_string());
+        }
+        collect_expanded_ids(&item.children, set);
+    }
 }
 
 fn language_from_path(path: &str) -> Option<SharedString> {
@@ -1221,14 +1736,19 @@ pub fn build_workspace(window: &mut Window, app: &mut App) -> Entity<Root> {
         InputState::new(window, cx).placeholder("Commit message...")
     });
     let terminal_pane = app.new(|cx| TerminalPane::new(cx));
+    let create_input = app.new(|cx| {
+        InputState::new(window, cx).placeholder("Enter name...")
+    });
 
     let ts = tree_state.clone();
     let si = search_input.clone();
     let ci = commit_input.clone();
     let tp = terminal_pane.clone();
+    let cri = create_input.clone();
     let view = app.new(|cx| {
         cx.observe(&ts, WorkspaceView::on_tree_changed).detach();
         cx.subscribe(&si, WorkspaceView::on_search_changed).detach();
+        cx.subscribe(&cri, WorkspaceView::on_create_event).detach();
         cx.subscribe(&tp, |this: &mut WorkspaceView, _, event: &TerminalEvent, cx| {
             match event {
                 TerminalEvent::AllSessionsClosed => {
@@ -1237,7 +1757,7 @@ pub fn build_workspace(window: &mut Window, app: &mut App) -> Entity<Root> {
                 }
             }
         }).detach();
-        WorkspaceView::new(ts, si, ci, tp, cx)
+        WorkspaceView::new(ts, si, ci, tp, cri, cx)
     });
 
     let view: AnyView = view.into();

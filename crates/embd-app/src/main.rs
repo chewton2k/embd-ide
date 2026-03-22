@@ -1,3 +1,4 @@
+mod assets;
 mod git_panel;
 mod terminal;
 mod theme;
@@ -6,7 +7,7 @@ mod workspace_view;
 use gpui::{px, size, point, Application, Bounds, TitlebarOptions, WindowBounds, WindowOptions};
 
 fn main() {
-    let application = Application::new();
+    let application = Application::new().with_assets(assets::EmbeddedAssets);
 
     // Re-open window when dock icon is clicked after all windows are closed
     application.on_reopen(|app| {
