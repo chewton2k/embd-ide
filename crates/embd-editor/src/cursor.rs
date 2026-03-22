@@ -148,22 +148,14 @@ impl SelectionSet {
 }
 
 /// Shift a Position based on a char offset and delta.
-/// This is a simplified shift that works on a flat offset model.
-/// For proper line-aware shifting, the buffer should be consulted.
+///
+/// NOTE: This is intentionally a no-op. Proper cursor shifting requires
+/// the buffer's line/col mapping, which is unavailable here. The Buffer's
+/// insert/delete/replace methods handle cursor adjustment directly by
+/// converting positions to offsets before the edit, shifting the offsets,
+/// and converting back using the modified rope.
 fn shift_pos(pos: &mut Position, offset: usize, delta: i64) {
-    // Convert to a simple linear index for comparison.
-    // This is a rough heuristic — precise shifting requires the buffer's
-    // line/col mapping. For now, we only shift the column on the same line
-    // or mark positions as needing recalculation.
-    //
-    // In practice, the buffer will re-derive positions from offsets after edits.
-    // This function exists so that cursor offsets stay approximately correct
-    // between edit and re-derivation.
     let _ = (pos, offset, delta);
-    // The actual shifting is done by converting to offset, adjusting, and
-    // converting back. But since we don't have the buffer here, we leave this
-    // as a no-op stub. The Buffer's insert/delete methods handle cursor
-    // adjustment through the full offset->pos pipeline.
 }
 
 #[cfg(test)]

@@ -244,6 +244,12 @@ impl Buffer {
         }
 
         let old_selections = self.selections.clone();
+
+        // Capture cursor offsets BEFORE editing the rope
+        let sel_offsets: Vec<(usize, usize)> = self.selections.selections.iter()
+            .map(|s| (self.pos_to_offset(s.anchor), self.pos_to_offset(s.head)))
+            .collect();
+
         let op = EditOp::Insert {
             offset,
             text: text.to_string(),
@@ -253,9 +259,17 @@ impl Buffer {
         self.modified = true;
         self.version += 1;
 
-        // Move cursors that are at or after the insertion point
+        // Adjust cursor positions using the new rope
         let inserted_len = text.chars().count();
-        self.selections.shift_after(offset, inserted_len as i64);
+        let new_positions: Vec<_> = sel_offsets.iter().map(|&(a, h)| {
+            let new_a = if a >= offset { a + inserted_len } else { a };
+            let new_h = if h >= offset { h + inserted_len } else { h };
+            (self.offset_to_pos(new_a), self.offset_to_pos(new_h))
+        }).collect();
+        for (sel, (anchor, head)) in self.selections.selections.iter_mut().zip(new_positions) {
+            sel.anchor = anchor;
+            sel.head = head;
+        }
 
         self.history.push(op, old_selections, self.selections.clone());
         Ok(())
@@ -270,6 +284,12 @@ impl Buffer {
         }
 
         let old_selections = self.selections.clone();
+
+        // Capture cursor offsets BEFORE editing the rope
+        let sel_offsets: Vec<(usize, usize)> = self.selections.selections.iter()
+            .map(|s| (self.pos_to_offset(s.anchor), self.pos_to_offset(s.head)))
+            .collect();
+
         let deleted_text = self.text.slice(start..end).to_string();
         let op = EditOp::Delete {
             offset: start,
@@ -280,8 +300,17 @@ impl Buffer {
         self.modified = true;
         self.version += 1;
 
+        // Adjust cursor positions using the new rope
         let deleted_len = end - start;
-        self.selections.shift_after(start, -(deleted_len as i64));
+        let new_positions: Vec<_> = sel_offsets.iter().map(|&(a, h)| {
+            let new_a = if a >= end { a - deleted_len } else if a > start { start } else { a };
+            let new_h = if h >= end { h - deleted_len } else if h > start { start } else { h };
+            (self.offset_to_pos(new_a), self.offset_to_pos(new_h))
+        }).collect();
+        for (sel, (anchor, head)) in self.selections.selections.iter_mut().zip(new_positions) {
+            sel.anchor = anchor;
+            sel.head = head;
+        }
 
         self.history.push(op, old_selections, self.selections.clone());
         Ok(())
@@ -293,6 +322,12 @@ impl Buffer {
         let end = end.min(self.text.len_chars());
 
         let old_selections = self.selections.clone();
+
+        // Capture cursor offsets BEFORE editing the rope
+        let sel_offsets: Vec<(usize, usize)> = self.selections.selections.iter()
+            .map(|s| (self.pos_to_offset(s.anchor), self.pos_to_offset(s.head)))
+            .collect();
+
         let old_text = if start < end {
             self.text.slice(start..end).to_string()
         } else {
@@ -314,9 +349,18 @@ impl Buffer {
         self.modified = true;
         self.version += 1;
 
-        let old_len = end.saturating_sub(start) as i64;
-        let new_len = new_text.chars().count() as i64;
-        self.selections.shift_after(start, new_len - old_len);
+        // Adjust cursor positions using the new rope
+        let old_len = end.saturating_sub(start);
+        let new_len = new_text.chars().count();
+        let new_positions: Vec<_> = sel_offsets.iter().map(|&(a, h)| {
+            let new_a = adjust_offset_for_edit(a, start, old_len, new_len);
+            let new_h = adjust_offset_for_edit(h, start, old_len, new_len);
+            (self.offset_to_pos(new_a), self.offset_to_pos(new_h))
+        }).collect();
+        for (sel, (anchor, head)) in self.selections.selections.iter_mut().zip(new_positions) {
+            sel.anchor = anchor;
+            sel.head = head;
+        }
 
         self.history.push(op, old_selections, self.selections.clone());
         Ok(())
@@ -411,6 +455,22 @@ impl Buffer {
                 }
             }
         }
+    }
+}
+
+/// Adjust a char offset after an edit at `edit_start` that removed `old_len`
+/// chars and inserted `new_len` chars.
+fn adjust_offset_for_edit(off: usize, edit_start: usize, old_len: usize, new_len: usize) -> usize {
+    let edit_end = edit_start + old_len;
+    if off >= edit_end {
+        // After the edited range: shift by the size difference
+        off - old_len + new_len
+    } else if off > edit_start {
+        // Within the edited range: move to end of replacement
+        edit_start + new_len
+    } else {
+        // Before the edit: unchanged
+        off
     }
 }
 

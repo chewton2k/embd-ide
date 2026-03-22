@@ -20,6 +20,9 @@ struct TermSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     parser: vt100::Parser,
     alive: Arc<Mutex<bool>>,
+    /// Keep the child process alive for the session's lifetime.
+    /// Dropping this early can orphan or kill the shell process.
+    _child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 // ── Terminal pane (GPUI entity) ─────────────────────────────────────
@@ -134,7 +137,7 @@ impl TerminalPane {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
 
-        let _child = match pair.slave.spawn_command(cmd) {
+        let child = match pair.slave.spawn_command(cmd) {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("Failed to spawn shell: {e}");
@@ -142,8 +145,20 @@ impl TerminalPane {
             }
         };
 
-        let writer: Box<dyn Write + Send> = pair.master.take_writer().unwrap();
-        let reader = pair.master.try_clone_reader().unwrap();
+        let writer: Box<dyn Write + Send> = match pair.master.take_writer() {
+            Ok(w) => w,
+            Err(e) => {
+                eprintln!("Failed to get PTY writer: {e}");
+                return;
+            }
+        };
+        let reader = match pair.master.try_clone_reader() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Failed to get PTY reader: {e}");
+                return;
+            }
+        };
 
         let alive = Arc::new(Mutex::new(true));
 
@@ -153,6 +168,7 @@ impl TerminalPane {
             writer: Arc::new(Mutex::new(writer)),
             parser: vt100::Parser::new(TERM_ROWS, TERM_COLS, SCROLLBACK),
             alive: alive.clone(),
+            _child: child,
         };
 
         // Reader thread — sends raw bytes
@@ -171,7 +187,9 @@ impl TerminalPane {
                     Err(_) => break,
                 }
             }
-            *alive_clone.lock().unwrap() = false;
+            if let Ok(mut alive) = alive_clone.lock() {
+                *alive = false;
+            }
             let _ = exit_tx.send(id);
         });
 
@@ -369,7 +387,7 @@ impl Render for TerminalPane {
         let active_alive = self
             .sessions
             .get(self.active)
-            .map(|s| *s.alive.lock().unwrap())
+            .and_then(|s| s.alive.lock().ok().map(|g| *g))
             .unwrap_or(false);
 
         // Read terminal screen from vt100 parser
@@ -428,7 +446,7 @@ impl Render for TerminalPane {
         // Tab bar
         let tab_items: Vec<AnyElement> = self.sessions.iter().enumerate().map(|(i, s)| {
             let is_active = i == self.active;
-            let alive = *s.alive.lock().unwrap();
+            let alive = s.alive.lock().ok().map_or(false, |g| *g);
             let label = if alive {
                 s.name.clone()
             } else {

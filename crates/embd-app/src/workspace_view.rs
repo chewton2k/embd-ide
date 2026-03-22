@@ -76,6 +76,9 @@ pub struct WorkspaceView {
 
     // Pending file to load (deferred to render for window access)
     pending_open: Option<(String, String)>, // (path, content)
+
+    // Search debouncing: only apply results from the latest query
+    search_generation: u64,
 }
 
 impl WorkspaceView {
@@ -109,6 +112,7 @@ impl WorkspaceView {
             git_status_map: HashMap::new(),
             last_opened_path: None,
             pending_open: None,
+            search_generation: 0,
         }
     }
 
@@ -137,7 +141,7 @@ impl WorkspaceView {
     fn toggle_git_panel(&mut self, _: &ToggleGitPanel, _w: &mut Window, cx: &mut Context<Self>) {
         self.git_panel_open = !self.git_panel_open;
         if self.git_panel_open {
-            self.refresh_git();
+            self.refresh_git(cx);
         }
         cx.notify();
     }
@@ -169,10 +173,17 @@ impl WorkspaceView {
         if let (Some(ref path), Some(ref _root)) = (self.active_file.clone(), self.project_root.clone()) {
             if let Some(state) = self.editor_states.get(path) {
                 let content = state.read(cx).value().to_string();
-                if let Err(e) = std::fs::write(path, &content) {
-                    eprintln!("Save error: {e}");
+                // Route through ProjectFs when available for path validation
+                let result = if let Some(ref fs) = self.project_fs {
+                    fs.write_file(path, &content).map_err(|e| e.to_string())
                 } else {
-                    self.modified_files.insert(path.clone(), false);
+                    std::fs::write(path, &content).map_err(|e| e.to_string())
+                };
+                match result {
+                    Ok(()) => {
+                        self.modified_files.insert(path.clone(), false);
+                    }
+                    Err(e) => eprintln!("Save error: {e}"),
                 }
             }
         }
@@ -274,15 +285,40 @@ impl WorkspaceView {
 
     fn on_search_changed(&mut self, _: Entity<InputState>, _: &InputEvent, cx: &mut Context<Self>) {
         let query = self.search_input.read(cx).value().to_string();
-        if let Some(ref root) = self.project_root {
-            if query.is_empty() {
-                self.search_results.clear();
-            } else {
-                self.search_results = find_files(root, &query, 50).unwrap_or_default();
-            }
+
+        if query.is_empty() {
+            self.search_results.clear();
             self.search_selected = 0;
+            cx.notify();
+            return;
         }
-        cx.notify();
+
+        let Some(root) = self.project_root.clone() else {
+            return;
+        };
+
+        // Bump generation so stale results from earlier keystrokes are discarded
+        self.search_generation += 1;
+        let generation = self.search_generation;
+
+        let (tx, rx) = flume::bounded(1);
+        std::thread::spawn(move || {
+            let results = find_files(&root, &query, 50).unwrap_or_default();
+            let _ = tx.send(results);
+        });
+
+        cx.spawn(async move |this, cx| {
+            if let Ok(results) = rx.recv_async().await {
+                let _ = this.update(cx, |this, cx| {
+                    if this.search_generation == generation {
+                        this.search_results = results;
+                        this.search_selected = 0;
+                        cx.notify();
+                    }
+                });
+            }
+        })
+        .detach();
     }
 
     // ── Project loading ─────────────────────────────────────────────
@@ -323,16 +359,31 @@ impl WorkspaceView {
         self.modified_files.clear();
         self.last_opened_path = None;
 
-        self.refresh_git();
+        self.refresh_git(cx);
         cx.notify();
     }
 
-    fn refresh_git(&mut self) {
-        if let Some(ref root) = self.project_root {
-            self.git_data = git_panel::refresh_git(root);
-            let repo = GitRepo::new(root);
-            self.git_status_map = repo.status().unwrap_or_default();
-        }
+    fn refresh_git(&mut self, cx: &mut Context<Self>) {
+        let Some(root) = self.project_root.clone() else { return };
+
+        let (tx, rx) = flume::bounded(1);
+        std::thread::spawn(move || {
+            let git_data = git_panel::refresh_git(&root);
+            let repo = GitRepo::new(&root);
+            let status_map = repo.status().unwrap_or_default();
+            let _ = tx.send((git_data, status_map));
+        });
+
+        cx.spawn(async move |this, cx| {
+            if let Ok((git_data, status_map)) = rx.recv_async().await {
+                let _ = this.update(cx, |this, cx| {
+                    this.git_data = git_data;
+                    this.git_status_map = status_map;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
     }
 
     fn on_tree_changed(&mut self, _: Entity<TreeState>, cx: &mut Context<Self>) {
@@ -358,6 +409,20 @@ impl WorkspaceView {
             // Already open, just switch to it
             self.active_file = Some(path.to_string());
             return;
+        }
+
+        // Check file size before reading (10 MB limit)
+        const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.len() > MAX_FILE_SIZE => {
+                eprintln!("File too large to open ({} bytes): {}", meta.len(), path);
+                return;
+            }
+            Err(e) => {
+                eprintln!("Failed to open file: {e}");
+                return;
+            }
+            _ => {}
         }
 
         // Read file content
@@ -774,7 +839,7 @@ impl WorkspaceView {
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 this.git_panel_open = !this.git_panel_open;
                                 if this.git_panel_open {
-                                    this.refresh_git();
+                                    this.refresh_git(cx);
                                 }
                                 cx.notify();
                             })),

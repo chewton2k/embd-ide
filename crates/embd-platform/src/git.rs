@@ -513,7 +513,7 @@ impl GitRepo {
     }
 
     pub fn resolve_conflict(&self, file: &str, content: &str, stage: bool) -> Result<()> {
-        let abs = self.workdir.join(file);
+        let abs = self.workdir.join(file).canonicalize()?;
         if !abs.starts_with(&self.workdir) {
             return Err(Error::AccessDenied("file outside repo".to_string()));
         }

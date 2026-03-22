@@ -16,7 +16,7 @@ type Handler = Box<dyn Fn(&dyn Any) + Send + Sync>;
 /// Events are identified by string keys. Handlers receive a type-erased payload
 /// and downcast to the expected type.
 pub struct EventBus {
-    handlers: Mutex<HashMap<String, Vec<Arc<Handler>>>>,
+    handlers: Mutex<HashMap<String, Vec<Option<Arc<Handler>>>>>,
 }
 
 impl EventBus {
@@ -39,8 +39,19 @@ impl EventBus {
             event: event.to_string(),
             index: handlers.len(),
         };
-        handlers.push(handler);
+        handlers.push(Some(handler));
         id
+    }
+
+    /// Remove a previously registered handler.
+    pub fn unsubscribe(&self, id: &SubscriptionId) {
+        if let Ok(mut map) = self.handlers.lock() {
+            if let Some(handlers) = map.get_mut(&id.event) {
+                if id.index < handlers.len() {
+                    handlers[id.index] = None;
+                }
+            }
+        }
     }
 
     /// Emit an event, calling all registered handlers synchronously.
@@ -49,7 +60,7 @@ impl EventBus {
             let map = self.handlers.lock().unwrap();
             map.get(event).cloned().unwrap_or_default()
         };
-        for handler in &handlers {
+        for handler in handlers.iter().flatten() {
             handler(payload);
         }
     }

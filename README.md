@@ -11,50 +11,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/chewton2k/embd-ide/releases">Download</a> &nbsp;&middot;&nbsp;
   <a href="#build-from-source">Build from Source</a> &nbsp;&middot;&nbsp;
   <a href="#features">Features</a>
 </p>
 
 ---
 
-## Features
-
-- **Syntax-highlighted editor** with line numbers and language detection
-- **File explorer** with tree view and git status indicators
-- **Integrated terminal** with multiple sessions (vt100)
-- **Git panel** — branch, staged/changed files, diff preview
-- **Fuzzy file search** — quick-open any file
-- **Resizable panels** — drag to resize sidebar, editor, terminal, and git
-- **Cross-platform** — macOS, Linux, and Windows
-
-## Install
-
-### Download
-
-Grab the latest release for your platform from [Releases](https://github.com/chewton2k/embd-ide/releases/latest):
-
-| Platform | Download |
-|---|---|
-| macOS (Apple Silicon) | `embd-aarch64-apple-darwin.zip` |
-| macOS (Intel) | `embd-x86_64-apple-darwin.zip` |
-| Linux (x86_64) | `embd-x86_64-unknown-linux-gnu.tar.gz` |
-| Windows (x86_64) | `embd-x86_64-pc-windows-msvc.zip` |
-
-**macOS** — Unzip and drag `embd.app` into `/Applications`.
-
-**Linux** — Extract and copy the binary:
-```bash
-tar xzf embd-x86_64-unknown-linux-gnu.tar.gz
-sudo cp embd-x86_64-unknown-linux-gnu/embd /usr/local/bin/
-sudo cp embd-x86_64-unknown-linux-gnu/embd.desktop /usr/share/applications/
-```
-
-**Windows** — Unzip and add `embd.exe` to your PATH.
-
----
-
-### Build from Source
+## Build from Source
 
 #### Prerequisites
 
