@@ -34,7 +34,7 @@ pub struct Workspace {
 impl Workspace {
     /// Create a new workspace for a project directory.
     pub fn new(root: PathBuf, settings: Settings) -> Self {
-        let max_tabs = settings.session_limits.max_tabs;
+        let max_tabs = settings.session.max_tabs;
         let language_registry = embd_editor::build_default_registry();
         Self {
             root,

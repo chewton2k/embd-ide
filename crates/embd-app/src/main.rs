@@ -1,5 +1,6 @@
 mod assets;
 mod git_panel;
+mod pdf_render;
 mod terminal;
 mod theme;
 mod workspace_view;

@@ -18,8 +18,28 @@ use embd_platform::search::find_files;
 
 use crate::assets;
 use crate::git_panel::{self, GitPanelData};
+use crate::pdf_render;
 use crate::terminal::{TerminalEvent, TerminalPane};
 use crate::theme::Colors;
+
+// ── File viewer types ────────────────────────────────────────────────
+
+enum FileViewer {
+    /// Code / text editor (InputState)
+    Editor(Entity<InputState>),
+    /// Image viewer (path on disk)
+    Image { path: PathBuf, zoom: f32 },
+    /// SVG viewer (path on disk — rendered as image)
+    Svg(PathBuf),
+    /// PDF — rendered pages as GPUI images
+    Pdf {
+        pages: Vec<Arc<RenderImage>>,
+        page_count: usize,
+        zoom: f32,
+    },
+    /// Binary / non-UTF-8 file — show hex preview
+    Binary { path: PathBuf, preview: String, size: u64 },
+}
 
 // ── Actions ─────────────────────────────────────────────────────────
 
@@ -67,8 +87,8 @@ pub struct WorkspaceView {
     project_root: Option<PathBuf>,
     tree_state: Entity<TreeState>,
 
-    // Editor: one InputState per open file, keyed by path
-    editor_states: HashMap<String, Entity<InputState>>,
+    // One viewer per open file, keyed by path
+    file_viewers: HashMap<String, FileViewer>,
     active_file: Option<String>,
     tab_order: Vec<String>, // ordered list of open file paths
     modified_files: HashMap<String, bool>,
@@ -110,6 +130,8 @@ pub struct WorkspaceView {
     creating: Option<(String, bool)>,
     create_input: Entity<InputState>,
 
+    // Pinned tabs (always shown at the left, cannot be closed via X)
+    pinned_tabs: HashSet<String>,
 }
 
 impl WorkspaceView {
@@ -129,7 +151,7 @@ impl WorkspaceView {
             project_fs: None,
             project_root: None,
             tree_state,
-            editor_states: HashMap::new(),
+            file_viewers: HashMap::new(),
             active_file: None,
             tab_order: Vec::new(),
             modified_files: HashMap::new(),
@@ -150,6 +172,7 @@ impl WorkspaceView {
             tree_items: Vec::new(),
             creating: None,
             create_input,
+            pinned_tabs: HashSet::new(),
         }
     }
 
@@ -208,9 +231,8 @@ impl WorkspaceView {
 
     fn save(&mut self, _: &Save, _w: &mut Window, cx: &mut Context<Self>) {
         if let (Some(ref path), Some(ref _root)) = (self.active_file.clone(), self.project_root.clone()) {
-            if let Some(state) = self.editor_states.get(path) {
+            if let Some(FileViewer::Editor(state)) = self.file_viewers.get(path) {
                 let content = state.read(cx).value().to_string();
-                // Route through ProjectFs when available for path validation
                 let result = if let Some(ref fs) = self.project_fs {
                     fs.write_file(path, &content).map_err(|e| e.to_string())
                 } else {
@@ -229,12 +251,38 @@ impl WorkspaceView {
 
     fn close_tab(&mut self, _: &CloseTab, _w: &mut Window, cx: &mut Context<Self>) {
         if let Some(ref path) = self.active_file.clone() {
-            self.tab_order.retain(|p| p != path);
-            self.editor_states.remove(path);
-            self.modified_files.remove(path);
+            if !self.pinned_tabs.contains(path) {
+                self.tab_order.retain(|p| p != path);
+                self.file_viewers.remove(path);
+                self.modified_files.remove(path);
+                self.active_file = self.tab_order.last().cloned();
+            }
+        }
+        self.last_opened_path = None;
+        cx.notify();
+    }
+
+    fn close_tab_by_path(&mut self, path: &str, cx: &mut Context<Self>) {
+        self.tab_order.retain(|p| p != path);
+        self.file_viewers.remove(path);
+        self.modified_files.remove(path);
+        self.pinned_tabs.remove(path);
+        if self.active_file.as_deref() == Some(path) {
             self.active_file = self.tab_order.last().cloned();
         }
         self.last_opened_path = None;
+        cx.notify();
+    }
+
+    fn toggle_pin_tab(&mut self, path: &str, cx: &mut Context<Self>) {
+        if self.pinned_tabs.contains(path) {
+            self.pinned_tabs.remove(path);
+        } else {
+            self.pinned_tabs.insert(path.to_string());
+        }
+        // Re-sort: pinned tabs first, preserving relative order within each group
+        let pinned = &self.pinned_tabs;
+        self.tab_order.sort_by_key(|p| if pinned.contains(p) { 0 } else { 1 });
         cx.notify();
     }
 
@@ -611,8 +659,8 @@ impl WorkspaceView {
                     if std::fs::rename(src, &dest).is_ok() {
                         let old_path = path_clone.clone();
                         let new_path = dest.to_string_lossy().to_string();
-                        if let Some(state) = this.editor_states.remove(&old_path) {
-                            this.editor_states.insert(new_path.clone(), state);
+                        if let Some(state) = this.file_viewers.remove(&old_path) {
+                            this.file_viewers.insert(new_path.clone(), state);
                             if let Some(pos) = this.tab_order.iter().position(|p| p == &old_path) {
                                 this.tab_order[pos] = new_path.clone();
                             }
@@ -632,7 +680,7 @@ impl WorkspaceView {
     fn ctx_trash(&mut self, _: &CtxTrash, _w: &mut Window, cx: &mut Context<Self>) {
         let Some(path) = self.context_path.lock().unwrap().clone() else { return };
         self.tab_order.retain(|p| p != &path);
-        self.editor_states.remove(&path);
+        self.file_viewers.remove(&path);
         self.modified_files.remove(&path);
         if self.active_file.as_deref() == Some(&path) {
             self.active_file = self.tab_order.last().cloned();
@@ -670,7 +718,7 @@ impl WorkspaceView {
             if let Ok(1) = rx.await {
                 let _ = this.update(cx, |this, cx| {
                     this.tab_order.retain(|p| p != &path);
-                    this.editor_states.remove(&path);
+                    this.file_viewers.remove(&path);
                     this.modified_files.remove(&path);
                     if this.active_file.as_deref() == Some(&path) {
                         this.active_file = this.tab_order.last().cloned();
@@ -732,10 +780,11 @@ impl WorkspaceView {
 
         self.project_fs = Some(fs);
         self.project_root = Some(path);
-        self.editor_states.clear();
+        self.file_viewers.clear();
         self.tab_order.clear();
         self.active_file = None;
         self.modified_files.clear();
+        self.pinned_tabs.clear();
         self.last_opened_path = None;
 
         self.refresh_git(cx);
@@ -784,30 +833,94 @@ impl WorkspaceView {
     /// Queue a file open — the actual InputState creation happens in render()
     /// where we have window access.
     fn open_file_deferred(&mut self, path: &str) {
-        if self.editor_states.contains_key(path) {
-            // Already open, just switch to it
+        if self.file_viewers.contains_key(path) {
             self.active_file = Some(path.to_string());
             return;
         }
 
-        // Check file size before reading (10 MB limit)
-        const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
-        match std::fs::metadata(path) {
-            Ok(meta) if meta.len() > MAX_FILE_SIZE => {
-                eprintln!("File too large to open ({} bytes): {}", meta.len(), path);
-                return;
-            }
+        const MAX_FILE_SIZE: u64 = 50 * 1024 * 1024;
+        let meta = match std::fs::metadata(path) {
+            Ok(m) => m,
             Err(e) => {
                 eprintln!("Failed to open file: {e}");
                 return;
             }
-            _ => {}
+        };
+        if meta.len() > MAX_FILE_SIZE {
+            eprintln!("File too large to open ({} bytes): {}", meta.len(), path);
+            return;
         }
 
-        // Read file content
-        match std::fs::read_to_string(path) {
-            Ok(content) => {
-                self.pending_open = Some((path.to_string(), content));
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        // Image files — open directly with GPUI img()
+        let image_exts = [
+            "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "tiff", "tif",
+            "avif", "tga", "qoi",
+        ];
+        if image_exts.contains(&ext.as_str()) {
+            let viewer = FileViewer::Image { path: PathBuf::from(path), zoom: 1.0 };
+            if !self.tab_order.contains(&path.to_string()) {
+                self.tab_order.push(path.to_string());
+            }
+            self.file_viewers.insert(path.to_string(), viewer);
+            self.active_file = Some(path.to_string());
+            return;
+        }
+
+        // SVG — render as image
+        if ext == "svg" {
+            let viewer = FileViewer::Svg(PathBuf::from(path));
+            if !self.tab_order.contains(&path.to_string()) {
+                self.tab_order.push(path.to_string());
+            }
+            self.file_viewers.insert(path.to_string(), viewer);
+            self.active_file = Some(path.to_string());
+            return;
+        }
+
+        // PDF — render pages inline
+        if ext == "pdf" {
+            let pdf_path = PathBuf::from(path);
+            let (pages, page_count) = pdf_render::render_pdf(&pdf_path, 2.0)
+                .unwrap_or_else(|| (vec![], 0));
+            let viewer = FileViewer::Pdf {
+                pages,
+                page_count,
+                zoom: 1.0,
+            };
+            if !self.tab_order.contains(&path.to_string()) {
+                self.tab_order.push(path.to_string());
+            }
+            self.file_viewers.insert(path.to_string(), viewer);
+            self.active_file = Some(path.to_string());
+            return;
+        }
+
+        // Try reading as UTF-8 text
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                if let Ok(content) = String::from_utf8(bytes.clone()) {
+                    // Text file — open in editor
+                    self.pending_open = Some((path.to_string(), content));
+                } else {
+                    // Binary file — show hex preview
+                    let preview = format_hex_preview(&bytes, 2048);
+                    let viewer = FileViewer::Binary {
+                        path: PathBuf::from(path),
+                        preview,
+                        size: meta.len(),
+                    };
+                    if !self.tab_order.contains(&path.to_string()) {
+                        self.tab_order.push(path.to_string());
+                    }
+                    self.file_viewers.insert(path.to_string(), viewer);
+                    self.active_file = Some(path.to_string());
+                }
             }
             Err(e) => eprintln!("Failed to open file: {e}"),
         }
@@ -828,7 +941,6 @@ impl WorkspaceView {
                 s.set_value(&content, window, cx);
             });
 
-            // Subscribe to changes to track modified state
             let path_clone = path.clone();
             cx.subscribe(&state, move |this: &mut Self, _, _event: &InputEvent, cx| {
                 this.modified_files.insert(path_clone.clone(), true);
@@ -839,7 +951,7 @@ impl WorkspaceView {
             if !self.tab_order.contains(&path) {
                 self.tab_order.push(path.clone());
             }
-            self.editor_states.insert(path.clone(), state);
+            self.file_viewers.insert(path.clone(), FileViewer::Editor(state));
             self.active_file = Some(path);
             cx.notify();
         }
@@ -1216,20 +1328,29 @@ impl WorkspaceView {
         let file_info = if let Some(ref path) = self.active_file {
             let lang = language_from_path(path).unwrap_or("Plain Text".into());
             let modified = self.modified_files.get(path).copied().unwrap_or(false);
-            if let Some(state) = self.editor_states.get(path) {
-                let pos = state.read(cx).cursor_position();
-                let mut parts = format!(
-                    "Ln {}, Col {}  {}  UTF-8",
-                    pos.line + 1,
-                    pos.character + 1,
-                    lang,
-                );
-                if modified {
-                    parts.push_str("  ●");
+            match self.file_viewers.get(path) {
+                Some(FileViewer::Editor(state)) => {
+                    let pos = state.read(cx).cursor_position();
+                    let mut parts = format!(
+                        "Ln {}, Col {}  {}  UTF-8",
+                        pos.line + 1,
+                        pos.character + 1,
+                        lang,
+                    );
+                    if modified {
+                        parts.push_str("  ●");
+                    }
+                    parts
                 }
-                parts
-            } else {
-                format!("{}  UTF-8", lang)
+                Some(FileViewer::Image { .. }) => "Image".to_string(),
+                Some(FileViewer::Svg(_)) => "SVG".to_string(),
+                Some(FileViewer::Pdf { page_count, .. }) => {
+                    format!("PDF — {} page{}", page_count, if *page_count == 1 { "" } else { "s" })
+                }
+                Some(FileViewer::Binary { size, .. }) => {
+                    format!("Binary — {}", format_file_size(*size))
+                }
+                None => format!("{}  UTF-8", lang),
             }
         } else {
             String::new()
@@ -1316,11 +1437,37 @@ impl WorkspaceView {
                         )
                     }),
             )
-            // Right side: file info
+            // Right side: file info + settings gear
             .child(
                 div()
-                    .text_color(Colors::text_faint())
-                    .child(file_info),
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_color(Colors::text_faint())
+                            .child(file_info),
+                    )
+                    .child(
+                        div()
+                            .id("settings-btn")
+                            .size(px(20.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(3.0))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(Colors::surface_hover()))
+                            .child(
+                                svg()
+                                    .path("icons/settings.svg")
+                                    .size(px(14.0))
+                                    .text_color(Colors::text_faint()),
+                            )
+                            .on_click(|_, _, cx| {
+                                embd_settings::open_settings_window(cx);
+                            }),
+                    ),
             )
     }
 }
@@ -1366,6 +1513,7 @@ impl Render for WorkspaceView {
                 .text_xs()
                 .children(self.tab_order.iter().enumerate().map(|(i, path)| {
                     let is_active = active_idx == Some(i);
+                    let is_pinned = self.pinned_tabs.contains(path);
                     let name = PathBuf::from(path)
                         .file_name()
                         .and_then(|n| n.to_str())
@@ -1373,15 +1521,19 @@ impl Render for WorkspaceView {
                         .to_string();
                     let modified = self.modified_files.get(path).copied().unwrap_or(false);
                     let tab_icon = assets::icon_for_path(path, false, false);
+                    let path_for_close = path.clone();
+                    let path_for_pin = path.clone();
 
                     div()
                         .id(SharedString::from(format!("tab-{}", i)))
-                        .px(px(12.0))
+                        .pl(px(12.0))
+                        .pr(px(4.0))
                         .py(px(6.0))
                         .cursor_pointer()
                         .flex()
                         .items_center()
                         .gap(px(5.0))
+                        .group("tab")
                         .hover(|s| s.bg(Colors::surface_hover()))
                         .text_color(if is_active {
                             Colors::text()
@@ -1392,6 +1544,11 @@ impl Render for WorkspaceView {
                             d.bg(Colors::bg_base())
                                 .rounded_t(px(4.0))
                         })
+                        .when(is_pinned, |d| {
+                            d.border_b_1()
+                                .border_color(Colors::accent_dim())
+                        })
+                        // File type icon
                         .child(
                             svg()
                                 .path(tab_icon)
@@ -1399,15 +1556,79 @@ impl Render for WorkspaceView {
                                 .flex_shrink_0()
                                 .text_color(assets::icon_color(tab_icon)),
                         )
+                        // File name
                         .child(name)
+                        // Modified indicator
                         .when(modified, |d| {
                             d.child(
                                 div()
                                     .text_xs()
                                     .text_color(Colors::text_faint())
-                                    .child("●"),
+                                    .child("\u{25CF}"),
                             )
                         })
+                        // Pin button — visible on hover or when pinned
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("tab-pin-{}", i)))
+                                .flex_shrink_0()
+                                .size(px(16.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(3.0))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(Colors::bg_overlay()))
+                                .when(!is_pinned, |d| {
+                                    d.invisible()
+                                        .group_hover("tab", |s| s.visible())
+                                })
+                                .child(
+                                    svg()
+                                        .path(if is_pinned {
+                                            "icons/pin-filled.svg"
+                                        } else {
+                                            "icons/pin.svg"
+                                        })
+                                        .size(px(12.0))
+                                        .text_color(if is_pinned {
+                                            Colors::accent_dim()
+                                        } else {
+                                            Colors::text_faint()
+                                        }),
+                                )
+                                .on_click(cx.listener(move |this, _, _w, cx| {
+                                    this.toggle_pin_tab(&path_for_pin, cx);
+                                })),
+                        )
+                        // Close button — visible on hover, hidden for pinned tabs
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("tab-close-{}", i)))
+                                .flex_shrink_0()
+                                .size(px(16.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(3.0))
+                                .cursor_pointer()
+                                .hover(|s| s.bg(Colors::bg_overlay()))
+                                .when(is_pinned, |d| d.hidden())
+                                .when(!is_pinned, |d| {
+                                    d.invisible()
+                                        .group_hover("tab", |s| s.visible())
+                                })
+                                .child(
+                                    svg()
+                                        .path("icons/close.svg")
+                                        .size(px(12.0))
+                                        .text_color(Colors::text_faint()),
+                                )
+                                .on_click(cx.listener(move |this, _, _w, cx| {
+                                    this.close_tab_by_path(&path_for_close, cx);
+                                })),
+                        )
+                        // Click on the tab body to activate
                         .on_click(cx.listener(move |this, _, _w, cx| {
                             if let Some(path) = this.tab_order.get(i) {
                                 this.active_file = Some(path.clone());
@@ -1421,25 +1642,234 @@ impl Render for WorkspaceView {
 
         // Editor content
         let editor_content = if let Some(ref path) = self.active_file {
-            if let Some(state) = self.editor_states.get(path) {
-                div()
-                    .size_full()
-                    .child(
-                        Input::new(state)
-                            .appearance(false)
-                            .bordered(false)
-                            .h_full(),
-                    )
-                    .into_any_element()
-            } else {
-                div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_color(Colors::text_muted())
-                    .child("Loading...")
-                    .into_any_element()
+            match self.file_viewers.get(path) {
+                Some(FileViewer::Editor(state)) => {
+                    div()
+                        .size_full()
+                        .child(
+                            Input::new(state)
+                                .appearance(false)
+                                .bordered(false)
+                                .h_full(),
+                        )
+                        .into_any_element()
+                }
+                Some(FileViewer::Image { path: img_path, zoom }) => {
+                    let src = img_path.clone();
+                    let z = *zoom;
+                    let zoom_pct = format!("{}%", (z * 100.0) as u32);
+                    div()
+                        .id("image-viewer")
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .bg(Colors::bg_base())
+                        .child(render_zoom_bar(&zoom_pct, cx))
+                        .child(
+                            div()
+                                .id("image-scroll")
+                                .flex_1()
+                                .overflow_scroll()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .p(px(20.0))
+                                .on_scroll_wheel(cx.listener(
+                                    |this, event: &ScrollWheelEvent, _w, cx| {
+                                        if event.modifiers.platform {
+                                            apply_viewer_zoom(this, event.delta.pixel_delta(px(1.0)).y);
+                                            cx.notify();
+                                        }
+                                    },
+                                ))
+                                .child(
+                                    img(ImageSource::from(src))
+                                        .w(px(800.0 * z))
+                                        .object_fit(ObjectFit::Contain),
+                                ),
+                        )
+                        .into_any_element()
+                }
+                Some(FileViewer::Svg(svg_path)) => {
+                    let src = svg_path.clone();
+                    div()
+                        .id("svg-viewer")
+                        .size_full()
+                        .overflow_scroll()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(Colors::bg_base())
+                        .p(px(20.0))
+                        .child(
+                            img(ImageSource::from(src))
+                                .max_w_full()
+                                .max_h_full()
+                                .object_fit(ObjectFit::Contain),
+                        )
+                        .into_any_element()
+                }
+                Some(FileViewer::Pdf { pages, page_count, zoom }) => {
+                    let z = *zoom;
+                    let pc = *page_count;
+                    if pages.is_empty() {
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_xs()
+                            .text_color(Colors::text_faint())
+                            .child("Failed to render PDF")
+                            .into_any_element()
+                    } else {
+                        let zoom_pct = format!("{}%", (z * 100.0) as u32);
+                        let page_images: Vec<AnyElement> = pages
+                            .iter()
+                            .enumerate()
+                            .map(|(i, render_img)| {
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .items_center()
+                                    .mb(px(16.0))
+                                    .child(
+                                        img(ImageSource::Render(render_img.clone()))
+                                            .w(px(700.0 * z))
+                                            .object_fit(ObjectFit::ScaleDown),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(hsla(0.0, 0.0, 0.7, 1.0))
+                                            .mt(px(4.0))
+                                            .child(format!(
+                                                "Page {} of {}",
+                                                i + 1,
+                                                pc
+                                            )),
+                                    )
+                                    .into_any_element()
+                            })
+                            .collect();
+
+                        div()
+                            .size_full()
+                            .flex()
+                            .flex_col()
+                            .bg(rgb(0x3a3a3a))
+                            .child(render_zoom_bar(&zoom_pct, cx))
+                            .child(
+                                div()
+                                    .id("pdf-viewer")
+                                    .flex_1()
+                                    .overflow_scroll()
+                                    .p(px(24.0))
+                                    .on_scroll_wheel(cx.listener(
+                                        |this, event: &ScrollWheelEvent, _w, cx| {
+                                            if event.modifiers.platform {
+                                                apply_viewer_zoom(this, event.delta.pixel_delta(px(1.0)).y);
+                                                cx.notify();
+                                            }
+                                        },
+                                    ))
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .flex()
+                                            .flex_col()
+                                            .items_center()
+                                            .children(page_images),
+                                    ),
+                            )
+                            .into_any_element()
+                    }
+                }
+                Some(FileViewer::Binary { path: bin_path, preview, size }) => {
+                    let filename = bin_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    let size_str = format_file_size(*size);
+                    let preview_text = preview.clone();
+                    let open_path = bin_path.clone();
+                    div()
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .bg(Colors::bg_base())
+                        .child(
+                            div()
+                                .px(px(16.0))
+                                .py(px(10.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(10.0))
+                                .border_b_1()
+                                .border_color(Colors::border_subtle())
+                                .child(
+                                    svg()
+                                        .path("icons/file.svg")
+                                        .size(px(16.0))
+                                        .text_color(Colors::text_faint()),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(Colors::text_muted())
+                                        .child(format!("{} — Binary file ({})", filename, size_str)),
+                                )
+                                .child(
+                                    div()
+                                        .id("open-binary-external")
+                                        .ml_auto()
+                                        .px(px(10.0))
+                                        .py(px(4.0))
+                                        .rounded(px(3.0))
+                                        .bg(Colors::bg_surface())
+                                        .border_1()
+                                        .border_color(Colors::border_subtle())
+                                        .cursor_pointer()
+                                        .text_xs()
+                                        .text_color(Colors::text_muted())
+                                        .hover(|s| s.bg(Colors::surface_hover()))
+                                        .child("Open Externally")
+                                        .on_click({
+                                            let p = open_path.clone();
+                                            move |_, _, _| {
+                                                let _ = std::process::Command::new("open")
+                                                    .arg(&p)
+                                                    .spawn();
+                                            }
+                                        }),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .id("hex-preview")
+                                .flex_1()
+                                .overflow_scroll()
+                                .px(px(16.0))
+                                .py(px(10.0))
+                                .font_family("monospace")
+                                .text_size(px(12.0))
+                                .line_height(px(18.0))
+                                .text_color(Colors::text_faint())
+                                .child(preview_text),
+                        )
+                        .into_any_element()
+                }
+                None => {
+                    div()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(Colors::text_muted())
+                        .child("Loading...")
+                        .into_any_element()
+                }
             }
         } else if self.project_root.is_some() {
             div()
@@ -1623,6 +2053,110 @@ impl Render for WorkspaceView {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
+/// Render a small zoom toolbar with −/+/Reset buttons and current percentage.
+fn render_zoom_bar(zoom_pct: &str, cx: &mut Context<WorkspaceView>) -> impl IntoElement {
+    div()
+        .id("zoom-bar")
+        .w_full()
+        .h(px(28.0))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(8.0))
+        .bg(Colors::bg_surface())
+        .border_b_1()
+        .border_color(Colors::border_subtle())
+        .child(
+            div()
+                .id("zoom-out-btn")
+                .px(px(8.0))
+                .py(px(2.0))
+                .rounded(px(3.0))
+                .cursor_pointer()
+                .text_xs()
+                .text_color(Colors::text_muted())
+                .hover(|s| s.bg(Colors::surface_hover()))
+                .child("\u{2212}") // minus sign
+                .on_click(cx.listener(|this, _, _w, cx| {
+                    // Zoom out by a fixed step
+                    apply_viewer_zoom_step(this, -0.1);
+                    cx.notify();
+                })),
+        )
+        .child(
+            div()
+                .min_w(px(40.0))
+                .flex()
+                .justify_center()
+                .text_xs()
+                .text_color(Colors::text_muted())
+                .child(zoom_pct.to_string()),
+        )
+        .child(
+            div()
+                .id("zoom-in-btn")
+                .px(px(8.0))
+                .py(px(2.0))
+                .rounded(px(3.0))
+                .cursor_pointer()
+                .text_xs()
+                .text_color(Colors::text_muted())
+                .hover(|s| s.bg(Colors::surface_hover()))
+                .child("+")
+                .on_click(cx.listener(|this, _, _w, cx| {
+                    // Zoom in by a fixed step
+                    apply_viewer_zoom_step(this, 0.1);
+                    cx.notify();
+                })),
+        )
+        .child(
+            div()
+                .id("zoom-reset-btn")
+                .px(px(8.0))
+                .py(px(2.0))
+                .rounded(px(3.0))
+                .cursor_pointer()
+                .text_xs()
+                .text_color(Colors::text_faint())
+                .hover(|s| s.bg(Colors::surface_hover()))
+                .child("Reset")
+                .on_click(cx.listener(|this, _, _w, cx| {
+                    if let Some(ref path) = this.active_file {
+                        match this.file_viewers.get_mut(path) {
+                            Some(FileViewer::Image { zoom, .. }) => *zoom = 1.0,
+                            Some(FileViewer::Pdf { zoom, .. }) => *zoom = 1.0,
+                            _ => {}
+                        }
+                    }
+                    cx.notify();
+                })),
+        )
+}
+
+/// Apply zoom from Cmd+scroll wheel delta (negative y = scroll up = zoom in).
+fn apply_viewer_zoom(this: &mut WorkspaceView, delta_y: Pixels) {
+    let Some(ref path) = this.active_file else { return };
+    let zoom = match this.file_viewers.get_mut(path) {
+        Some(FileViewer::Image { zoom, .. }) => zoom,
+        Some(FileViewer::Pdf { zoom, .. }) => zoom,
+        _ => return,
+    };
+    let change = -f32::from(delta_y) * 0.005;
+    *zoom = (*zoom + change).clamp(0.1, 5.0);
+}
+
+/// Apply a fixed zoom step (positive = zoom in, negative = zoom out).
+fn apply_viewer_zoom_step(this: &mut WorkspaceView, step: f32) {
+    let Some(ref path) = this.active_file else { return };
+    let zoom = match this.file_viewers.get_mut(path) {
+        Some(FileViewer::Image { zoom, .. }) => zoom,
+        Some(FileViewer::Pdf { zoom, .. }) => zoom,
+        _ => return,
+    };
+    *zoom = (*zoom + step).clamp(0.1, 5.0);
+}
+
 fn file_entries_to_tree_items(entries: &[FileEntry]) -> Vec<TreeItem> {
     entries
         .iter()
@@ -1671,6 +2205,58 @@ fn collect_expanded_ids(items: &[TreeItem], set: &mut HashSet<String>) {
         }
         collect_expanded_ids(&item.children, set);
     }
+}
+
+fn format_file_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+fn format_hex_preview(bytes: &[u8], max_bytes: usize) -> String {
+    let mut out = String::new();
+    let limit = bytes.len().min(max_bytes);
+    for (i, chunk) in bytes[..limit].chunks(16).enumerate() {
+        // Offset
+        out.push_str(&format!("{:08x}  ", i * 16));
+        // Hex bytes
+        for (j, b) in chunk.iter().enumerate() {
+            out.push_str(&format!("{:02x} ", b));
+            if j == 7 {
+                out.push(' ');
+            }
+        }
+        // Padding for short lines
+        let pad = 16 - chunk.len();
+        for j in 0..pad {
+            out.push_str("   ");
+            if chunk.len() + j == 7 {
+                out.push(' ');
+            }
+        }
+        out.push(' ');
+        // ASCII
+        out.push('|');
+        for b in chunk {
+            if b.is_ascii_graphic() || *b == b' ' {
+                out.push(*b as char);
+            } else {
+                out.push('.');
+            }
+        }
+        out.push('|');
+        out.push('\n');
+    }
+    if limit < bytes.len() {
+        out.push_str(&format!("... ({} more bytes)\n", bytes.len() - limit));
+    }
+    out
 }
 
 fn language_from_path(path: &str) -> Option<SharedString> {

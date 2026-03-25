@@ -6,6 +6,7 @@ members = [
     "crates/embd-workspace",
     "crates/embd-platform",
     "crates/embd-commands",
+    "crates/embd-settings",
     "crates/embd-app",
     "crates/xtask",
 ]

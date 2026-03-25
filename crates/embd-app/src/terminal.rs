@@ -12,17 +12,78 @@ const TERM_ROWS: u16 = 24;
 const TERM_COLS: u16 = 80;
 const SCROLLBACK: usize = 1000;
 
+// ── Styled text run (batched adjacent cells with same style) ────────
+
+struct StyledRun {
+    text: String,
+    fg: Hsla,
+    bg: Hsla,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    cursor: CursorStyle,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum CursorStyle {
+    None,
+    Block,       // focused + visible phase
+    Underline,   // focused + blink-off phase
+    Hollow,      // unfocused
+}
+
+impl StyledRun {
+    fn can_merge(&self, fg: Hsla, bg: Hsla, bold: bool, italic: bool, underline: bool) -> bool {
+        self.cursor == CursorStyle::None
+            && self.fg == fg
+            && self.bg == bg
+            && self.bold == bold
+            && self.italic == italic
+            && self.underline == underline
+    }
+}
+
+// ── vt100 callbacks for title tracking ──────────────────────────────
+
+#[derive(Clone)]
+struct TermCallbacks {
+    title: Arc<Mutex<Option<String>>>,
+}
+
+impl vt100::Callbacks for TermCallbacks {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        if let Ok(s) = std::str::from_utf8(title) {
+            *self.title.lock().unwrap() = Some(s.to_string());
+        }
+    }
+
+    fn set_window_icon_name(&mut self, _: &mut vt100::Screen, name: &[u8]) {
+        if let Ok(s) = std::str::from_utf8(name) {
+            *self.title.lock().unwrap() = Some(s.to_string());
+        }
+    }
+}
+
 // ── Terminal session ────────────────────────────────────────────────
 
 struct TermSession {
     id: u32,
-    name: String,
+    default_name: String,
+    title: Arc<Mutex<Option<String>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    parser: vt100::Parser,
+    parser: vt100::Parser<TermCallbacks>,
     alive: Arc<Mutex<bool>>,
-    /// Keep the child process alive for the session's lifetime.
-    /// Dropping this early can orphan or kill the shell process.
     _child: Box<dyn portable_pty::Child + Send + Sync>,
+}
+
+impl TermSession {
+    fn display_name(&self) -> String {
+        if let Some(ref title) = *self.title.lock().unwrap() {
+            title.clone()
+        } else {
+            self.default_name.clone()
+        }
+    }
 }
 
 // ── Terminal pane (GPUI entity) ─────────────────────────────────────
@@ -44,6 +105,7 @@ pub struct TerminalPane {
     exit_rx: flume::Receiver<u32>,
     exit_tx: flume::Sender<u32>,
     cursor_visible: bool,
+    blink_epoch: usize,
 }
 
 impl TerminalPane {
@@ -51,10 +113,10 @@ impl TerminalPane {
         let (tx, rx) = flume::unbounded();
         let (exit_tx, exit_rx) = flume::unbounded();
 
-        // Poll for PTY output every 16ms
+        // Poll for PTY output every 8ms (~120fps) — only notify on actual changes
         cx.spawn(async move |this, cx| {
             loop {
-                Timer::after(std::time::Duration::from_millis(16)).await;
+                Timer::after(std::time::Duration::from_millis(8)).await;
                 let ok = this
                     .update(cx, |this, cx| {
                         this.poll(cx);
@@ -67,15 +129,19 @@ impl TerminalPane {
         })
         .detach();
 
-        // Cursor blink every 500ms
+        // Cursor blink every 500ms — only notify when cursor actually toggles
         cx.spawn(async move |this, cx| {
             loop {
                 Timer::after(std::time::Duration::from_millis(500)).await;
                 let ok = this
                     .update(cx, |this, cx| {
                         if !this.sessions.is_empty() {
-                            this.cursor_visible = !this.cursor_visible;
-                            cx.notify();
+                            let new_val = !this.cursor_visible;
+                            if new_val != this.cursor_visible {
+                                this.cursor_visible = new_val;
+                                this.blink_epoch += 1;
+                                cx.notify();
+                            }
                         }
                     })
                     .is_ok();
@@ -97,6 +163,7 @@ impl TerminalPane {
             exit_rx,
             exit_tx,
             cursor_visible: true,
+            blink_epoch: 0,
         }
     }
 
@@ -162,11 +229,36 @@ impl TerminalPane {
 
         let alive = Arc::new(Mutex::new(true));
 
+        let shell_name = std::env::var("SHELL")
+            .ok()
+            .and_then(|s| s.rsplit('/').next().map(String::from))
+            .unwrap_or_else(|| "shell".into());
+        let project_name = self
+            .cwd
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string());
+        let name = match project_name {
+            Some(proj) => format!("{} — {}", proj, shell_name),
+            None => shell_name,
+        };
+
+        let title: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let callbacks = TermCallbacks {
+            title: title.clone(),
+        };
+
         let session = TermSession {
             id,
-            name: format!("Terminal {}", id),
+            default_name: name,
+            title,
             writer: Arc::new(Mutex::new(writer)),
-            parser: vt100::Parser::new(TERM_ROWS, TERM_COLS, SCROLLBACK),
+            parser: vt100::Parser::new_with_callbacks(
+                TERM_ROWS,
+                TERM_COLS,
+                SCROLLBACK,
+                callbacks,
+            ),
             alive: alive.clone(),
             _child: child,
         };
@@ -221,11 +313,11 @@ impl TerminalPane {
                 session.parser.process(&data);
                 changed = true;
             }
-            // Reset cursor visible on new output
+            // Reset cursor visible on new output so it stays solid while active
             self.cursor_visible = true;
         }
 
-        // Drain exits — auto-remove dead sessions
+        // Drain exits
         while let Ok(id) = self.exit_rx.try_recv() {
             self.sessions.retain(|s| s.id != id);
             if self.active >= self.sessions.len() && !self.sessions.is_empty() {
@@ -249,8 +341,15 @@ impl TerminalPane {
                 let _ = w.flush();
             }
         }
-        // Reset blink so cursor stays visible while typing
         self.cursor_visible = true;
+    }
+
+    /// Get application cursor mode from the active session's vt100 screen.
+    fn app_cursor_mode(&self) -> bool {
+        self.sessions
+            .get(self.active)
+            .map(|s| s.parser.screen().application_cursor())
+            .unwrap_or(false)
     }
 
     fn handle_key_down(
@@ -261,48 +360,176 @@ impl TerminalPane {
     ) {
         let ks = &event.keystroke;
 
-        // Let Cmd+key combos pass through to workspace actions
+        // Let Cmd+key combos pass through to workspace
         if ks.modifiers.platform {
             return;
         }
 
-        if ks.modifiers.control {
-            let key = ks.key.as_str();
-            if key.len() == 1 {
-                let ch = key.as_bytes()[0];
-                if ch.is_ascii_lowercase() {
-                    let ctrl_code = ch - b'a' + 1;
-                    self.write_to_active(&[ctrl_code]);
-                    cx.notify();
-                    return;
-                }
-            }
+        let app_cursor = self.app_cursor_mode();
+        if let Some(bytes) = keystroke_to_bytes(ks, app_cursor) {
+            self.write_to_active(&bytes);
+            cx.notify();
         }
+    }
+}
 
-        let key = ks.key.as_str();
-        match key {
-            "enter" => self.write_to_active(b"\r"),
-            "backspace" => self.write_to_active(b"\x7f"),
-            "tab" => self.write_to_active(b"\t"),
-            "escape" => self.write_to_active(b"\x1b"),
-            "up" => self.write_to_active(b"\x1b[A"),
-            "down" => self.write_to_active(b"\x1b[B"),
-            "right" => self.write_to_active(b"\x1b[C"),
-            "left" => self.write_to_active(b"\x1b[D"),
-            "home" => self.write_to_active(b"\x1b[H"),
-            "end" => self.write_to_active(b"\x1b[F"),
-            "delete" => self.write_to_active(b"\x1b[3~"),
-            _ => {
-                if let Some(ref ch) = ks.key_char {
-                    self.write_to_active(ch.as_bytes());
-                } else if key.len() == 1 {
-                    self.write_to_active(key.as_bytes());
-                } else {
-                    return;
+// ── Keyboard mapping (xterm-compatible) ─────────────────────────────
+
+fn keystroke_to_bytes(ks: &Keystroke, app_cursor: bool) -> Option<Vec<u8>> {
+    let key = ks.key.as_str();
+    let ctrl = ks.modifiers.control;
+    let alt = ks.modifiers.alt;
+    let shift = ks.modifiers.shift;
+
+    // xterm modifier encoding: 1 + (shift?1:0) + (alt?2:0) + (ctrl?4:0)
+    let mod_code = 1
+        + if shift { 1 } else { 0 }
+        + if alt { 2 } else { 0 }
+        + if ctrl { 4 } else { 0 };
+    let has_mods = mod_code > 1;
+
+    match key {
+        "enter" => Some(if alt { b"\x1b\r".to_vec() } else { b"\r".to_vec() }),
+        "backspace" => Some(if ctrl {
+            b"\x08".to_vec()
+        } else if alt {
+            b"\x1b\x7f".to_vec()
+        } else {
+            b"\x7f".to_vec()
+        }),
+        "tab" => Some(if shift {
+            b"\x1b[Z".to_vec()
+        } else {
+            b"\t".to_vec()
+        }),
+        "escape" => Some(b"\x1b".to_vec()),
+        "space" => Some(if ctrl {
+            b"\x00".to_vec()
+        } else if alt {
+            b"\x1b ".to_vec()
+        } else {
+            b" ".to_vec()
+        }),
+
+        // Arrow keys — respect application cursor mode
+        "up" => Some(csi_or_ss3(b'A', app_cursor, has_mods, mod_code)),
+        "down" => Some(csi_or_ss3(b'B', app_cursor, has_mods, mod_code)),
+        "right" => Some(csi_or_ss3(b'C', app_cursor, has_mods, mod_code)),
+        "left" => Some(csi_or_ss3(b'D', app_cursor, has_mods, mod_code)),
+
+        // Navigation
+        "home" => Some(if has_mods {
+            format!("\x1b[1;{}H", mod_code).into_bytes()
+        } else if app_cursor {
+            b"\x1bOH".to_vec()
+        } else {
+            b"\x1b[H".to_vec()
+        }),
+        "end" => Some(if has_mods {
+            format!("\x1b[1;{}F", mod_code).into_bytes()
+        } else if app_cursor {
+            b"\x1bOF".to_vec()
+        } else {
+            b"\x1b[F".to_vec()
+        }),
+        "pageup" => Some(tilde_key(5, has_mods, mod_code)),
+        "pagedown" => Some(tilde_key(6, has_mods, mod_code)),
+        "insert" => Some(tilde_key(2, has_mods, mod_code)),
+        "delete" => Some(tilde_key(3, has_mods, mod_code)),
+
+        // Function keys
+        "f1" => Some(ss3_func(b'P', has_mods, mod_code)),
+        "f2" => Some(ss3_func(b'Q', has_mods, mod_code)),
+        "f3" => Some(ss3_func(b'R', has_mods, mod_code)),
+        "f4" => Some(ss3_func(b'S', has_mods, mod_code)),
+        "f5" => Some(tilde_key(15, has_mods, mod_code)),
+        "f6" => Some(tilde_key(17, has_mods, mod_code)),
+        "f7" => Some(tilde_key(18, has_mods, mod_code)),
+        "f8" => Some(tilde_key(19, has_mods, mod_code)),
+        "f9" => Some(tilde_key(20, has_mods, mod_code)),
+        "f10" => Some(tilde_key(21, has_mods, mod_code)),
+        "f11" => Some(tilde_key(23, has_mods, mod_code)),
+        "f12" => Some(tilde_key(24, has_mods, mod_code)),
+
+        _ => {
+            // Ctrl+letter → control character (optionally with alt meta prefix)
+            if ctrl && !shift {
+                if let Some(code) = ctrl_code_for(key) {
+                    return if alt {
+                        Some(vec![0x1b, code])
+                    } else {
+                        Some(vec![code])
+                    };
                 }
             }
+
+            // Alt/Option as meta prefix — \x1b + char
+            if alt {
+                if let Some(ref ch) = ks.key_char {
+                    let mut bytes = vec![0x1b];
+                    bytes.extend_from_slice(ch.as_bytes());
+                    return Some(bytes);
+                } else if key.len() == 1 {
+                    return Some(vec![0x1b, key.as_bytes()[0]]);
+                }
+            }
+
+            // Regular character input
+            if let Some(ref ch) = ks.key_char {
+                Some(ch.as_bytes().to_vec())
+            } else if key.len() == 1 {
+                Some(key.as_bytes().to_vec())
+            } else {
+                None
+            }
         }
-        cx.notify();
+    }
+}
+
+/// Arrow/cursor keys: SS3 in app mode, CSI otherwise, with modifier support.
+fn csi_or_ss3(ch: u8, app_cursor: bool, has_mods: bool, mod_code: u32) -> Vec<u8> {
+    if has_mods {
+        format!("\x1b[1;{}{}", mod_code, ch as char).into_bytes()
+    } else if app_cursor {
+        vec![0x1b, b'O', ch]
+    } else {
+        vec![0x1b, b'[', ch]
+    }
+}
+
+/// Tilde-style keys: \x1b[N~ or \x1b[N;mod~
+fn tilde_key(n: u32, has_mods: bool, mod_code: u32) -> Vec<u8> {
+    if has_mods {
+        format!("\x1b[{};{}~", n, mod_code).into_bytes()
+    } else {
+        format!("\x1b[{}~", n).into_bytes()
+    }
+}
+
+/// F1-F4 use SS3 without mods, CSI with mods.
+fn ss3_func(ch: u8, has_mods: bool, mod_code: u32) -> Vec<u8> {
+    if has_mods {
+        format!("\x1b[1;{}{}", mod_code, ch as char).into_bytes()
+    } else {
+        vec![0x1b, b'O', ch]
+    }
+}
+
+/// Map a single-char key to its Ctrl code (0x01-0x1f).
+fn ctrl_code_for(key: &str) -> Option<u8> {
+    if key.len() != 1 {
+        return None;
+    }
+    let ch = key.as_bytes()[0];
+    match ch {
+        b'a'..=b'z' => Some(ch - b'a' + 1),
+        b'@' => Some(0x00),
+        b'[' => Some(0x1b),
+        b'\\' => Some(0x1c),
+        b']' => Some(0x1d),
+        b'^' => Some(0x1e),
+        b'_' => Some(0x1f),
+        _ => None,
     }
 }
 
@@ -311,20 +538,20 @@ impl TerminalPane {
 fn vt100_color_to_hsla(color: vt100::Color, is_fg: bool) -> Hsla {
     match color {
         vt100::Color::Default => {
-            if is_fg { Colors::text() } else { hsla(0.0, 0.0, 0.0, 0.0) }
+            if is_fg {
+                Colors::text()
+            } else {
+                hsla(0.0, 0.0, 0.0, 0.0)
+            }
         }
         vt100::Color::Idx(idx) => ansi_index_to_hsla(idx),
         vt100::Color::Rgb(r, g, b) => {
-            let color: Hsla = rgb(
-                ((r as u32) << 16) | ((g as u32) << 8) | (b as u32),
-            ).into();
-            color
+            rgb(((r as u32) << 16) | ((g as u32) << 8) | (b as u32)).into()
         }
     }
 }
 
 fn ansi_index_to_hsla(idx: u8) -> Hsla {
-    // Standard 16 ANSI colors (Catppuccin-inspired)
     match idx {
         0 => rgb(0x45475a).into(),   // black
         1 => rgb(0xf38ba8).into(),   // red
@@ -344,24 +571,141 @@ fn ansi_index_to_hsla(idx: u8) -> Hsla {
         15 => rgb(0xa6adc8).into(),  // bright white
         // 216 color cube (indices 16-231)
         16..=231 => {
-            let idx = idx - 16;
-            let r = (idx / 36) * 51;
-            let g = ((idx % 36) / 6) * 51;
-            let b = (idx % 6) * 51;
-            let color: Hsla = rgb(
-                ((r as u32) << 16) | ((g as u32) << 8) | (b as u32),
-            ).into();
-            color
+            let i = idx - 16;
+            let r = (i / 36) * 51;
+            let g = ((i % 36) / 6) * 51;
+            let b = (i % 6) * 51;
+            rgb(((r as u32) << 16) | ((g as u32) << 8) | (b as u32)).into()
         }
         // Grayscale (indices 232-255)
         _ => {
             let v = 8 + (idx - 232) * 10;
-            let color: Hsla = rgb(
-                ((v as u32) << 16) | ((v as u32) << 8) | (v as u32),
-            ).into();
-            color
+            rgb(((v as u32) << 16) | ((v as u32) << 8) | (v as u32)).into()
         }
     }
+}
+
+// ── Build styled runs from a screen row ─────────────────────────────
+
+fn build_row_runs(
+    screen: &vt100::Screen,
+    row: u16,
+    cursor_row: u16,
+    cursor_col: u16,
+    cursor_style: CursorStyle,
+) -> Vec<StyledRun> {
+    let cols = screen.size().1;
+    let is_cursor_row = row == cursor_row;
+    let mut runs: Vec<StyledRun> = Vec::with_capacity(16);
+
+    let mut col = 0u16;
+    while col < cols {
+        let cell = match screen.cell(row, col) {
+            Some(c) => c,
+            None => {
+                col += 1;
+                continue;
+            }
+        };
+
+        let contents = cell.contents();
+        // Wide char trailing cell — skip
+        if contents.is_empty() {
+            col += 1;
+            continue;
+        }
+
+        let mut fg = vt100_color_to_hsla(cell.fgcolor(), true);
+        let mut bg = vt100_color_to_hsla(cell.bgcolor(), false);
+        let bold = cell.bold();
+        let italic = cell.italic();
+        let underline = cell.underline();
+
+        if cell.inverse() {
+            std::mem::swap(&mut fg, &mut bg);
+            // If both were default, make the swap visible
+            if bg.a == 0.0 {
+                bg = Colors::text();
+                fg = Colors::bg_base();
+            }
+        }
+
+        let cell_cursor = if is_cursor_row && col == cursor_col {
+            cursor_style
+        } else {
+            CursorStyle::None
+        };
+
+        // Try to merge into the previous run
+        if cell_cursor == CursorStyle::None {
+            if let Some(last) = runs.last_mut() {
+                if last.can_merge(fg, bg, bold, italic, underline) {
+                    last.text.push_str(contents);
+                    col += 1;
+                    continue;
+                }
+            }
+        }
+
+        runs.push(StyledRun {
+            text: contents.to_string(),
+            fg,
+            bg,
+            bold,
+            italic,
+            underline,
+            cursor: cell_cursor,
+        });
+
+        col += 1;
+    }
+
+    // Ensure cursor is visible even on an empty/trailing position
+    if is_cursor_row && cursor_style != CursorStyle::None {
+        let cursor_col_usize = cursor_col as usize;
+        // Check if cursor was already placed on a cell
+        let cursor_placed = runs.iter().any(|r| r.cursor != CursorStyle::None);
+        if !cursor_placed {
+            // Cursor is past the last content — append a cursor block
+            // Pad with spaces if needed
+            let current_len: usize = runs.iter().map(|r| r.text.chars().count()).sum();
+            if cursor_col_usize > current_len {
+                runs.push(StyledRun {
+                    text: " ".repeat(cursor_col_usize - current_len),
+                    fg: Colors::text(),
+                    bg: hsla(0.0, 0.0, 0.0, 0.0),
+                    bold: false,
+                    italic: false,
+                    underline: false,
+                    cursor: CursorStyle::None,
+                });
+            }
+            runs.push(StyledRun {
+                text: " ".to_string(),
+                fg: Colors::text(),
+                bg: hsla(0.0, 0.0, 0.0, 0.0),
+                bold: false,
+                italic: false,
+                underline: false,
+                cursor: cursor_style,
+            });
+        }
+    }
+
+    // Guarantee at least one run per line to maintain height
+    if runs.is_empty() {
+        runs.push(StyledRun {
+            text: " ".to_string(),
+            fg: Colors::text(),
+            bg: hsla(0.0, 0.0, 0.0, 0.0),
+            bold: false,
+            italic: false,
+            underline: false,
+            cursor: CursorStyle::None,
+        });
+    }
+
+    runs
 }
 
 // ── Render ───────────────────────────────────────────────────────────
@@ -371,6 +715,7 @@ impl Render for TerminalPane {
         let is_focused = self.focus_handle.is_focused(window)
             || self.focus_handle.contains_focused(window, cx);
         let cursor_visible = self.cursor_visible;
+
         if self.sessions.is_empty() {
             return div()
                 .id("terminal-empty")
@@ -390,104 +735,84 @@ impl Render for TerminalPane {
             .and_then(|s| s.alive.lock().ok().map(|g| *g))
             .unwrap_or(false);
 
-        // Read terminal screen from vt100 parser
-        let screen_lines: Vec<Vec<(String, Hsla, Hsla, bool, bool)>> = self
+        // Determine cursor style
+        let cursor_style = if !active_alive {
+            CursorStyle::None
+        } else if is_focused && cursor_visible {
+            CursorStyle::Block
+        } else if is_focused {
+            CursorStyle::Underline
+        } else {
+            CursorStyle::Hollow
+        };
+
+        // Build all row runs from the vt100 screen
+        let row_runs: Vec<Vec<StyledRun>> = self
             .sessions
             .get(self.active)
             .map(|s| {
                 let screen = s.parser.screen();
                 let rows = screen.size().0;
-                let cols = screen.size().1;
+                let cursor = screen.cursor_position();
                 (0..rows)
                     .map(|row| {
-                        let mut line: Vec<(String, Hsla, Hsla, bool, bool)> = Vec::new();
-                        let mut col = 0u16;
-                        while col < cols {
-                            let cell = screen.cell(row, col);
-                            let (contents, fg, bg, bold, inverse) = match cell {
-                                Some(cell) => {
-                                    let contents = cell.contents();
-                                    let fg = vt100_color_to_hsla(cell.fgcolor(), true);
-                                    let bg = vt100_color_to_hsla(cell.bgcolor(), false);
-                                    let bold = cell.bold();
-                                    let inverse = cell.inverse();
-                                    // Skip wide char trailing cells
-                                    if contents.is_empty() {
-                                        col += 1;
-                                        continue;
-                                    }
-                                    (contents, fg, bg, bold, inverse)
-                                }
-                                None => {
-                                    col += 1;
-                                    continue;
-                                }
-                            };
-                            line.push((contents.to_string(), fg, bg, bold, inverse));
-                            col += 1;
-                        }
-                        line
+                        build_row_runs(screen, row, cursor.0, cursor.1, cursor_style)
                     })
                     .collect()
             })
             .unwrap_or_default();
 
-        // Cursor position
-        let cursor_pos = self
+        // ── Tab bar ─────────────────────────────────────────────────
+        let tab_items: Vec<AnyElement> = self
             .sessions
-            .get(self.active)
-            .map(|s| {
-                let screen = s.parser.screen();
-                let pos = screen.cursor_position();
-                (pos.0 as usize, pos.1 as usize)
-            })
-            .unwrap_or((0, 0));
-
-        // Tab bar
-        let tab_items: Vec<AnyElement> = self.sessions.iter().enumerate().map(|(i, s)| {
-            let is_active = i == self.active;
-            let alive = s.alive.lock().ok().map_or(false, |g| *g);
-            let label = if alive {
-                s.name.clone()
-            } else {
-                format!("{} (exited)", s.name)
-            };
-
-            div()
-                .id(SharedString::from(format!("term-tab-{}", i)))
-                .px(px(10.0))
-                .py(px(4.0))
-                .text_xs()
-                .cursor_pointer()
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .text_color(if is_active {
-                    Colors::text_muted()
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let is_active = i == self.active;
+                let alive = s.alive.lock().ok().map_or(false, |g| *g);
+                let display = s.display_name();
+                let label = if alive {
+                    display
                 } else {
-                    Colors::text_faint()
-                })
-                .when(is_active, |d| d.bg(Colors::bg_base()).rounded_t(px(3.0)))
-                .hover(|s| s.text_color(Colors::text_muted()))
-                .on_click(cx.listener(move |this, _, _window, cx| {
-                    this.active = i;
-                    cx.notify();
-                }))
-                .child(label)
-                .child(
-                    div()
-                        .id(SharedString::from(format!("term-close-{}", i)))
-                        .cursor_pointer()
-                        .text_color(Colors::text_faint())
-                        .hover(|s| s.text_color(Colors::text_muted()))
-                        .rounded(px(2.0))
-                        .child("×")
-                        .on_click(cx.listener(move |this, _, _window, cx| {
-                            this.kill_session(i, cx);
-                        })),
-                )
-                .into_any_element()
-        }).collect();
+                    format!("{} (exited)", display)
+                };
+
+                div()
+                    .id(SharedString::from(format!("term-tab-{}", i)))
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .text_xs()
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_color(if is_active {
+                        Colors::text_muted()
+                    } else {
+                        Colors::text_faint()
+                    })
+                    .when(is_active, |d| d.bg(Colors::bg_base()).rounded_t(px(3.0)))
+                    .hover(|s| s.text_color(Colors::text_muted()))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.active = i;
+                        cx.notify();
+                    }))
+                    .child(label)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("term-close-{}", i)))
+                            .cursor_pointer()
+                            .text_color(Colors::text_faint())
+                            .hover(|s| s.text_color(Colors::text_muted()))
+                            .rounded(px(2.0))
+                            .child("×")
+                            .on_click(cx.listener(move |this, _, _window, cx| {
+                                this.kill_session(i, cx);
+                            })),
+                    )
+                    .into_any_element()
+            })
+            .collect();
 
         let tab_bar = div()
             .h(px(28.0))
@@ -515,52 +840,47 @@ impl Render for TerminalPane {
                     })),
             );
 
-        // Render screen lines
-        let rendered_lines: Vec<AnyElement> = screen_lines
-            .iter()
-            .enumerate()
-            .map(|(row_idx, line)| {
-                let is_cursor_row = row_idx == cursor_pos.0;
+        // ── Render rows from batched runs ───────────────────────────
+        let rendered_lines: Vec<AnyElement> = row_runs
+            .into_iter()
+            .map(|runs| {
+                let spans: Vec<AnyElement> = runs
+                    .into_iter()
+                    .map(|run| {
+                        let mut el = div().text_color(run.fg);
 
-                // Build spans for this row
-                let spans: Vec<AnyElement> = line
-                    .iter()
-                    .enumerate()
-                    .map(|(col_idx, (text, fg, bg, bold, inverse))| {
-                        let is_cursor = is_cursor_row && col_idx == cursor_pos.1 && active_alive;
-                        let (fg, bg) = if *inverse {
-                            (*bg, *fg)
-                        } else {
-                            (*fg, *bg)
-                        };
-
-                        let mut el = div().text_color(fg);
-                        if bg.a > 0.0 {
-                            el = el.bg(bg);
+                        if run.bg.a > 0.0 {
+                            el = el.bg(run.bg);
                         }
-                        if *bold {
+                        if run.bold {
                             el = el.font_weight(FontWeight::BOLD);
                         }
-                        if is_cursor && is_focused && cursor_visible {
-                            // Solid block cursor when focused and visible
-                            el = el.bg(Colors::text()).text_color(Colors::bg_base());
-                        } else if is_cursor && is_focused {
-                            // Blink off phase — show a subtle underline
-                            el = el.border_b_2().border_color(Colors::text());
-                        } else if is_cursor {
-                            // Unfocused — dim hollow cursor
-                            el = el.border_1().border_color(Colors::text_muted());
+                        if run.italic {
+                            el = el.italic();
                         }
-                        el.child(text.clone()).into_any_element()
+                        if run.underline {
+                            el = el.underline().text_decoration_color(run.fg);
+                        }
+
+                        // Cursor styling
+                        match run.cursor {
+                            CursorStyle::Block => {
+                                el = el.bg(Colors::text()).text_color(Colors::bg_base());
+                            }
+                            CursorStyle::Underline => {
+                                el = el.border_b_2().border_color(Colors::text());
+                            }
+                            CursorStyle::Hollow => {
+                                el = el.border_1().border_color(Colors::text_muted());
+                            }
+                            CursorStyle::None => {}
+                        }
+
+                        el.child(run.text).into_any_element()
                     })
                     .collect();
 
-                // If line is empty, show a space to maintain line height
-                if spans.is_empty() {
-                    div().child(" ").into_any_element()
-                } else {
-                    div().flex().children(spans).into_any_element()
-                }
+                div().flex().children(spans).into_any_element()
             })
             .collect();
 
@@ -580,7 +900,8 @@ impl Render for TerminalPane {
                     .overflow_y_scroll()
                     .px(px(10.0))
                     .py(px(6.0))
-                    .text_xs()
+                    .text_size(px(13.0))
+                    .line_height(px(18.0))
                     .font_family("monospace")
                     .children(rendered_lines),
             )

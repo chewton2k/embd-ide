@@ -82,6 +82,10 @@ static ICONS: LazyLock<HashMap<&'static str, &'static [u8]>> = LazyLock::new(|| 
     icon!(m, "font");
     icon!(m, "archive");
     icon!(m, "certificate");
+    // UI chrome
+    icon!(m, "pin");
+    icon!(m, "pin-filled");
+    icon!(m, "close");
     m
 });
 

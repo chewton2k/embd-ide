@@ -1422,14 +1422,18 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 name = "embd-app"
 version = "0.2.0"
 dependencies = [
+ "core-foundation 0.10.0",
+ "core-graphics 0.24.0",
  "embd-commands",
  "embd-core",
  "embd-editor",
  "embd-platform",
+ "embd-settings",
  "embd-workspace",
  "flume",
  "gpui",
  "gpui-component",
+ "image",
  "log",
  "portable-pty",
  "serde",
@@ -1489,11 +1493,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "embd-settings"
+version = "0.1.0"
+dependencies = [
+ "embd-core",
+ "gpui",
+ "gpui-component",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "embd-workspace"
 version = "0.1.0"
 dependencies = [
  "embd-core",
  "embd-editor",
+ "embd-settings",
  "serde",
  "serde_json",
 ]

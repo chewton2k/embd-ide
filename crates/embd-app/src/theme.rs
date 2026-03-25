@@ -1,37 +1,41 @@
 use gpui::{rgb, App, Hsla};
+use embd_settings::palette;
 
-/// Catppuccin Mocha-inspired color palette — refined for minimalist polish.
 pub struct Colors;
 
 impl Colors {
+    fn p() -> palette::Palette { palette::active_palette() }
+
     // ── Backgrounds ──────────────────────────────────────────────
-    pub fn bg_base() -> Hsla { rgb(0x1e1e2e).into() }
-    pub fn bg_surface() -> Hsla { rgb(0x282838).into() }     // slightly lighter than base
-    pub fn bg_elevated() -> Hsla { rgb(0x313244).into() }    // cards, popovers
-    pub fn bg_overlay() -> Hsla { rgb(0x45475a).into() }     // selection highlight
+    pub fn bg_base() -> Hsla { rgb(Self::p().bg_base).into() }
+    pub fn bg_surface() -> Hsla { rgb(Self::p().bg_surface).into() }
+    pub fn bg_elevated() -> Hsla { rgb(Self::p().bg_elevated).into() }
+    pub fn bg_overlay() -> Hsla { rgb(Self::p().bg_overlay).into() }
 
     // ── Text ─────────────────────────────────────────────────────
-    pub fn text() -> Hsla { rgb(0xcdd6f4).into() }
-    pub fn text_muted() -> Hsla { rgb(0x9399b2).into() }     // secondary text
-    pub fn text_faint() -> Hsla { rgb(0x6c7086).into() }     // tertiary / disabled
+    pub fn text() -> Hsla { rgb(Self::p().text).into() }
+    pub fn text_muted() -> Hsla { rgb(Self::p().text_muted).into() }
+    pub fn text_faint() -> Hsla { rgb(Self::p().text_faint).into() }
 
     // ── Accent ───────────────────────────────────────────────────
-    pub fn accent() -> Hsla { rgb(0x89b4fa).into() }
-    pub fn accent_dim() -> Hsla { rgb(0x5d7cbf).into() }     // muted accent
+    pub fn accent() -> Hsla { rgb(Self::p().accent).into() }
+    pub fn accent_dim() -> Hsla { rgb(Self::p().accent_dim).into() }
 
     // ── Borders ──────────────────────────────────────────────────
-    pub fn border() -> Hsla { rgb(0x3b3d52).into() }         // primary borders
-    pub fn border_subtle() -> Hsla { rgb(0x313244).into() }  // subtle dividers
+    pub fn border() -> Hsla { rgb(Self::p().border).into() }
+    pub fn border_subtle() -> Hsla { rgb(Self::p().border_subtle).into() }
 
     // ── Semantic ─────────────────────────────────────────────────
-    pub fn success() -> Hsla { rgb(0xa6e3a1).into() }
-    pub fn warning() -> Hsla { rgb(0xf9e2af).into() }
-    pub fn error() -> Hsla { rgb(0xf38ba8).into() }
+    pub fn success() -> Hsla { rgb(Self::p().success).into() }
+    pub fn warning() -> Hsla { rgb(Self::p().warning).into() }
+    pub fn error() -> Hsla { rgb(Self::p().error).into() }
 
     // ── Interactive ──────────────────────────────────────────────
-    pub fn surface_hover() -> Hsla { rgb(0x313244).into() }
+    pub fn surface_hover() -> Hsla { rgb(Self::p().surface_hover).into() }
 }
 
 pub fn init(_app: &mut App) {
-    // Future: register theme resources, load settings, etc.
+    // Load theme from saved settings
+    let settings = embd_settings::Settings::load(&embd_settings::Settings::default_path());
+    palette::set_theme(&settings.appearance.theme_id);
 }
