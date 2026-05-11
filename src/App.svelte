@@ -4,7 +4,7 @@
   import FileViewer from './lib/FileViewer.svelte';
   import JSONViewer from './lib/JSONViewer.svelte';
   import MergeEditor from './lib/MergeEditor.svelte';
-  import Tabs from './lib/Tabs.svelte';
+  import Toolbar from './lib/Toolbar.svelte';
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
   import GitPanel from './lib/GitPanel.svelte';
@@ -14,7 +14,7 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab } from './lib/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel } from './lib/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -54,11 +54,15 @@
     await openFolderByPath(project.path);
   }
 
-  let showChat = $state(false);
-  let showGit = $state(false);
   let showFileSearch = $state(false);
   let sidebarWidth = $state(220);
   let terminalHeight = $state(220);
+  let sidebarVisible = $state(true);
+
+  function toggleSidebar() {
+    sidebarVisible = !sidebarVisible;
+  }
+
   let chatWidth = $state(320);
   let gitWidth = $state(360);
 
@@ -102,18 +106,19 @@
     $showTerminal = !$showTerminal;
   }
 
-  function toggleChat() {
-    showChat = !showChat;
-    if (showChat) showGit = false;
-  }
-
-  function toggleGit() {
-    showGit = !showGit;
-    if (showGit) showChat = false;
-  }
-
   let appVersion = $state('');
   let isClosing = false;
+
+  let breadcrumbSegments = $derived.by(() => {
+    const path = $activeFilePath;
+    const root = $projectRoot;
+    if (!path) return [];
+    if (root && path.startsWith(root + '/')) {
+      const rel = path.slice(root.length + 1);
+      return [root.split('/').pop() || root, ...rel.split('/')];
+    }
+    return [path.split('/').pop() || path];
+  });
 
   onMount(async () => {
     getVersion().then(v => appVersion = v);
@@ -208,11 +213,11 @@
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
       e.preventDefault();
-      toggleChat();
+      toggleChatPanel();
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
       e.preventDefault();
-      toggleGit();
+      toggleGitPanel();
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
       e.preventDefault();
@@ -240,16 +245,18 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="ide-layout">
+  <Toolbar {sidebarVisible} onToggleSidebar={toggleSidebar} />
   <div class="ide-top">
+    {#if sidebarVisible}
     <div class="sidebar" style="width: {sidebarWidth}px">
       <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} onOpenFolder={handleOpenFolder} />
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
+    {/if}
 
     <div class="main-area">
       <div class="editor-area" style="flex: 1; min-height: 0;">
-        <Tabs />
         <div class="editor-container">
           {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
             <MergeEditor filePath={$activeFile} />
@@ -299,25 +306,25 @@
       </div>
     </div>
 
-    {#if showChat}
+    {#if $showChat}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="resize-handle resize-handle-col" onmousedown={startDrag('chat')}></div>
       <div class="chat-panel" style="width: {chatWidth}px">
         <div class="panel-header">
           <span>AI Chat</span>
-          <button onclick={toggleChat}>✕</button>
+          <button onclick={toggleChatPanel}>✕</button>
         </div>
         <ChatPanel />
       </div>
     {/if}
 
-    {#if showGit}
+    {#if $showGit}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="resize-handle resize-handle-col" onmousedown={startDrag('git')}></div>
       <div class="git-panel-container" style="width: {gitWidth}px">
         <div class="panel-header">
           <span>Source Control</span>
-          <button onclick={toggleGit}>✕</button>
+          <button onclick={toggleGitPanel}>✕</button>
         </div>
         <GitPanel />
       </div>
@@ -334,31 +341,16 @@
 
   <div class="statusbar">
     <div class="statusbar-left">
-      <button onclick={() => showSettings.update(v => !v)} class="statusbar-btn gear-btn" title="Settings">
-        <svg viewBox="0 0 16 14" fill="currentColor" width="13" height="13">
-          <path d="M8 1l1.3.8.8-.5 1 1-.5.8.5 1H12.5v1.4l-.8.5.2 1 .9.5-.3 1.2-1 .1-.3 1 .6.8-.7 1.1-1-.3-.7.8.1 1L8 13l-1.3-.8-.8.5-1-1 .5-.8-.5-1H3.5V8.5l.8-.5-.2-1-.9-.5.3-1.2 1-.1.3-1-.6-.8.7-1.1 1 .3.7-.8L6.5 2 8 1zm0 4.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/>
-        </svg>
-      </button>
-      {#if $gitBranch}
-        <button class="statusbar-btn statusbar-branch" onclick={toggleGit}>
-          <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-            <path d="M14.7 7.3L8.7 1.3a1 1 0 0 0-1.4 0L5.7 2.9l1.8 1.8A1.2 1.2 0 0 1 9 5.9v4.3a1.2 1.2 0 1 1-1-.1V6.1L6.3 7.8a1.2 1.2 0 1 1-.9-.5l1.8-1.8-1.8-1.8L1.3 7.3a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0l6-6a1 1 0 0 0 0-1.4z"/>
-          </svg>
-          {$gitBranch}
-        </button>
+      {#if breadcrumbSegments.length > 0}
+        <div class="breadcrumb">
+          {#each breadcrumbSegments as seg, i}
+            <span class="breadcrumb-seg">{seg}</span>
+            {#if i < breadcrumbSegments.length - 1}
+              <span class="breadcrumb-sep">›</span>
+            {/if}
+          {/each}
+        </div>
       {/if}
-      <button onclick={toggleTerminal} class="statusbar-btn">
-        {$showTerminal ? 'Hide' : 'Show'} Terminal 
-      </button>
-      <button onclick={toggleChat} class="statusbar-btn">
-        | {showChat ? 'Hide' : 'Show'} AI 
-      </button>
-      <button onclick={toggleGit} class="statusbar-btn">
-        | {showGit ? 'Hide' : 'Show'} Git 
-      </button>
-      <button onclick={() => autosaveEnabled.update(v => !v)} class="statusbar-btn autosave-btn">
-        | {$autosaveEnabled ? 'ON Autosave' : 'OFF Autosave'} |
-      </button>
     </div>
     <div class="statusbar-right">
       {#if $activeFile}
@@ -384,7 +376,7 @@
 <style>
   .ide-layout {
     display: grid;
-    grid-template-rows: 1fr var(--density-statusbar-height, 24px);
+    grid-template-rows: var(--density-tabs-height, 36px) 1fr var(--density-statusbar-height, 24px);
     height: 100vh;
     width: 100vw;
     overflow: hidden;
@@ -625,39 +617,6 @@
     flex-shrink: 0;
   }
 
-  .statusbar-btn {
-    color: var(--bg-tertiary);
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .statusbar-btn:hover {
-    opacity: 0.8;
-  }
-
-  .autosave-btn {
-    font-size: 11px;
-    opacity: 0.9;
-  }
-
-  .gear-btn {
-    display: flex;
-    align-items: center;
-    padding: 0 4px;
-  }
-
-  .statusbar-branch {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    font-weight: 500;
-    padding-right: 8px;
-    border-right: 1px solid color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
-  }
-
   .save-indicator {
     display: flex;
     align-items: center;
@@ -675,5 +634,34 @@
 
   .save-indicator.unsaved {
     opacity: 1;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .breadcrumb-seg {
+    background: color-mix(in srgb, var(--bg-tertiary) 50%, transparent);
+    padding: 1px 7px;
+    border-radius: 10px;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 500;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--bg-tertiary);
+  }
+
+  .breadcrumb-sep {
+    opacity: 0.55;
+    font-size: 10px;
+    flex-shrink: 0;
+    color: var(--bg-tertiary);
   }
 </style>
