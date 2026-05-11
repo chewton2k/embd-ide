@@ -113,11 +113,14 @@
     const path = $activeFilePath;
     const root = $projectRoot;
     if (!path) return [];
-    if (root && path.startsWith(root + '/')) {
-      const rel = path.slice(root.length + 1);
-      return [root.split('/').pop() || root, ...rel.split('/')];
+    const sep = path.includes('\\') ? '\\' : '/';
+    const normPath = path.replace(/\\/g, '/');
+    const normRoot = root ? root.replace(/\\/g, '/') : null;
+    if (normRoot && normPath.startsWith(normRoot + '/')) {
+      const rel = normPath.slice(normRoot.length + 1);
+      return [normRoot.split('/').pop() || normRoot, ...rel.split('/')];
     }
-    return [path.split('/').pop() || path];
+    return [normPath.split('/').pop() || path];
   });
 
   onMount(async () => {
@@ -646,7 +649,7 @@
   }
 
   .breadcrumb-seg {
-    background: color-mix(in srgb, var(--bg-tertiary) 50%, transparent);
+    background: color-mix(in srgb, currentColor 15%, transparent);
     padding: 1px 7px;
     border-radius: 10px;
     white-space: nowrap;
@@ -655,13 +658,13 @@
     max-width: 130px;
     overflow: hidden;
     text-overflow: ellipsis;
-    color: var(--bg-tertiary);
+    color: inherit;
   }
 
   .breadcrumb-sep {
     opacity: 0.55;
     font-size: 10px;
     flex-shrink: 0;
-    color: var(--bg-tertiary);
+    color: inherit;
   }
 </style>
