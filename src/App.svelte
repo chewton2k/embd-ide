@@ -14,7 +14,7 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel } from './lib/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget } from './lib/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -117,10 +117,23 @@
     const normRoot = root ? root.replace(/\\/g, '/') : null;
     if (normRoot && normPath.startsWith(normRoot + '/')) {
       const rel = normPath.slice(normRoot.length + 1);
-      return [normRoot.split('/').pop() || normRoot, ...rel.split('/')];
+      const relParts = rel.split('/');
+      const rootName = normRoot.split('/').pop() || normRoot;
+      return [
+        { name: rootName, path: normRoot },
+        ...relParts.map((part, i) => ({
+          name: part,
+          path: normRoot + '/' + relParts.slice(0, i + 1).join('/')
+        }))
+      ];
     }
-    return [normPath.split('/').pop() || path];
+    return [{ name: normPath.split('/').pop() || path, path: normPath }];
   });
+
+  function navigateBreadcrumb(path: string) {
+    if (!sidebarVisible) toggleSidebar();
+    fileTreeNavTarget.set(path);
+  }
 
   onMount(async () => {
     getVersion().then(v => appVersion = v);
@@ -249,13 +262,11 @@
 <div class="ide-layout">
   <Toolbar {sidebarVisible} onToggleSidebar={toggleSidebar} />
   <div class="ide-top">
-    {#if sidebarVisible}
-    <div class="sidebar" style="width: {sidebarWidth}px">
+    <div class="sidebar" class:hidden={!sidebarVisible} style="width: {sidebarWidth}px">
       <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} onOpenFolder={handleOpenFolder} />
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
-    {/if}
+    <div class="resize-handle resize-handle-col" class:hidden={!sidebarVisible} onmousedown={startDrag('sidebar')}></div>
 
     <div class="main-area">
       <div class="editor-area" style="flex: 1; min-height: 0;">
@@ -346,7 +357,7 @@
       {#if breadcrumbSegments.length > 0}
         <div class="breadcrumb">
           {#each breadcrumbSegments as seg, i}
-            <span class="breadcrumb-seg">{seg}</span>
+            <span class="breadcrumb-seg" role="button" tabindex="0" onclick={() => navigateBreadcrumb(seg.path)} onkeydown={(e) => e.key === 'Enter' && navigateBreadcrumb(seg.path)}>{seg.name}</span>
             {#if i < breadcrumbSegments.length - 1}
               <span class="breadcrumb-sep">›</span>
             {/if}
@@ -658,6 +669,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     color: inherit;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .breadcrumb-seg:hover {
+    background: color-mix(in srgb, currentColor 30%, transparent);
   }
 
   .breadcrumb-sep {

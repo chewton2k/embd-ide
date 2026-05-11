@@ -1,11 +1,11 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { open, ask } from '@tauri-apps/plugin-dialog';
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath } from './stores';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget } from './stores';
   import { saveSessionNow, findRecentProject } from './session';
   import { exists } from '@tauri-apps/plugin-fs';
 
@@ -48,6 +48,34 @@
         contextMenu.x = Math.max(4, contextMenu.x - (rect.right - viewW) - 8);
       }
     }
+  });
+
+  $effect(() => {
+    const target = $fileTreeNavTarget;
+    if (!target) return;
+    const normTarget = target.replace(/\\/g, '/');
+    const normRoot = rootPath ? rootPath.replace(/\\/g, '/') : null;
+    if (normRoot && normTarget.startsWith(normRoot)) {
+      const rel = normTarget.slice(normRoot.length).replace(/^\//, '');
+      const parts = rel.split('/').filter(Boolean);
+      let current = normRoot;
+      const toExpand: string[] = [];
+      for (let i = 0; i < parts.length - 1; i++) {
+        current += '/' + parts[i];
+        toExpand.push(current);
+      }
+      // untrack prevents expandedDirs from becoming a tracked dependency of this effect
+      untrack(() => {
+        for (const dir of toExpand) expandedDirs.add(dir);
+        if (toExpand.length > 0) expandedDirs = new Set(expandedDirs);
+      });
+    }
+    selectedPath = target;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-path="${CSS.escape(target)}"]`);
+      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      fileTreeNavTarget.set(null);
+    });
   });
 
   // Clipboard for copy/paste files

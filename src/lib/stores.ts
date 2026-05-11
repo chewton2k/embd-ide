@@ -220,6 +220,9 @@ export const showChat = writable<boolean>(false);
 export const showGit = writable<boolean>(false);
 export const triggerSearchInFile = writable<number>(0);
 
+// Breadcrumb navigation target — set to a path to scroll FileTree to that item
+export const fileTreeNavTarget = writable<string | null>(null);
+
 export function toggleChatPanel() {
   const next = !get(showChat);
   showChat.set(next);
