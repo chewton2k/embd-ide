@@ -1,6 +1,6 @@
 <script lang="ts">
   import Tabs from './Tabs.svelte';
-  import { showTerminal, showSettings, autosaveEnabled, showChat, showGit, gitBranch, triggerSearchInFile, toggleChatPanel, toggleGitPanel } from './stores';
+  import { showTerminal, showSettings, autosaveEnabled, showChat, showGit, gitBranch, triggerSearchInFile, toggleChatPanel, toggleGitPanel, activeFilePath } from './stores';
 
   let { sidebarVisible, onToggleSidebar }: {
     sidebarVisible: boolean;
@@ -10,6 +10,14 @@
   function triggerSearch() {
     triggerSearchInFile.update(n => n + 1);
   }
+
+  const viewerExts = new Set(['png','jpg','jpeg','gif','webp','bmp','ico','svg','pdf','mp4','webm','mov','mp3','wav','ogg','flac']);
+  let searchEnabled = $derived.by(() => {
+    const path = $activeFilePath;
+    if (!path) return false;
+    const ext = path.split('.').pop()?.toLowerCase() ?? '';
+    return !viewerExts.has(ext);
+  });
 </script>
 
 <div class="toolbar">
@@ -20,6 +28,7 @@
     onclick={onToggleSidebar}
     title="Toggle sidebar"
     aria-label="Toggle sidebar"
+    aria-pressed={sidebarVisible}
   >
     <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
       <rect x="1" y="1" width="4" height="14" rx="1" opacity={sidebarVisible ? 1 : 0.4}/>
@@ -32,7 +41,7 @@
   </div>
 
   <div class="toolbar-right">
-    <button type="button" class="toolbar-search-btn" onclick={triggerSearch} title="Search in file (Cmd/Ctrl+F)">
+    <button type="button" class="toolbar-search-btn" class:disabled={!searchEnabled} onclick={triggerSearch} disabled={!searchEnabled} title="Search in file (Cmd/Ctrl+F)" aria-label="Search in file">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="12" height="12">
         <circle cx="7" cy="7" r="4.5"/>
         <path d="M10.5 10.5L14 14"/>
@@ -208,6 +217,12 @@
   .toolbar-search-btn:hover {
     border-color: var(--accent);
     color: var(--text-primary);
+  }
+
+  .toolbar-search-btn.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 
   .branch-label {

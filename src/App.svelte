@@ -113,7 +113,6 @@
     const path = $activeFilePath;
     const root = $projectRoot;
     if (!path) return [];
-    const sep = path.includes('\\') ? '\\' : '/';
     const normPath = path.replace(/\\/g, '/');
     const normRoot = root ? root.replace(/\\/g, '/') : null;
     if (normRoot && normPath.startsWith(normRoot + '/')) {
