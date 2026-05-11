@@ -32,7 +32,7 @@
   import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback } from './stores';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile } from './stores';
 
   let { filePath }: { filePath: string } = $props();
 
@@ -1038,6 +1038,21 @@
         savedContentCache.delete(cachedPath);
       }
     }
+  });
+
+  // Open search panel when triggerSearchInFile store increments
+  $effect(() => {
+    const trigger = $triggerSearchInFile;
+    if (trigger === 0) return;
+    if (!view) return;
+    view.focus();
+    openSearchPanel(view);
+    requestAnimationFrame(() => {
+      view?.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('autocorrect', 'off');
+      });
+    });
   });
 </script>
 
