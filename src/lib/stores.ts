@@ -215,6 +215,23 @@ autosaveDelay.subscribe(v => localStorage.setItem('embd-autosave-delay', String(
 // Settings modal visibility
 export const showSettings = writable<boolean>(false);
 
+// Chat and Git panel visibility
+export const showChat = writable<boolean>(false);
+export const showGit = writable<boolean>(false);
+export const triggerSearchInFile = writable<number>(0);
+
+export function toggleChatPanel() {
+  const next = !get(showChat);
+  showChat.set(next);
+  if (next) showGit.set(false);
+}
+
+export function toggleGitPanel() {
+  const next = !get(showGit);
+  showGit.set(next);
+  if (next) showChat.set(false);
+}
+
 // Terminal panel visibility
 export const showTerminal = writable<boolean>(true);
 
