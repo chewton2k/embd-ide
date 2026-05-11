@@ -1045,6 +1045,24 @@
     const trigger = $triggerSearchInFile;
     if (trigger === 0) return;
     if (!view) return;
+
+    // Only open in the focused/active editor — matches handleGlobalKeydown guard
+    const active = document.activeElement;
+    const thisEditorHasFocus = editorContainer?.contains(active) || view.hasFocus;
+    const anyEditorHasFocus = !!active?.closest('.editor-wrapper');
+    if (!thisEditorHasFocus && anyEditorHasFocus) return;
+
+    // If panel already open, just focus its input
+    const existingPanel = editorContainer?.querySelector('.cm-panel.cm-search');
+    if (existingPanel) {
+      const searchInput = existingPanel.querySelector<HTMLInputElement>('input.cm-search-field[main-field]');
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.select();
+      }
+      return;
+    }
+
     view.focus();
     openSearchPanel(view);
     requestAnimationFrame(() => {
