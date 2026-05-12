@@ -8,10 +8,10 @@
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
   import GitPanel from './lib/GitPanel.svelte';
-  import Settings from './lib/Settings.svelte';
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
   import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
@@ -108,6 +108,42 @@
 
   let isClosing = false;
 
+  async function openSettingsWindow() {
+    try {
+      const existing = await WebviewWindow.getByLabel('settings');
+      if (existing) {
+        try { await existing.show(); } catch {}
+        try { await existing.setFocus(); } catch {}
+        return;
+      }
+      const win = new WebviewWindow('settings', {
+        url: 'index.html#settings',
+        title: 'Settings',
+        width: 900,
+        height: 640,
+        minWidth: 720,
+        minHeight: 480,
+        resizable: true,
+        center: true,
+        focus: true,
+      });
+      win.once('tauri://error', (e) => {
+        console.error('Failed to open settings window', e);
+      });
+    } catch (e) {
+      console.error('openSettingsWindow failed', e);
+    }
+  }
+
+  // Treat `showSettings` as an "open settings" trigger. Reset it after
+  // launching so the Toolbar's toggle reads as off again.
+  showSettings.subscribe((v) => {
+    if (v) {
+      openSettingsWindow();
+      showSettings.set(false);
+    }
+  });
+
   let breadcrumbSegments = $derived.by(() => {
     const path = $activeFilePath;
     const root = $projectRoot;
@@ -135,10 +171,15 @@
   }
 
   onMount(async () => {
-    // Sync stored API key to backend on startup
-    const storedKey = localStorage.getItem('embd-api-key');
-    if (storedKey) {
-      invoke('set_api_key', { key: storedKey }).catch(() => {});
+    // Sync stored API keys to backend on startup
+    const providerKeys: { provider: string; storageKey: string }[] = [
+      { provider: 'openrouter', storageKey: 'embd-api-key' },
+      { provider: 'openai',     storageKey: 'embd-openai-key' },
+      { provider: 'anthropic',  storageKey: 'embd-anthropic-key' },
+    ];
+    for (const { provider, storageKey } of providerKeys) {
+      const key = localStorage.getItem(storageKey);
+      if (key) invoke('set_provider_key', { provider, key }).catch(() => {});
     }
     // Load recent projects
     try {
@@ -353,9 +394,6 @@
       </div>
     {/if}
 
-    {#if $showSettings}
-      <Settings />
-    {/if}
 
     {#if showFileSearch}
       <FileSearch onClose={() => showFileSearch = false} />

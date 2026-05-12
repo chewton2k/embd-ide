@@ -9,7 +9,7 @@ use tauri::Manager;
 pub fn run() {
     let terminal_state = terminal::create_terminal_state();
     let project_root_state = fs_commands::create_project_root_state();
-    let api_key_state = ai::create_api_key_state();
+    let api_key_state = ai::create_provider_keys_state();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -64,6 +64,7 @@ pub fn run() {
             terminal::kill_terminal,
             terminal::resize_terminal,
             ai::set_api_key,
+            ai::set_provider_key,
             ai::ai_chat,
             session::get_recent_projects,
             session::save_session,

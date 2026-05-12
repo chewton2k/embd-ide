@@ -1144,7 +1144,7 @@
     width: 14px;
     text-align: center;
     flex-shrink: 0;
-    font-family: monospace;
+    font-family: var(--font-mono);
   }
 
   .file-name {
@@ -1178,7 +1178,7 @@
 
   /* Diff preview */
   .diff-preview {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     overflow-x: auto;
     max-height: 300px;
@@ -1381,7 +1381,7 @@
   }
 
   .graph-hash {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     color: var(--git-graph-accent);
     flex-shrink: 0;
     font-size: 10px;

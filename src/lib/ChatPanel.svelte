@@ -1,36 +1,75 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { chatMessages, apiKey, aiModel, activeFile, openFiles, type ChatMessage } from './stores';
+  import { chatMessages, apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, activeFile, openFiles, type ChatMessage, type AiProvider } from './stores';
   import { get } from 'svelte/store';
 
   let input = $state('');
   let loading = $state(false);
   let messagesContainer: HTMLDivElement;
   let showKeyInput = $state(false);
-  let keyInput = $state(get(apiKey));
+  let keyInput = $state('');
+  let selectedProvider = $state<AiProvider>(get(aiProvider));
   let selectedModel = $state(get(aiModel));
 
-  const freeModels = [
-    { id: 'openrouter/free', label: 'OpenRouter Auto (Free)' },
-    { id: 'nvidia/nemotron-3-nano-30b-a3b:free', label: 'Nemotron Nano 30B' },
-    { id: 'stepfun/step-3.5-flash:free', label: 'Step 3.5 Flash' },
-    { id: 'liquid/lfm-2.5-1.2b-instruct:free', label: 'LFM 2.5 Instruct' },
-    { id: 'arcee-ai/trinity-large-preview:free', label: 'Arcee Trinity Large' },
-  ];
+  type ModelOption = { id: string; label: string };
+  const MODELS_BY_PROVIDER: Record<AiProvider, ModelOption[]> = {
+    openrouter: [
+      { id: 'openrouter/auto',                   label: 'OpenRouter — Auto' },
+      { id: 'anthropic/claude-sonnet-4',         label: 'Claude Sonnet 4' },
+      { id: 'anthropic/claude-haiku-4',          label: 'Claude Haiku 4' },
+      { id: 'openai/gpt-4o',                     label: 'GPT-4o' },
+      { id: 'openai/gpt-4o-mini',                label: 'GPT-4o mini' },
+      { id: 'google/gemini-2.5-pro-preview',     label: 'Gemini 2.5 Pro' },
+      { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+    ],
+    openai: [
+      { id: 'gpt-4o',          label: 'GPT-4o' },
+      { id: 'gpt-4o-mini',     label: 'GPT-4o mini' },
+      { id: 'gpt-4-turbo',     label: 'GPT-4 Turbo' },
+      { id: 'o1-mini',         label: 'o1-mini' },
+    ],
+    anthropic: [
+      { id: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
+      { id: 'claude-3-5-haiku-latest',  label: 'Claude 3.5 Haiku' },
+      { id: 'claude-3-opus-latest',     label: 'Claude 3 Opus' },
+    ],
+  };
 
-  const paidModels = [
-    { id: 'anthropic/claude-sonnet-4', label: 'Claude Sonnet 4' },
-    { id: 'anthropic/claude-haiku-4', label: 'Claude Haiku 4' },
-    { id: 'openai/gpt-4o', label: 'GPT-4o' },
-    { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
-    { id: 'google/gemini-2.5-pro-preview', label: 'Gemini 2.5 Pro' },
-  ];
+  const PROVIDER_LABEL: Record<AiProvider, string> = {
+    openrouter: 'OpenRouter',
+    openai: 'OpenAI',
+    anthropic: 'Anthropic',
+  };
+
+  const PROVIDER_PLACEHOLDER: Record<AiProvider, string> = {
+    openrouter: 'sk-or-...',
+    openai: 'sk-...',
+    anthropic: 'sk-ant-...',
+  };
+
+  function keyStoreFor(p: AiProvider) {
+    return p === 'openai' ? openaiApiKey : p === 'anthropic' ? anthropicApiKey : apiKey;
+  }
+
+  // Reset model when provider changes if current model isn't valid for it.
+  $effect(() => {
+    const models = MODELS_BY_PROVIDER[selectedProvider];
+    if (!models.some(m => m.id === selectedModel)) {
+      selectedModel = models[0].id;
+      aiModel.set(selectedModel);
+    }
+  });
 
   async function saveKey() {
-    apiKey.set(keyInput);
-    // Store key on backend so it's not sent on every request
-    try { await invoke('set_api_key', { key: keyInput }); } catch {}
+    keyStoreFor(selectedProvider).set(keyInput);
+    try { await invoke('set_provider_key', { provider: selectedProvider, key: keyInput }); } catch {}
     showKeyInput = false;
+    keyInput = '';
+  }
+
+  function openKeyInput() {
+    keyInput = get(keyStoreFor(selectedProvider));
+    showKeyInput = true;
   }
 
   const slashCommands: Record<string, string> = {
@@ -59,9 +98,9 @@
       return;
     }
 
-    const key = get(apiKey);
+    const key = get(keyStoreFor(selectedProvider));
     if (!key) {
-      showKeyInput = true;
+      openKeyInput();
       return;
     }
 
@@ -83,7 +122,12 @@
 
     try {
       const response = await invoke<string>('ai_chat', {
-        request: { prompt, context: context || null, model: selectedModel }
+        request: {
+          prompt,
+          context: context || null,
+          model: selectedModel,
+          provider: selectedProvider,
+        }
       });
       const assistantMsg: ChatMessage = { role: 'assistant', content: response };
       chatMessages.update(msgs => [...msgs, assistantMsg]);
@@ -115,11 +159,11 @@
 <div class="chat-container">
   {#if showKeyInput}
     <div class="key-setup">
-      <p>Enter your OpenRouter API key:</p>
+      <p>Enter your {PROVIDER_LABEL[selectedProvider]} API key:</p>
       <input
         type="password"
         bind:value={keyInput}
-        placeholder="sk-or-..."
+        placeholder={PROVIDER_PLACEHOLDER[selectedProvider]}
         onkeydown={(e) => e.key === 'Enter' && saveKey()}
       />
       <button class="save-key-btn" onclick={saveKey}>Save</button>
@@ -156,20 +200,23 @@
     ></textarea>
     <div class="input-footer">
       <select
+        class="provider-select"
+        bind:value={selectedProvider}
+        onchange={() => aiProvider.set(selectedProvider)}
+        title="Provider"
+      >
+        <option value="openrouter">OpenRouter</option>
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic</option>
+      </select>
+      <select
         class="model-select"
         bind:value={selectedModel}
         onchange={() => aiModel.set(selectedModel)}
       >
-        <optgroup label="Free">
-          {#each freeModels as m}
-            <option value={m.id}>{m.label}</option>
-          {/each}
-        </optgroup>
-        <optgroup label="Paid">
-          {#each paidModels as m}
-            <option value={m.id}>{m.label}</option>
-          {/each}
-        </optgroup>
+        {#each MODELS_BY_PROVIDER[selectedProvider] as m}
+          <option value={m.id}>{m.label}</option>
+        {/each}
       </select>
       <button class="send-btn" onclick={sendMessage} disabled={loading || !input.trim()}>
         Send
@@ -177,8 +224,8 @@
     </div>
   </div>
 
-  <button class="settings-btn" onclick={() => showKeyInput = !showKeyInput}>
-    API Key
+  <button class="settings-btn" onclick={openKeyInput}>
+    {PROVIDER_LABEL[selectedProvider]} API Key
   </button>
 </div>
 
@@ -285,8 +332,8 @@
     gap: 8px;
   }
 
+  .provider-select,
   .model-select {
-    flex: 1;
     font-size: 11px;
     padding: 4px 6px;
     border-radius: 4px;
@@ -295,6 +342,8 @@
     border: 1px solid var(--border);
     min-width: 0;
   }
+  .provider-select { max-width: 110px; }
+  .model-select { flex: 1; }
 
   .send-btn {
     background: var(--accent);

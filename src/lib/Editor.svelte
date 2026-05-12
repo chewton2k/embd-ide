@@ -1296,7 +1296,7 @@
   }
 
   .md-preview-content :global(code) {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     background: var(--bg-tertiary);
     padding: 2px 5px;
     border-radius: 3px;

@@ -91,7 +91,8 @@
     const xterm = new XTerm({
       cursorBlink: true,
       fontSize: get(terminalFontSize),
-      fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
+        || "ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace",
       theme: buildXtermTheme(),
     });
 

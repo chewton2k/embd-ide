@@ -164,14 +164,31 @@ export interface ChatMessage {
 }
 
 export const chatMessages = writable<ChatMessage[]>([]);
+export type AiProvider = 'openrouter' | 'openai' | 'anthropic';
+
+// Legacy alias: OpenRouter key. Kept so older code paths keep working.
 export const apiKey = writable<string>(localStorage.getItem('embd-api-key') || '');
-export const aiModel = writable<string>(localStorage.getItem('embd-ai-model') || 'openrouter/free');
+export const openaiApiKey = writable<string>(localStorage.getItem('embd-openai-key') || '');
+export const anthropicApiKey = writable<string>(localStorage.getItem('embd-anthropic-key') || '');
+
+export const aiProvider = writable<AiProvider>(
+  (localStorage.getItem('embd-ai-provider') as AiProvider) || 'openrouter'
+);
+export const aiModel = writable<string>(localStorage.getItem('embd-ai-model') || 'openrouter/auto');
 
 apiKey.subscribe(key => {
   if (key) localStorage.setItem('embd-api-key', key);
   else localStorage.removeItem('embd-api-key');
 });
-
+openaiApiKey.subscribe(key => {
+  if (key) localStorage.setItem('embd-openai-key', key);
+  else localStorage.removeItem('embd-openai-key');
+});
+anthropicApiKey.subscribe(key => {
+  if (key) localStorage.setItem('embd-anthropic-key', key);
+  else localStorage.removeItem('embd-anthropic-key');
+});
+aiProvider.subscribe(p => localStorage.setItem('embd-ai-provider', p));
 aiModel.subscribe(model => {
   if (model) localStorage.setItem('embd-ai-model', model);
 });
@@ -552,3 +569,37 @@ export const hiddenPatterns = writable<{ pattern: string; enabled: boolean }[]>(
 hiddenPatterns.subscribe(patterns => {
   localStorage.setItem('embd-hidden-patterns', JSON.stringify(patterns));
 });
+
+// --- Cross-window settings sync ---
+// When the Settings window (a separate webview) writes to localStorage,
+// the main window receives a `storage` event and we mirror the change
+// into the corresponding store. setItem with an unchanged value does
+// not refire the event, so this can't loop.
+const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
+  'embd-autosave':            { set: v => autosaveEnabled.set(v !== 'false') },
+  'embd-autosave-delay':      { set: v => autosaveDelay.set(parseInt(v || '1000', 10)) },
+  'embd-editor-font-size':    { set: v => editorFontSize.set(parseInt(v || '13', 10)) },
+  'embd-editor-tab-size':     { set: v => editorTabSize.set(parseInt(v || '2', 10)) },
+  'embd-editor-word-wrap':    { set: v => editorWordWrap.set(v === 'true') },
+  'embd-editor-line-numbers': { set: v => editorLineNumbers.set(v !== 'false') },
+  'embd-terminal-font-size':  { set: v => terminalFontSize.set(parseInt(v || '13', 10)) },
+  'embd-theme':               { set: v => currentThemeId.set(v || 'catppuccin-mocha') },
+  'embd-ui-font-size':        { set: v => uiFontSize.set(parseInt(v || '13', 10)) },
+  'embd-ui-density':          { set: v => uiDensity.set((v as 'compact' | 'comfortable') || 'comfortable') },
+  'embd-hidden-patterns':     { set: v => { try { hiddenPatterns.set(JSON.parse(v || '[]')); } catch { /* ignore */ } } },
+  'embd-max-recent-projects': { set: v => maxRecentProjects.set(parseInt(v || '3', 10)) },
+  'embd-max-tabs':            { set: v => maxTabs.set(parseInt(v || '9', 10)) },
+  'embd-api-key':             { set: v => apiKey.set(v || '') },
+  'embd-openai-key':          { set: v => openaiApiKey.set(v || '') },
+  'embd-anthropic-key':       { set: v => anthropicApiKey.set(v || '') },
+  'embd-ai-provider':         { set: v => aiProvider.set((v as AiProvider) || 'openrouter') },
+  'embd-ai-model':            { set: v => aiModel.set(v || 'openrouter/auto') },
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (!e.key) return;
+    const entry = SETTINGS_SYNC[e.key];
+    if (entry) entry.set(e.newValue);
+  });
+}
