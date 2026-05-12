@@ -8,6 +8,8 @@
     "core:webview:allow-create-webview-window",
     "core:window:allow-set-focus",
     "core:window:allow-show",
+    "core:window:allow-start-dragging",
+    "core:window:allow-is-fullscreen",
     "core:app:allow-version",
     "core:app:allow-tauri-version",
     "shell:allow-open",

@@ -12,7 +12,7 @@
  * referenced in section markup via `data-setting="..."`.
  */
 
-export type SettingsTabId = 'general' | 'shortcuts' | 'models' | 'agents' | 'knowledge' | 'about';
+export type SettingsTabId = 'general' | 'terminal' | 'shortcuts' | 'models' | 'agents' | 'knowledge' | 'about';
 
 export interface SettingsTab {
   id: SettingsTabId;
@@ -36,7 +36,8 @@ export interface SettingsEntry {
 }
 
 export const SETTINGS_TABS: SettingsTab[] = [
-  { id: 'general',   label: 'General',   keywords: 'appearance theme editor font tab autosave density hidden patterns terminal preview word wrap line numbers error lens',   icon: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6' },
+  { id: 'general',   label: 'General',   keywords: 'appearance theme editor font tab autosave density hidden patterns preview word wrap line numbers error lens',           icon: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6' },
+  { id: 'terminal',  label: 'Terminal',  keywords: 'shell xterm bash zsh fish layout panel tab font size profile',                                                            icon: 'M3 5h18v14H3z M7 10l3 2-3 2 M13 14h4' },
   { id: 'shortcuts', label: 'Shortcuts', keywords: 'keyboard keybindings hotkeys shortcut',                                                                                   icon: 'M2 8h20v8H2z M6 12h.01 M10 12h.01 M14 12h.01 M18 12h.01' },
   { id: 'models',    label: 'Models',    keywords: 'ai api key openrouter openai anthropic provider claude gpt llm default model',                                             icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z' },
   { id: 'agents',    label: 'Agents',    keywords: 'assistant chat inline completions ghost text autocomplete auto-approve agent',                                             icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M3 21v-1a6 6 0 0 1 6-6 6 6 0 0 1 6 6v1 M17 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M14 14a4 4 0 0 1 8 0' },
@@ -58,9 +59,9 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
   { anchor: 'editor-line-numbers',   tab: 'general', group: 'Editor', label: 'Line numbers',             keywords: 'gutter row numbers' },
   { anchor: 'editor-error-lens',     tab: 'general', group: 'Editor', label: 'Error lens',               keywords: 'inline errors diagnostics syntax warnings squiggles' },
 
-  // ── General › Terminal ──
-  { anchor: 'terminal-mode',         tab: 'general', group: 'Terminal', label: 'Terminal layout',        keywords: 'tab panel bottom docked vscode zed xcode placement position' },
-  { anchor: 'terminal-font-size',    tab: 'general', group: 'Terminal', label: 'Terminal font size',     keywords: 'text size shell xterm' },
+  // ── Terminal ──
+  { anchor: 'terminal-mode',         tab: 'terminal', group: 'Layout', label: 'Terminal layout',         keywords: 'tab panel bottom docked vscode zed xcode placement position surface' },
+  { anchor: 'terminal-font-size',    tab: 'terminal', group: 'Typography', label: 'Terminal font size',  keywords: 'text size shell xterm' },
 
   // ── General › Preview ──
   { anchor: 'preview-default-url',   tab: 'general', group: 'Preview', label: 'Preview default URL',     keywords: 'localhost web browser dev server iframe' },

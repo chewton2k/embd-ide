@@ -3,8 +3,7 @@
     appearanceMode, editorTheme, uiFontSize, uiDensity,
     editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers,
     editorShowErrorLens,
-    terminalFontSize, previewUrl,
-    terminalMode,
+    previewUrl,
     autosaveEnabled, autosaveDelay,
     maxRecentProjects, maxTabs,
     hiddenPatterns,
@@ -195,49 +194,6 @@
         <button class="toggle" class:active={$editorShowErrorLens} onclick={() => editorShowErrorLens.update(v => !v)} aria-label="Toggle error lens">
           <span class="track"><span class="thumb"></span></span>
         </button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Terminal -->
-  <!-- Terminal -->
-  <div class="card">
-    <div class="card-head"><div class="card-title">Terminal</div></div>
-    <div class="rows">
-      <div class="row" data-setting="terminal-mode">
-        <div class="row-info">
-          <div class="row-label">Layout</div>
-          <div class="row-help">
-            Show terminals as editor tabs, or dock them in a resizable
-            panel at the bottom of the window like VSCode, Xcode and Zed.
-            Switching layout closes any open terminals so they can be
-            restarted cleanly in the new container.
-          </div>
-        </div>
-        <div class="pills">
-          <button
-            class="pill"
-            class:active={$terminalMode === 'tab'}
-            onclick={() => terminalMode.set('tab')}
-            aria-pressed={$terminalMode === 'tab'}
-            title="Terminals open in the main editor tab bar"
-          >Tab</button>
-          <button
-            class="pill"
-            class:active={$terminalMode === 'panel'}
-            onclick={() => terminalMode.set('panel')}
-            aria-pressed={$terminalMode === 'panel'}
-            title="Terminals dock in a resizable bottom panel"
-          >Bottom panel</button>
-        </div>
-      </div>
-      <div class="row" data-setting="terminal-font-size">
-        <div class="row-info"><div class="row-label">Font size</div></div>
-        <div class="stepper">
-          <button class="step-btn" onclick={() => terminalFontSize.update(v => Math.max(10, v - 1))}>−</button>
-          <span class="step-val">{$terminalFontSize}px</span>
-          <button class="step-btn" onclick={() => terminalFontSize.update(v => Math.min(24, v + 1))}>+</button>
-        </div>
       </div>
     </div>
   </div>

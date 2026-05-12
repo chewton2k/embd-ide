@@ -67,9 +67,13 @@
     </button>
   </div>
 
-  <!-- Drag region between the two clusters. The cluster wrappers
-       themselves opt out of dragging via the no-drag rule below. -->
-  <div class="drag-spacer" aria-hidden="true"></div>
+  <!--
+    Drag region between the two clusters. Tauri's runtime listens for
+    mousedown on elements with `data-tauri-drag-region`; buttons inside
+    the clusters don't carry the attribute, so click events on them
+    fire normally.
+  -->
+  <div class="drag-spacer" data-tauri-drag-region aria-hidden="true"></div>
 
   <!-- Right cluster — global toggles and quick search. -->
   <div class="cluster cluster-right">

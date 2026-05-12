@@ -235,8 +235,7 @@ export async function saveConversationNow(): Promise<void> {
 }
 
 export async function loadConversation(id: string): Promise<void> {
-  const { projectRoot: pr } = await import('./git');
-  const root = get(pr);
+  const root = get(projectRoot);
   if (!root) return;
   try {
     const json = await invoke<string>('knowledge_load_conversation', { projectRoot: root, id });
@@ -248,8 +247,7 @@ export async function loadConversation(id: string): Promise<void> {
 }
 
 export async function listConversations(): Promise<{ id: string; title: string; created_at: number; updated_at: number }[]> {
-  const { projectRoot: pr } = await import('./git');
-  const root = get(pr);
+  const root = get(projectRoot);
   if (!root) return [];
   try {
     return await invoke('knowledge_list_conversations', { projectRoot: root });
@@ -257,8 +255,7 @@ export async function listConversations(): Promise<{ id: string; title: string; 
 }
 
 export async function deleteAllConversations(): Promise<void> {
-  const { projectRoot: pr } = await import('./git');
-  const root = get(pr);
+  const root = get(projectRoot);
   if (!root) return;
   try {
     await invoke('knowledge_delete_conversations', { projectRoot: root });

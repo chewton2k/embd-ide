@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appearanceMode, uiFontSize, uiDensity } from '../modules/stores';
   import GeneralSection   from './sections/GeneralSection.svelte';
+  import TerminalSection  from './sections/TerminalSection.svelte';
   import ShortcutsSection from './sections/ShortcutsSection.svelte';
   import ModelsSection    from './sections/ModelsSection.svelte';
   import AgentsSection    from './sections/AgentsSection.svelte';
@@ -197,6 +198,8 @@
     <div class="content-inner">
       {#if activeTab === 'general'}
         <GeneralSection />
+      {:else if activeTab === 'terminal'}
+        <TerminalSection />
       {:else if activeTab === 'shortcuts'}
         <ShortcutsSection />
       {:else if activeTab === 'models'}
@@ -274,6 +277,11 @@
     border: 1px solid var(--border);
     border-radius: 7px;
     color: var(--text-muted);
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .search-box:focus-within {
+    border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+    background: var(--bg-surface);
   }
   .search-box input {
     flex: 1;
@@ -310,14 +318,14 @@
     border-radius: 7px;
     color: var(--text-primary);
     cursor: pointer;
-    transition: background 0.12s, border-color 0.12s;
+    transition: background 0.12s ease, border-color 0.12s ease;
   }
   .result:hover {
     background: var(--bg-surface);
-    border-color: var(--border);
+    border-color: color-mix(in srgb, var(--border) 70%, transparent);
   }
   .result:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
     outline-offset: 1px;
   }
   .result-label {
@@ -343,7 +351,14 @@
     border-top: 1px solid var(--border);
   }
 
+  /*
+   * Sidebar nav. Active state uses an accent left bar plus subtle
+   * background tint — clearer than the previous border-only treatment,
+   * and matches the visual weight of the Knowledge section's
+   * highlighted controls.
+   */
   .nav-btn {
+    position: relative;
     display: flex; align-items: center; gap: 10px;
     padding: 8px 12px;
     background: none;
@@ -353,15 +368,35 @@
     font-size: 13px;
     text-align: left;
     cursor: pointer;
-    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    transition:
+      background 0.12s ease,
+      color 0.12s ease,
+      border-color 0.12s ease;
+  }
+  .nav-btn::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--accent);
+    opacity: 0;
+    transition: opacity 0.12s ease;
   }
   .nav-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
+  .nav-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    outline-offset: 1px;
+  }
   .nav-btn.active {
     background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
     border-color: color-mix(in srgb, var(--accent) 25%, transparent);
     color: var(--text-primary);
     font-weight: 600;
   }
+  .nav-btn.active::before { opacity: 1; }
   .nav-btn svg { flex-shrink: 0; }
 
   .content {
