@@ -256,7 +256,7 @@
     padding: 4px 10px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 5px;
+    border-radius: 20px;
     color: var(--text-muted);
     font-size: 11px;
     cursor: pointer;
@@ -276,8 +276,6 @@
     background: var(--bg-surface);
     color: var(--text-muted);
     margin-left: auto;
-  }
-    pointer-events: none;
   }
 
   .branch-label {

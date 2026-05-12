@@ -192,7 +192,7 @@
     height: calc(100% - 8px);
     margin: 4px 3px 4px 0;
     border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-    border-radius: 6px;
+    border-radius: 20px;
   }
   .tab:hover {
     background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
@@ -229,7 +229,8 @@
 
   .pin-dot {
     width: 6px; height: 6px; border-radius: 50%;
-    background: var(--text-muted); flex-shrink: 0;
+    background: var(--text-primary); flex-shrink: 0;
+    opacity: 0.7;
   }
 
   .tab-actions {
