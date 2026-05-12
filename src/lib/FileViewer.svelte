@@ -19,8 +19,9 @@
   let error = $state<string | null>(null);
   let zoom = $state(100);
   let fileSize = $state('');
-  let pdfContainer: HTMLDivElement;
+  let pdfContainer: HTMLDivElement | undefined = $state();
   let pdfPageCount = $state(0);
+  let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
 
   function getFileType(path: string): 'image' | 'svg' | 'pdf' | 'video' | 'audio' | 'unknown' {
     const ext = path.split('.').pop()?.toLowerCase();
@@ -66,6 +67,10 @@
     svgContent = null;
     pdfData = null;
     pdfPageCount = 0;
+    if (pdfDoc) {
+      pdfDoc.destroy();
+      pdfDoc = null;
+    }
     zoom = 100;
 
     const type = getFileType(path);
@@ -99,17 +104,20 @@
     loading = false;
   }
 
-  async function renderPdf(data: Uint8Array, scale: number) {
+  async function renderPdf(data: Uint8Array) {
     if (!pdfContainer) return;
     pdfContainer.innerHTML = '';
+    const currentData = data;
 
     try {
-      const pdf = await pdfjsLib.getDocument({ data }).promise;
+      const pdf = await pdfjsLib.getDocument({ data: data.slice() }).promise;
+      if (pdfData !== currentData) { pdf.destroy(); return; }
+      pdfDoc = pdf;
       pdfPageCount = pdf.numPages;
 
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: scale / 100 * 1.5 });
+        const viewport = page.getViewport({ scale: 1.5 });
 
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
@@ -120,7 +128,7 @@
         canvas.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)';
 
         const ctx = canvas.getContext('2d')!;
-        await page.render({ canvasContext: ctx, viewport }).promise;
+        await page.render({ canvasContext: ctx, viewport, canvas } as any).promise;
 
         pdfContainer.appendChild(canvas);
       }
@@ -129,16 +137,23 @@
     }
   }
 
-  // Re-render PDF when data or zoom changes
+  // Render PDF once when data is available
   $effect(() => {
     if (pdfData && pdfContainer) {
-      renderPdf(pdfData, zoom);
+      renderPdf(pdfData);
     }
   });
 
   function zoomIn() { zoom = Math.min(500, zoom + 25); }
   function zoomOut() { zoom = Math.max(25, zoom - 25); }
   function zoomReset() { zoom = 100; }
+
+  function handleWheel(e: WheelEvent) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const delta = e.deltaY * -0.5;
+    zoom = Math.min(500, Math.max(25, Math.round(zoom + delta)));
+  }
 
   $effect(() => {
     if (filePath) loadFile(filePath);
@@ -163,7 +178,8 @@
     </div>
 
     <!-- Content -->
-    <div class="viewer-content">
+    <!-- svelte-ignore event_directive_deprecated -->
+    <div class="viewer-content" onwheel={handleWheel}>
       {#if getFileType(filePath) === 'svg' && svgContent}
         <div
           class="svg-container"
@@ -181,7 +197,12 @@
         />
 
       {:else if getFileType(filePath) === 'pdf' && pdfData}
-        <div class="pdf-scroll" bind:this={pdfContainer}></div>
+        <div class="pdf-scroll">
+          <div
+            bind:this={pdfContainer}
+            style="transform: scale({zoom / 100}); transform-origin: top center;"
+          ></div>
+        </div>
 
       {:else if getFileType(filePath) === 'video' && assetUrl}
         <video controls src={assetUrl} class="media-player">
@@ -265,10 +286,6 @@
     border-radius: 4px;
   }
 
-  .svg-container {
-    transition: transform 0.15s ease;
-  }
-
   .svg-container :global(svg) {
     max-width: 100%;
     max-height: 100%;
@@ -280,7 +297,7 @@
     align-items: center;
     width: 100%;
     height: 100%;
-    overflow-y: auto;
+    overflow: auto;
     padding: 12px;
   }
 

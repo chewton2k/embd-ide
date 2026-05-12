@@ -22,16 +22,17 @@
   import { sql } from '@codemirror/lang-sql';
   import { xml } from '@codemirror/lang-xml';
   import { prolog } from 'codemirror-lang-prolog';
+  // @ts-ignore — no type declarations shipped
   import { scheme } from 'codemirror-lang-scheme';
   import { StreamLanguage } from '@codemirror/language';
   import { oCaml } from '@codemirror/legacy-modes/mode/mllike';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-  import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree } from '@codemirror/language';
+  import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree, ensureSyntaxTree } from '@codemirror/language';
   import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback } from './stores.ts';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from './stores';
 
   let { filePath }: { filePath: string } = $props();
 
@@ -405,6 +406,14 @@
       scheduleCountMatches();
     });
 
+    // Close panel on Escape from anywhere within it
+    dom.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSearchPanel(panelView);
+      }
+    });
+
     // Pre-fill with selected text
     const sel = panelView.state.selection.main;
     if (!sel.empty) {
@@ -474,18 +483,43 @@
   function buildErrorLensPlugin() {
     function scanErrors(state: EditorState): DecorationSet {
       const builder = new RangeSetBuilder<Decoration>();
-      const tree = syntaxTree(state);
+      // Use ensureSyntaxTree to wait for a fully-parsed tree (up to 500ms).
+      // syntaxTree() can return an incomplete tree which produces false error nodes.
+      const tree = ensureSyntaxTree(state, state.doc.length, 500);
+      if (!tree) return Decoration.none;
+
       const seenLines = new Set<number>();
       const widgets: { pos: number; widget: Decoration }[] = [];
 
       tree.iterate({
         enter(node) {
           if (node.type.isError) {
+            // Skip zero-length error nodes — these are parser recovery artifacts,
+            // not actual syntax errors in the source text.
+            if (node.from === node.to) return;
+
+            const raw = state.doc.sliceString(node.from, node.to).trim();
+            if (!raw) return;
+
+            // Skip false positives from JSX parsing: property access (.foo),
+            // closing braces/parens/brackets, and other common JSX artifacts.
+            if (/^[.}\])]/.test(raw) || /^[</>]+$/.test(raw)) return;
+
+            // Check parent context — errors inside JSX elements/attributes
+            // are almost always parser recovery false positives.
+            let parent = node.node.parent;
+            while (parent) {
+              const name = parent.type.name;
+              if (name === 'JSXElement' || name === 'JSXOpenTag' || name === 'JSXAttribute'
+                  || name === 'JSXEscape' || name === 'JSXFragmentTag'
+                  || name === 'JSXSelfClosingTag' || name === 'JSXSpreadAttribute') return;
+              parent = parent.parent;
+            }
+
             const line = state.doc.lineAt(node.from);
             if (!seenLines.has(line.number)) {
               seenLines.add(line.number);
-              const raw = state.doc.sliceString(node.from, node.to).trim();
-              const msg = raw ? `Unexpected: '${raw}'` : 'Syntax error';
+              const msg = `Unexpected: '${raw}'`;
               widgets.push({
                 pos: line.to,
                 widget: Decoration.widget({ widget: new ErrorWidget(msg), side: 1 }),
@@ -506,7 +540,12 @@
         private timer: ReturnType<typeof setTimeout> | null = null;
 
         constructor(view: EditorView) {
-          this.decorations = scanErrors(view.state);
+          this.decorations = Decoration.none;
+          // Delay initial scan to let the parser finish
+          this.timer = setTimeout(() => {
+            this.decorations = scanErrors(view.state);
+            view.requestMeasure();
+          }, 500);
         }
 
         update(update: ViewUpdate) {
@@ -617,8 +656,9 @@
       autosaveTimer = null;
     }
 
-    // Save current editor state before switching
+    // Close any open search panel and save current editor state before switching
     if (view && currentFilePath) {
+      closeSearchPanel(view);
       stateCache.set(currentFilePath, view.state);
     }
 
@@ -881,18 +921,37 @@
   function handleGlobalKeydown(e: KeyboardEvent) {
     // Cmd/Ctrl+F: focus editor and open search panel
     if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-      if (view) {
-        e.preventDefault();
-        view.focus();
-        openSearchPanel(view);
-        // Disable autocapitalize on the search inputs
-        requestAnimationFrame(() => {
-          view.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
-            input.setAttribute('autocapitalize', 'off');
-            input.setAttribute('autocorrect', 'off');
-          });
-        });
+      if (!view) return;
+
+      // Only handle if this editor (or its search panel) contains focus,
+      // or if no other editor has focus (fallback for sidebar/external focus)
+      const active = document.activeElement;
+      const thisEditorHasFocus = editorContainer?.contains(active) || view.hasFocus;
+      const anyEditorHasFocus = !!active?.closest('.editor-wrapper');
+      if (!thisEditorHasFocus && anyEditorHasFocus) return;
+
+      e.preventDefault();
+
+      // If the search panel is already open, just focus its input
+      const existingPanel = editorContainer?.querySelector('.cm-panel.cm-search');
+      if (existingPanel) {
+        const searchInput = existingPanel.querySelector<HTMLInputElement>('input.cm-search-field[main-field]');
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+        return;
       }
+
+      view.focus();
+      openSearchPanel(view);
+      // Disable autocapitalize on the search inputs
+      requestAnimationFrame(() => {
+        view?.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
+          input.setAttribute('autocapitalize', 'off');
+          input.setAttribute('autocorrect', 'off');
+        });
+      });
     }
   }
 
@@ -980,6 +1039,49 @@
       }
     }
   });
+
+  // Open search panel when triggerSearchInFile store increments
+  $effect(() => {
+    const trigger = $triggerSearchInFile;
+    if (trigger === 0) return;
+    if (!view) return;
+
+    // Only open in the focused/active editor — matches handleGlobalKeydown guard
+    const active = document.activeElement;
+    const thisEditorHasFocus = editorContainer?.contains(active) || view.hasFocus;
+    const anyEditorHasFocus = !!active?.closest('.editor-wrapper');
+    if (!thisEditorHasFocus && anyEditorHasFocus) return;
+
+    // If panel already open, just focus its input
+    const existingPanel = editorContainer?.querySelector('.cm-panel.cm-search');
+    if (existingPanel) {
+      const searchInput = existingPanel.querySelector<HTMLInputElement>('input.cm-search-field[main-field]');
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.select();
+      }
+      return;
+    }
+
+    view.focus();
+    openSearchPanel(view);
+    requestAnimationFrame(() => {
+      view?.dom.querySelectorAll('.cm-panel.cm-search input').forEach((input) => {
+        input.setAttribute('autocapitalize', 'off');
+        input.setAttribute('autocorrect', 'off');
+      });
+    });
+  });
+
+  let lastPreviewTrigger = 0;
+  $effect(() => {
+    const trigger = $openPreviewSignal;
+    if (trigger === 0 || trigger === lastPreviewTrigger) return;
+    lastPreviewTrigger = trigger;
+    if (!view || $activeFilePath !== filePath || !isMarkdown) return;
+    showPreview = true;
+    updatePreview(view.state.doc.toString());
+  });
 </script>
 
 <div class="editor-root" class:md-split={isMarkdown && showPreview}>
@@ -1026,6 +1128,17 @@
   .editor-wrapper :global(.cm-gutters) {
     background: var(--bg-secondary);
     border-right: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .editor-wrapper :global(.cm-lineNumbers .cm-gutterElement) {
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .editor-wrapper :global(.cm-activeLineGutter) {
+    background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
   }
 
   .editor-wrapper :global(.cm-git-gutter) {
@@ -1194,7 +1307,7 @@
   }
 
   .md-preview-content :global(code) {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     background: var(--bg-tertiary);
     padding: 2px 5px;
     border-radius: 3px;

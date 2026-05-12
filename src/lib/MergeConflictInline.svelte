@@ -94,7 +94,7 @@
 
 <style>
   .inline-view {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
     line-height: 1.5;
   }

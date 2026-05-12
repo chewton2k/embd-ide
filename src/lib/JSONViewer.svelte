@@ -238,7 +238,7 @@
     flex: 1;
     overflow: auto;
     padding: 8px 14px;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.6;
   }

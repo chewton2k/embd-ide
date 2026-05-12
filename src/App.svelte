@@ -4,17 +4,16 @@
   import FileViewer from './lib/FileViewer.svelte';
   import JSONViewer from './lib/JSONViewer.svelte';
   import MergeEditor from './lib/MergeEditor.svelte';
-  import Tabs from './lib/Tabs.svelte';
+  import Toolbar from './lib/Toolbar.svelte';
   import Terminal from './lib/Terminal.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
   import GitPanel from './lib/GitPanel.svelte';
-  import Settings from './lib/Settings.svelte';
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { getVersion } from '@tauri-apps/api/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, togglePin } from './lib/stores.ts';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -34,9 +33,10 @@
   }
 
   let recentProjects = $state<RecentProject[]>([]);
-  let openFolderByPath: ((path: string) => Promise<void>) | null = null;
+  let showAllRecent = $state(false);
+  let openFolderByPath: ((path: string, restoreSession?: boolean) => Promise<void>) | null = null;
 
-  function handleOpenFolder(fn: (path: string) => Promise<void>) {
+  function handleOpenFolder(fn: (path: string, restoreSession?: boolean) => Promise<void>) {
     openFolderByPath = fn;
   }
 
@@ -49,42 +49,29 @@
       alert(`Project folder no longer exists:\n${project.path}`);
       return;
     }
+    // Session restoration is handled inside openFolderByPath
     await openFolderByPath(project.path);
-    // Restore session files
-    for (const file of project.session.open_files) {
-      const fileExists = await exists(file.path);
-      if (!fileExists) continue;
-      const name = file.path.split(/[/\\]/).pop() || file.path;
-      addFile(file.path, name);
-      if (file.pinned) {
-        togglePin(file.path);
-      }
-    }
-    // Restore active file
-    if (project.session.active_file) {
-      const activeExists = await exists(project.session.active_file);
-      if (activeExists) {
-        activeFilePath.set(project.session.active_file);
-      }
-    }
   }
 
-  let showChat = $state(false);
-  let showGit = $state(false);
   let showFileSearch = $state(false);
   let sidebarWidth = $state(220);
-  let terminalHeight = $state(220);
+  let sidebarVisible = $state(true);
+
+  function toggleSidebar() {
+    sidebarVisible = !sidebarVisible;
+  }
+
   let chatWidth = $state(320);
   let gitWidth = $state(360);
 
   // --- Drag resize logic ---
-  let dragging = $state<'sidebar' | 'terminal' | 'chat' | 'git' | null>(null);
+  let dragging = $state<'sidebar' | 'chat' | 'git' | null>(null);
 
-  function startDrag(target: 'sidebar' | 'terminal' | 'chat' | 'git') {
+  function startDrag(target: 'sidebar' | 'chat' | 'git') {
     return (e: MouseEvent) => {
       e.preventDefault();
       dragging = target;
-      document.body.style.cursor = target === 'terminal' ? 'row-resize' : 'col-resize';
+      document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
       window.addEventListener('mousemove', onDrag);
       window.addEventListener('mouseup', stopDrag);
@@ -94,10 +81,6 @@
   function onDrag(e: MouseEvent) {
     if (dragging === 'sidebar') {
       sidebarWidth = Math.max(140, Math.min(500, e.clientX));
-    } else if (dragging === 'terminal') {
-      const sbHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--density-statusbar-height') || '24');
-      const windowH = window.innerHeight - sbHeight;
-      terminalHeight = Math.max(100, Math.min(windowH - 150, windowH - e.clientY));
     } else if (dragging === 'chat') {
       chatWidth = Math.max(200, Math.min(600, window.innerWidth - e.clientX));
     } else if (dragging === 'git') {
@@ -114,27 +97,89 @@
   }
 
   function toggleTerminal() {
-    $showTerminal = !$showTerminal;
+    const sessions = get(terminalSessions);
+    if (!$showTerminal || sessions.length === 0) {
+      $showTerminal = true;
+      createTerminalSignal.update(n => n + 1);
+    } else if (!isTerminalPath($activeFilePath)) {
+      activeFilePath.set(terminalPath());
+    }
   }
 
-  function toggleChat() {
-    showChat = !showChat;
-    if (showChat) showGit = false;
+  let isClosing = false;
+
+  async function openSettingsWindow() {
+    try {
+      const existing = await WebviewWindow.getByLabel('settings');
+      if (existing) {
+        try { await existing.show(); } catch {}
+        try { await existing.setFocus(); } catch {}
+        return;
+      }
+      const win = new WebviewWindow('settings', {
+        url: 'index.html#settings',
+        title: 'Settings',
+        width: 900,
+        height: 640,
+        minWidth: 720,
+        minHeight: 480,
+        resizable: true,
+        center: true,
+        focus: true,
+      });
+      win.once('tauri://error', (e) => {
+        console.error('Failed to open settings window', e);
+      });
+    } catch (e) {
+      console.error('openSettingsWindow failed', e);
+    }
   }
 
-  function toggleGit() {
-    showGit = !showGit;
-    if (showGit) showChat = false;
-  }
+  // Treat `showSettings` as an "open settings" trigger. Reset it after
+  // launching so the Toolbar's toggle reads as off again.
+  showSettings.subscribe((v) => {
+    if (v) {
+      openSettingsWindow();
+      showSettings.set(false);
+    }
+  });
 
-  let appVersion = $state('');
+  let breadcrumbSegments = $derived.by(() => {
+    const path = $activeFilePath;
+    const root = $projectRoot;
+    if (!path) return [];
+    const normPath = path.replace(/\\/g, '/');
+    const normRoot = root ? root.replace(/\\/g, '/') : null;
+    if (normRoot && normPath.startsWith(normRoot + '/')) {
+      const rel = normPath.slice(normRoot.length + 1);
+      const relParts = rel.split('/');
+      const rootName = normRoot.split('/').pop() || normRoot;
+      return [
+        { name: rootName, path: normRoot },
+        ...relParts.map((part, i) => ({
+          name: part,
+          path: normRoot + '/' + relParts.slice(0, i + 1).join('/')
+        }))
+      ];
+    }
+    return [{ name: normPath.split('/').pop() || path, path: normPath }];
+  });
+
+  function navigateBreadcrumb(path: string) {
+    if (!sidebarVisible) toggleSidebar();
+    fileTreeNavTarget.set(path);
+  }
 
   onMount(async () => {
-    getVersion().then(v => appVersion = v);
-    // Sync stored API key to backend on startup
-    const storedKey = localStorage.getItem('embd-api-key');
-    if (storedKey) {
-      invoke('set_api_key', { key: storedKey }).catch(() => {});
+    // Sync stored API keys to backend on startup
+    const providerKeys: { provider: string; storageKey: string }[] = [
+      { provider: 'openrouter', storageKey: 'embd-api-key' },
+      { provider: 'openai',     storageKey: 'embd-openai-key' },
+      { provider: 'anthropic',  storageKey: 'embd-anthropic-key' },
+    ];
+    for (const { provider, storageKey } of providerKeys) {
+      const key = localStorage.getItem(storageKey);
+      if (key) invoke('set_provider_key', { provider, key }).catch(() => {});
     }
     // Load recent projects
     try {
@@ -143,11 +188,18 @@
     // Save session on window close — await the save before destroying
     const appWindow = getCurrentWindow();
     await appWindow.onCloseRequested(async (event) => {
+      if (isClosing) return;
+      isClosing = true;
       event.preventDefault();
       const root = get(projectRoot);
       if (root) {
         try {
-          await saveSessionNow(root);
+          await Promise.race([
+            saveSessionNow(root),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Save timeout')), 5000)
+            ),
+          ]);
         } catch (e) {
           console.error('Failed to save session on close:', e);
         }
@@ -200,6 +252,20 @@
     scheduleSaveSession();
   });
 
+  // Refresh recent projects when returning to the welcome screen
+  $effect(() => {
+    if ($activeFile === null) {
+      showAllRecent = false;
+      getRecentProjects().then(p => recentProjects = p).catch(() => {});
+    }
+  });
+
+  $effect(() => {
+    if ($openFileSearchSignal > 0) {
+      showFileSearch = true;
+    }
+  });
+
   function handleKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === '`') {
       e.preventDefault();
@@ -207,11 +273,11 @@
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
       e.preventDefault();
-      toggleChat();
+      toggleChatPanel();
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
       e.preventDefault();
-      toggleGit();
+      toggleGitPanel();
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
       e.preventDefault();
@@ -239,88 +305,95 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="ide-layout">
+  <Toolbar {sidebarVisible} onToggleSidebar={toggleSidebar} />
   <div class="ide-top">
-    <div class="sidebar" style="width: {sidebarWidth}px">
+    <div class="sidebar" class:hidden={!sidebarVisible} style="width: {sidebarWidth}px">
       <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} onOpenFolder={handleOpenFolder} />
     </div>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="resize-handle resize-handle-col" onmousedown={startDrag('sidebar')}></div>
+    <div class="resize-handle resize-handle-col" class:hidden={!sidebarVisible} onmousedown={startDrag('sidebar')}></div>
 
     <div class="main-area">
-      <div class="editor-area" style="flex: 1; min-height: 0;">
-        <Tabs />
-        <div class="editor-container">
-          {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
-            <MergeEditor filePath={$activeFile} />
-          {:else if $activeFile && isJsonFile($activeFile)}
-            <JSONViewer filePath={$activeFile} />
-          {:else if $activeFile && isViewerFile($activeFile)}
-            <FileViewer filePath={$activeFile} />
-          {:else if $activeFile}
-            <Editor filePath={$activeFile} />
-          {:else}
-            <div class="welcome">
-              <img src="/embd_logo.png" alt="embd" class="welcome-logo" />
-              {#if recentProjects.length > 0}
-                <div class="recent-projects">
-                  <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
-                  {#each recentProjects as project}
-                    <button class="recent-item" onclick={() => openRecentProject(project)}>
-                      <span class="recent-name">{project.name}</span>
-                      <span class="recent-path">{project.path}</span>
-                    </button>
-                  {/each}
+      <div class="editor-col">
+        <div class="editor-area" style="flex: 1; min-height: 0;">
+          <div class="editor-container">
+            <!-- Terminal tab slot: always rendered (visibility:hidden when unfocused) to keep PTY sessions alive -->
+            {#if $showTerminal}
+              <div class="terminal-tab-slot" class:focused={$showTerminal && isTerminalPath($activeFilePath)}>
+                <Terminal />
+              </div>
+            {/if}
+            <!-- File editor — hidden while a terminal tab is focused -->
+            {#if !($showTerminal && isTerminalPath($activeFilePath))}
+              {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
+                <MergeEditor filePath={$activeFile} />
+              {:else if $activeFile && isJsonFile($activeFile)}
+                <JSONViewer filePath={$activeFile} />
+              {:else if $activeFile && isViewerFile($activeFile)}
+                <FileViewer filePath={$activeFile} />
+              {:else if $activeFile}
+                <Editor filePath={$activeFile} />
+              {:else}
+                <div class="welcome">
+                  {#if recentProjects.length > 0}
+                    <div class="recent-projects">
+                      <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
+                      {#each (showAllRecent ? recentProjects : recentProjects.slice(0, 3)) as project}
+                        <button class="recent-item" onclick={() => openRecentProject(project)}>
+                          <span class="recent-name">{project.name}</span>
+                          <span class="recent-path">{project.path}</span>
+                        </button>
+                      {/each}
+                      {#if recentProjects.length > 3}
+                        <button class="show-more-btn" onclick={() => showAllRecent = !showAllRecent}>
+                          {showAllRecent ? 'Show less' : `Show more (${recentProjects.length - 3})`}
+                        </button>
+                      {/if}
+                    </div>
+                  {/if}
+                  <p>Open a file from the sidebar to start editing</p>
+                  <div class="shortcuts">
+                    <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
+                    <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
+                    <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
+                    <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
+                    <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
+                    <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
+                    <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
+                  </div>
                 </div>
               {/if}
-              <p>Open a file from the sidebar to start editing</p>
-              <div class="shortcuts">
-                <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
-                <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
-                <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
-                <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
-                <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
-                <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
-                <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
-              </div>
-            </div>
-          {/if}
+            {/if}
+          </div>
         </div>
-      </div>
 
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="resize-handle resize-handle-row" class:hidden={!$showTerminal} onmousedown={startDrag('terminal')}></div>
-      <div class="bottom-panel" class:hidden={!$showTerminal} style="height: {terminalHeight}px;">
-        <Terminal />
       </div>
     </div>
 
-    {#if showChat}
+    {#if $showChat}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="resize-handle resize-handle-col" onmousedown={startDrag('chat')}></div>
       <div class="chat-panel" style="width: {chatWidth}px">
         <div class="panel-header">
           <span>AI Chat</span>
-          <button onclick={toggleChat}>✕</button>
+          <button onclick={toggleChatPanel}>✕</button>
         </div>
         <ChatPanel />
       </div>
     {/if}
 
-    {#if showGit}
+    {#if $showGit}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="resize-handle resize-handle-col" onmousedown={startDrag('git')}></div>
       <div class="git-panel-container" style="width: {gitWidth}px">
         <div class="panel-header">
           <span>Source Control</span>
-          <button onclick={toggleGit}>✕</button>
+          <button onclick={toggleGitPanel}>✕</button>
         </div>
         <GitPanel />
       </div>
     {/if}
 
-    {#if $showSettings}
-      <Settings />
-    {/if}
 
     {#if showFileSearch}
       <FileSearch onClose={() => showFileSearch = false} />
@@ -329,31 +402,16 @@
 
   <div class="statusbar">
     <div class="statusbar-left">
-      <button onclick={() => showSettings.update(v => !v)} class="statusbar-btn gear-btn" title="Settings">
-        <svg viewBox="0 0 16 14" fill="currentColor" width="13" height="13">
-          <path d="M8 1l1.3.8.8-.5 1 1-.5.8.5 1H12.5v1.4l-.8.5.2 1 .9.5-.3 1.2-1 .1-.3 1 .6.8-.7 1.1-1-.3-.7.8.1 1L8 13l-1.3-.8-.8.5-1-1 .5-.8-.5-1H3.5V8.5l.8-.5-.2-1-.9-.5.3-1.2 1-.1.3-1-.6-.8.7-1.1 1 .3.7-.8L6.5 2 8 1zm0 4.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/>
-        </svg>
-      </button>
-      {#if $gitBranch}
-        <button class="statusbar-btn statusbar-branch" onclick={toggleGit}>
-          <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-            <path d="M14.7 7.3L8.7 1.3a1 1 0 0 0-1.4 0L5.7 2.9l1.8 1.8A1.2 1.2 0 0 1 9 5.9v4.3a1.2 1.2 0 1 1-1-.1V6.1L6.3 7.8a1.2 1.2 0 1 1-.9-.5l1.8-1.8-1.8-1.8L1.3 7.3a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0l6-6a1 1 0 0 0 0-1.4z"/>
-          </svg>
-          {$gitBranch}
-        </button>
+      {#if breadcrumbSegments.length > 0}
+        <div class="breadcrumb">
+          {#each breadcrumbSegments as seg, i}
+            <span class="breadcrumb-seg" role="button" tabindex="0" onclick={() => navigateBreadcrumb(seg.path)} onkeydown={(e) => e.key === 'Enter' && navigateBreadcrumb(seg.path)}>{seg.name}</span>
+            {#if i < breadcrumbSegments.length - 1}
+              <span class="breadcrumb-sep">›</span>
+            {/if}
+          {/each}
+        </div>
       {/if}
-      <button onclick={toggleTerminal} class="statusbar-btn">
-        {$showTerminal ? 'Hide' : 'Show'} Terminal 
-      </button>
-      <button onclick={toggleChat} class="statusbar-btn">
-        | {showChat ? 'Hide' : 'Show'} AI 
-      </button>
-      <button onclick={toggleGit} class="statusbar-btn">
-        | {showGit ? 'Hide' : 'Show'} Git 
-      </button>
-      <button onclick={() => autosaveEnabled.update(v => !v)} class="statusbar-btn autosave-btn">
-        | {$autosaveEnabled ? 'ON Autosave' : 'OFF Autosave'} |
-      </button>
     </div>
     <div class="statusbar-right">
       {#if $activeFile}
@@ -371,7 +429,6 @@
           {/if}
         </span>
       {/if}
-      <span>embd v{appVersion}</span>
     </div>
   </div>
 </div>
@@ -379,7 +436,7 @@
 <style>
   .ide-layout {
     display: grid;
-    grid-template-rows: 1fr var(--density-statusbar-height, 24px);
+    grid-template-rows: var(--density-tabs-height, 36px) 1fr var(--density-statusbar-height, 24px);
     height: 100vh;
     width: 100vw;
     overflow: hidden;
@@ -405,6 +462,14 @@
   .main-area {
     flex: 1;
     display: flex;
+    flex-direction: row;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .editor-col {
+    flex: 1;
+    display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
@@ -419,6 +484,22 @@
   .editor-container {
     flex: 1;
     overflow: hidden;
+    position: relative;
+  }
+
+  .terminal-tab-slot {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .terminal-tab-slot.focused {
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .welcome {
@@ -429,14 +510,6 @@
     height: 100%;
     color: var(--text-muted);
     gap: 12px;
-  }
-
-  .welcome-logo {
-    height: 75px;
-    width: auto;
-    object-fit: contain;
-    opacity: 0.7;
-    border-radius: 18px;
   }
 
   .shortcuts {
@@ -453,6 +526,8 @@
     width: 340px;
     gap: 4px;
     margin-bottom: 12px;
+    max-height: 240px;
+    overflow-y: auto;
   }
 
   .recent-item {
@@ -488,6 +563,19 @@
     max-width: 100%;
   }
 
+  .show-more-btn {
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .show-more-btn:hover {
+    color: var(--accent);
+  }
+
   .shortcuts kbd {
     background: var(--bg-surface);
     padding: 2px 6px;
@@ -511,19 +599,6 @@
   .resize-handle-col {
     width: 3px;
     cursor: col-resize;
-  }
-
-  .resize-handle-row {
-    height: 3px;
-    cursor: row-resize;
-    width: 100%;
-  }
-
-  .bottom-panel {
-    background: var(--bg-tertiary);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
   }
 
   .hidden {
@@ -605,39 +680,6 @@
     flex-shrink: 0;
   }
 
-  .statusbar-btn {
-    color: var(--bg-tertiary);
-    font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-
-  .statusbar-btn:hover {
-    opacity: 0.8;
-  }
-
-  .autosave-btn {
-    font-size: 11px;
-    opacity: 0.9;
-  }
-
-  .gear-btn {
-    display: flex;
-    align-items: center;
-    padding: 0 4px;
-  }
-
-  .statusbar-branch {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    font-weight: 500;
-    padding-right: 8px;
-    border-right: 1px solid color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
-  }
-
   .save-indicator {
     display: flex;
     align-items: center;
@@ -655,5 +697,41 @@
 
   .save-indicator.unsaved {
     opacity: 1;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11.5px;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .breadcrumb-seg {
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    padding: 1px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+    font-size: 11.5px;
+    font-weight: 600;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: inherit;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .breadcrumb-seg:hover {
+    background: color-mix(in srgb, currentColor 32%, transparent);
+  }
+
+  .breadcrumb-sep {
+    opacity: 0.75;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+    color: inherit;
   }
 </style>

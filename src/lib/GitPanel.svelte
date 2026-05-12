@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { ask } from '@tauri-apps/plugin-dialog';
-  import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh, sharedGitStatus, addFile } from './stores.ts';
+  import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh, sharedGitStatus, addFile } from './stores';
 
   interface GitFile {
     path: string;       // absolute path
@@ -236,6 +236,11 @@
   }
 
   async function selectFile(file: GitFile) {
+    if (selectedFile?.path === file.path) {
+      selectedFile = null;
+      diffLines = [];
+      return;
+    }
     selectedFile = file;
     const root = $projectRoot;
     if (!root) return;
@@ -623,11 +628,13 @@
         {:else}
           <div class="branch-list">
             {#each filteredBranches as branch}
-              <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="branch-item"
                 class:current={branch.is_current}
+                role="button"
+                tabindex="0"
                 onclick={() => switchBranch(branch)}
+                onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && switchBranch(branch)}
               >
                 <span class="branch-item-indicator">{branch.is_current ? '●' : ''}</span>
                 <span class="branch-item-name">
@@ -672,8 +679,7 @@
           <span>Merge Conflicts ({conflictFiles.length})</span>
         </div>
         {#each conflictFiles as file}
-          <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="file-row" onclick={() => openConflictFile(file)}>
+          <div class="file-row" role="button" tabindex="0" onclick={() => openConflictFile(file)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && openConflictFile(file)}>
             <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
             <span class="file-name" title={file.relPath}>{file.relPath}</span>
             <button class="file-action open-btn" onclick={(e: MouseEvent) => { e.stopPropagation(); openConflictFile(file); }}>Open</button>
@@ -691,11 +697,13 @@
         {/if}
       </div>
       {#each stagedFiles as file}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="file-row"
           class:selected={selectedFile?.path === file.path}
+          role="button"
+          tabindex="0"
           onclick={() => selectFile(file)}
+          onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectFile(file)}
         >
           <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
           <span class="file-name" title={file.relPath}>{file.relPath}</span>
@@ -716,11 +724,13 @@
         {/if}
       </div>
       {#each changedFiles as file}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="file-row"
           class:selected={selectedFile?.path === file.path}
+          role="button"
+          tabindex="0"
           onclick={() => selectFile(file)}
+          onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectFile(file)}
         >
           <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
           <span class="file-name" title={file.relPath}>{file.relPath}</span>
@@ -770,8 +780,7 @@
 
     <!-- History -->
     <div class="section">
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="section-header history-toggle" onclick={toggleHistory}>
+      <div class="section-header history-toggle" role="button" tabindex="0" onclick={toggleHistory} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleHistory()}>
         <span class="history-chevron" class:open={showHistory}>▶</span>
         <span>History</span>
         {#if showHistory}
@@ -1135,7 +1144,7 @@
     width: 14px;
     text-align: center;
     flex-shrink: 0;
-    font-family: monospace;
+    font-family: var(--font-mono);
   }
 
   .file-name {
@@ -1169,7 +1178,7 @@
 
   /* Diff preview */
   .diff-preview {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     overflow-x: auto;
     max-height: 300px;
@@ -1372,7 +1381,7 @@
   }
 
   .graph-hash {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     color: var(--git-graph-accent);
     flex-shrink: 0;
     font-size: 10px;

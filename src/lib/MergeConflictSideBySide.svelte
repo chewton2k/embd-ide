@@ -146,7 +146,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-family: var(--font-mono);
     font-size: 13px;
   }
 

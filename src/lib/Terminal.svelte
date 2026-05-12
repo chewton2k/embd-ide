@@ -1,18 +1,24 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { Terminal as XTerm } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import { open } from '@tauri-apps/plugin-shell';
-  import { projectRoot, terminalFontSize, currentThemeId, getTheme, showTerminal } from './stores.ts';
+  import {
+    projectRoot, terminalFontSize, currentThemeId, getTheme, showTerminal,
+    activeFilePath, openFiles, terminalSessions, createTerminalSignal,
+    killTerminalSignal, splitTerminalSignal, collapseTerminalSplitsSignal,
+    isTerminalPath, terminalPath
+  } from './stores';
   import { get } from 'svelte/store';
+  import { SplitSquareVertical, PanelBottom, Columns2, TerminalSquare } from 'lucide-svelte';
   import '@xterm/xterm/css/xterm.css';
 
-  interface TerminalTab {
-    id: number;         // local tab id
-    sessionId: number;  // backend PTY session id
+  interface TerminalPane {
+    id: number;
+    sessionId: number;
     name: string;
     xterm: XTerm;
     fitAddon: FitAddon;
@@ -21,9 +27,11 @@
     resizeObserver: ResizeObserver | null;
   }
 
-  let terminalContainer: HTMLDivElement;
-  let tabs = $state<TerminalTab[]>([]);
-  let activeTabId = $state<number | null>(null);
+  let terminalRoot: HTMLDivElement;
+  let panes = $state<TerminalPane[]>([]);
+  let activePaneId = $state<number | null>(null);
+  let splitDirection = $state<'right' | 'bottom'>('right');
+  let opChain = Promise.resolve();
 
   function buildXtermTheme() {
     const c = getTheme(get(currentThemeId)).colors;
@@ -51,35 +59,48 @@
     };
   }
 
-  function getActiveTab(): TerminalTab | undefined {
-    return tabs.find(t => t.id === activeTabId);
+  function getPaneMount(id: number): HTMLDivElement | null {
+    return terminalRoot?.querySelector(`[data-pane-terminal="${id}"]`) ?? null;
   }
 
-  async function createTab() {
+  function fitPane(pane: TerminalPane) {
+    const mount = getPaneMount(pane.id);
+    if (!mount || mount.clientWidth === 0 || mount.clientHeight === 0) return;
+    pane.fitAddon.fit();
+  }
+
+  function focusPane(id: number) {
+    activePaneId = id;
+    const pane = panes.find((entry) => entry.id === id);
+    if (!pane) return;
+    requestAnimationFrame(() => {
+      fitPane(pane);
+      pane.xterm.focus();
+    });
+  }
+
+  function enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const next = opChain.then(task);
+    opChain = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  async function createPane() {
     const cwd = get(projectRoot);
 
     const xterm = new XTerm({
       cursorBlink: true,
       fontSize: get(terminalFontSize),
-      fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim()
+        || "ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, monospace",
       theme: buildXtermTheme(),
     });
 
     const fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
     xterm.loadAddon(new WebLinksAddon((_event, uri) => {
-      if (uri.startsWith('http://') || uri.startsWith('https://')) {
-        open(uri);
-      }
+      if (uri.startsWith('http://') || uri.startsWith('https://')) open(uri);
     }));
-
-    // Hide all other terminals, show this one
-    hideAllTerminals();
-    xterm.open(terminalContainer);
-    // Fit first to get accurate dimensions, then spawn with correct size
-    fitAddon.fit();
-    await new Promise(r => requestAnimationFrame(r));
-    fitAddon.fit();
 
     let sessionId: number;
     let name: string;
@@ -89,8 +110,8 @@
     try {
       const result = await invoke<{ id: number; pid: number | null }>('spawn_terminal', {
         cwd,
-        rows: xterm.rows,
-        cols: xterm.cols,
+        rows: 24,
+        cols: 80,
       });
       sessionId = result.id;
       name = result.pid ? `Terminal ${result.pid}` : `Terminal ${result.id}`;
@@ -100,57 +121,28 @@
       });
 
       unlistenExit = await listen<void>(`terminal-exit-${sessionId}`, () => {
-        killTab(sessionId);
+        enqueue(() => closePane(sessionId, false));
       });
 
-      // Handle macOS keyboard shortcuts that xterm doesn't natively support
       xterm.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== 'keydown') return true;
-        // Cmd+Backspace: clear line (send Ctrl+U)
-        if (e.metaKey && e.key === 'Backspace') {
-          invoke('write_terminal', { id: sessionId, data: '\x15' });
-          return false;
-        }
-        // Cmd+Left: move to beginning of line (send Home / Ctrl+A)
-        if (e.metaKey && e.key === 'ArrowLeft') {
-          invoke('write_terminal', { id: sessionId, data: '\x01' });
-          return false;
-        }
-        // Cmd+Right: move to end of line (send End / Ctrl+E)
-        if (e.metaKey && e.key === 'ArrowRight') {
-          invoke('write_terminal', { id: sessionId, data: '\x05' });
-          return false;
-        }
-        // Alt+Backspace: delete word backward (send Ctrl+W)
-        if (e.altKey && e.key === 'Backspace') {
-          invoke('write_terminal', { id: sessionId, data: '\x17' });
-          return false;
-        }
+        if (e.metaKey && e.key === 'Backspace') { invoke('write_terminal', { id: sessionId, data: '\x15' }); return false; }
+        if (e.metaKey && e.key === 'ArrowLeft') { invoke('write_terminal', { id: sessionId, data: '\x01' }); return false; }
+        if (e.metaKey && e.key === 'ArrowRight') { invoke('write_terminal', { id: sessionId, data: '\x05' }); return false; }
+        if (e.altKey && e.key === 'Backspace') { invoke('write_terminal', { id: sessionId, data: '\x17' }); return false; }
         return true;
       });
 
-      // Send input directly to PTY
-      xterm.onData((data) => {
-        invoke('write_terminal', { id: sessionId, data });
-      });
-
-      xterm.onResize(({ rows, cols }) => {
-        invoke('resize_terminal', { id: sessionId, rows, cols });
-      });
+      xterm.onData((data) => { invoke('write_terminal', { id: sessionId, data }); });
+      xterm.onResize(({ rows, cols }) => { invoke('resize_terminal', { id: sessionId, rows, cols }); });
     } catch (e) {
       xterm.writeln(`\r\nFailed to start terminal: ${e}`);
       xterm.writeln('Terminal requires Tauri runtime.');
+      xterm.dispose();
       return;
     }
 
-    const resizeObserver = new ResizeObserver(() => {
-      if (activeTabId === sessionId) {
-        fitAddon.fit();
-      }
-    });
-    resizeObserver.observe(terminalContainer);
-
-    const tab: TerminalTab = {
+    const pane: TerminalPane = {
       id: sessionId,
       sessionId,
       name,
@@ -158,168 +150,263 @@
       fitAddon,
       unlisten,
       unlistenExit,
-      resizeObserver,
+      resizeObserver: null,
     };
 
-    tabs = [...tabs, tab];
-    activeTabId = sessionId;
+    panes = [...panes, pane];
+    activePaneId = sessionId;
+    showTerminal.set(true);
+    activeFilePath.set(terminalPath());
 
-    // Auto-focus so user can type immediately
+    await tick();
+
+    const mount = getPaneMount(pane.id);
+    if (!mount) return;
+
+    xterm.open(mount);
+    fitPane(pane);
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    fitPane(pane);
+
+    const resizeObserver = new ResizeObserver(() => {
+      fitPane(pane);
+    });
+    resizeObserver.observe(mount);
+    pane.resizeObserver = resizeObserver;
+
     requestAnimationFrame(() => xterm.focus());
   }
 
-  function hideAllTerminals() {
-    for (const tab of tabs) {
-      const el = tab.xterm.element;
-      if (el) el.style.display = 'none';
-    }
-  }
-
-  function switchTab(tabId: number) {
-    if (activeTabId === tabId) return;
-    hideAllTerminals();
-
-    const tab = tabs.find(t => t.id === tabId);
-    if (!tab) return;
-
-    activeTabId = tabId;
-    const el = tab.xterm.element;
-
-    if (el && el.parentElement === terminalContainer) {
-      // Already attached, just show it
-      el.style.display = '';
-    } else {
-      // Re-attach (shouldn't normally happen)
-      tab.xterm.open(terminalContainer);
-    }
-
-    // Refit after switching
-    requestAnimationFrame(() => {
-      tab.fitAddon.fit();
-      tab.xterm.focus();
-    });
-  }
-
-  async function killTab(tabId: number) {
-    const idx = tabs.findIndex(t => t.id === tabId);
+  async function closePane(paneId: number, killBackend = true) {
+    const idx = panes.findIndex((entry) => entry.id === paneId);
     if (idx === -1) return;
 
-    const tab = tabs[idx];
+    const pane = panes[idx];
+    pane.unlisten();
+    pane.unlistenExit();
+    pane.resizeObserver?.disconnect();
+    pane.xterm.dispose();
 
-    // Cleanup
-    tab.unlisten();
-    tab.unlistenExit();
-    tab.resizeObserver?.disconnect();
-    tab.xterm.dispose();
-    try {
-      await invoke('kill_terminal', { id: tab.sessionId });
-    } catch (_) { /* ignore */ }
+    if (killBackend) {
+      try { await invoke('kill_terminal', { id: pane.sessionId }); } catch { /* ignore */ }
+    }
 
-    const newTabs = tabs.filter(t => t.id !== tabId);
-    tabs = newTabs;
+    const remaining = panes.filter((entry) => entry.id !== paneId);
+    panes = remaining;
 
-    // Switch to another tab or clear
-    if (activeTabId === tabId) {
-      if (newTabs.length > 0) {
-        const next = idx > 0 ? newTabs[idx - 1] : newTabs[0];
-        switchTab(next.id);
-      } else {
-        activeTabId = null;
-        showTerminal.set(false);
+    if (activePaneId === paneId) {
+      activePaneId = remaining[idx]?.id ?? remaining[idx - 1]?.id ?? remaining[0]?.id ?? null;
+    }
+
+    if (remaining.length === 0) {
+      showTerminal.set(false);
+      if (isTerminalPath(get(activeFilePath))) {
+        const files = get(openFiles);
+        activeFilePath.set(files.at(-1)?.path ?? null);
       }
+      return;
+    }
+
+    if (!remaining.some((entry) => entry.id === activePaneId)) {
+      activePaneId = remaining[0].id;
+    }
+
+    if (activePaneId !== null) {
+      focusPane(activePaneId);
     }
   }
 
-  function handleCloseClick(e: MouseEvent, tabId: number) {
-    e.stopPropagation();
-    killTab(tabId);
+  async function closeAllPanes() {
+    for (const pane of [...panes]) {
+      await closePane(pane.id);
+    }
   }
 
-  // Re-focus active terminal when panel becomes visible
-  $effect(() => {
-    if ($showTerminal) {
-      const tab = getActiveTab();
-      if (tab) {
-        requestAnimationFrame(() => {
-          tab.fitAddon.fit();
-          tab.xterm.focus();
-        });
+  async function collapseToActivePane() {
+    const keepId = activePaneId ?? panes[0]?.id ?? null;
+    if (keepId === null || panes.length <= 1) return;
+    for (const pane of [...panes]) {
+      if (pane.id !== keepId) {
+        await closePane(pane.id);
       }
+    }
+    focusPane(keepId);
+  }
+
+  async function ensureTerminalVisible() {
+    showTerminal.set(true);
+    activeFilePath.set(terminalPath());
+    if (panes.length === 0) {
+      await createPane();
+      return;
+    }
+    if (activePaneId !== null) {
+      focusPane(activePaneId);
+    }
+  }
+
+  async function splitTerminal(direction: 'right' | 'bottom') {
+    splitDirection = direction;
+    if (panes.length === 0) {
+      await createPane();
+    }
+    await createPane();
+  }
+
+  $effect(() => {
+    terminalSessions.set(panes.map((pane) => ({
+      id: pane.id,
+      name: pane.name,
+    })));
+  });
+
+  $effect(() => {
+    const path = $activeFilePath;
+    if (!isTerminalPath(path)) return;
+    if (path !== terminalPath()) {
+      activeFilePath.set(terminalPath());
+      return;
+    }
+    if (activePaneId !== null) {
+      const paneId = activePaneId;
+      requestAnimationFrame(() => focusPane(paneId));
     }
   });
 
-  // When project root changes, create a fresh first terminal
-  let initializedForRoot: string | null = null;
+  let createCount = 0;
+  $effect(() => {
+    const sig = $createTerminalSignal;
+    if (sig > createCount) {
+      createCount = sig;
+      enqueue(async () => {
+        await ensureTerminalVisible();
+      });
+    }
+  });
+
+  let splitCount = 0;
+  $effect(() => {
+    const sig = $splitTerminalSignal;
+    if (sig.count > splitCount) {
+      splitCount = sig.count;
+      enqueue(async () => {
+        await splitTerminal(sig.direction);
+      });
+    }
+  });
+
+  let collapseCount = 0;
+  $effect(() => {
+    const sig = $collapseTerminalSplitsSignal;
+    if (sig > collapseCount) {
+      collapseCount = sig;
+      enqueue(async () => {
+        await collapseToActivePane();
+      });
+    }
+  });
+
+  $effect(() => {
+    const target = $killTerminalSignal;
+    if (target === null) return;
+    killTerminalSignal.set(null);
+    enqueue(async () => {
+      if (target === 'all') {
+        await closeAllPanes();
+      } else {
+        await closePane(target);
+      }
+    });
+  });
+
+  $effect(() => {
+    if ($showTerminal && isTerminalPath($activeFilePath) && activePaneId !== null) {
+      const paneId = activePaneId;
+      requestAnimationFrame(() => focusPane(paneId));
+    }
+  });
 
   onMount(() => {
     const unsubFont = terminalFontSize.subscribe((size) => {
-      for (const tab of tabs) {
-        tab.xterm.options.fontSize = size;
-        tab.fitAddon.fit();
+      for (const pane of panes) {
+        pane.xterm.options.fontSize = size;
+        fitPane(pane);
       }
     });
 
     const unsubTheme = currentThemeId.subscribe(() => {
       const theme = buildXtermTheme();
-      for (const tab of tabs) {
-        tab.xterm.options.theme = theme;
+      for (const pane of panes) {
+        pane.xterm.options.theme = theme;
       }
     });
 
-    const unsub = projectRoot.subscribe((root) => {
-      if (root && root !== initializedForRoot && terminalContainer) {
-        initializedForRoot = root;
-        // Kill all existing tabs and start fresh
-        for (const tab of [...tabs]) {
-          killTab(tab.id);
-        }
-        createTab();
-      }
-    });
-
-    return () => { unsub(); unsubFont(); unsubTheme(); };
+    return () => {
+      unsubFont();
+      unsubTheme();
+    };
   });
 
   onDestroy(() => {
-    for (const tab of tabs) {
-      tab.unlisten();
-      tab.unlistenExit();
-      tab.resizeObserver?.disconnect();
-      tab.xterm.dispose();
+    terminalSessions.set([]);
+    createTerminalSignal.set(0);
+    for (const pane of panes) {
+      pane.unlisten();
+      pane.unlistenExit();
+      pane.resizeObserver?.disconnect();
+      pane.xterm.dispose();
     }
   });
 </script>
 
 <div class="terminal-panel">
-  <div class="terminal-tabs">
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="terminal-tab-list" onwheel={(e) => { e.preventDefault(); e.currentTarget.scrollLeft += e.deltaY; }}>
-      {#each tabs as tab}
-        <div
-          class="terminal-tab"
-          class:active={activeTabId === tab.id}
-          role="tab"
-          tabindex="0"
-          onclick={() => switchTab(tab.id)}
-          onkeydown={(e) => e.key === 'Enter' && switchTab(tab.id)}
-        >
-          <svg class="tab-icon" viewBox="0 0 16 16" fill="currentColor" width="11" height="11">
-            <path d="M2 3a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H2zm1 2l3 2.5L3 10m4 0h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span class="tab-name">{tab.name}</span>
-          <button class="tab-close" onclick={(e) => handleCloseClick(e, tab.id)} title="Kill terminal">×</button>
-        </div>
-      {/each}
-      <button class="new-tab-btn" onclick={createTab} title="New terminal">
-        <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-          <path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
+  <div class="terminal-header">
+    <div class="terminal-title"><TerminalSquare size={13} /> <span>Terminal</span></div>
+    <div class="terminal-actions">
+      <button type="button" class="header-btn" onclick={() => enqueue(() => splitTerminal('right'))} title="Split right">
+        <Columns2 size={13} />
       </button>
+      <button type="button" class="header-btn" onclick={() => enqueue(() => splitTerminal('bottom'))} title="Split below">
+        <PanelBottom size={13} />
+      </button>
+      {#if panes.length > 1}
+        <button type="button" class="header-btn" onclick={() => enqueue(() => collapseToActivePane())} title="Close split panes">
+          <SplitSquareVertical size={13} />
+        </button>
+      {/if}
     </div>
   </div>
-  <div class="terminal-content" bind:this={terminalContainer}>
-    {#if tabs.length === 0}
-      <div class="terminal-placeholder">click + to start a terminal session</div>
+
+  <div class="terminal-content" class:split-right={splitDirection === 'right'} class:split-bottom={splitDirection === 'bottom'} bind:this={terminalRoot}>
+    {#if panes.length === 0}
+      <div class="terminal-placeholder">Open a terminal to start a session.</div>
+    {:else}
+      {#each panes as pane (pane.id)}
+        <div
+          class="terminal-pane"
+          class:active={activePaneId === pane.id}
+          role="button"
+          tabindex="0"
+          onclick={() => focusPane(pane.id)}
+          onkeydown={(e) => e.key === 'Enter' && focusPane(pane.id)}
+        >
+          <div class="pane-header">
+            <span class="pane-title">{pane.name}</span>
+            {#if panes.length > 1}
+              <button
+                type="button"
+                class="pane-close"
+                title="Close pane"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  enqueue(() => closePane(pane.id));
+                }}
+              >×</button>
+            {/if}
+          </div>
+          <div class="pane-body" data-pane-terminal={pane.id}></div>
+        </div>
+      {/each}
     {/if}
   </div>
 </div>
@@ -328,127 +415,115 @@
   .terminal-panel {
     display: flex;
     flex-direction: column;
-    flex: 1;
-    overflow: hidden;
+    height: 100%;
+    background: var(--bg-tertiary);
   }
 
-  .terminal-tabs {
+  .terminal-header {
     display: flex;
     align-items: center;
-    background: var(--bg-secondary);
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
     border-bottom: 1px solid var(--border);
-    height: 30px;
+    background: var(--bg-secondary);
     flex-shrink: 0;
-    padding: 0 4px;
-    gap: 2px;
   }
 
-  .terminal-tab-list {
-    display: flex;
+  .terminal-title {
+    display: inline-flex;
     align-items: center;
-    overflow-x: auto;
-    gap: 1px;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .terminal-tab-list::-webkit-scrollbar {
-    height: 3px;
-  }
-
-  .terminal-tab-list::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .terminal-tab-list::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-  }
-
-  .terminal-tab {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    font-size: 11px;
-    color: var(--text-muted);
-    border-radius: 4px;
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-    transition: all 0.1s;
-  }
-
-  .terminal-tab:hover {
-    background: var(--bg-surface);
+    gap: 6px;
+    font-size: 12px;
     color: var(--text-secondary);
   }
 
-  .terminal-tab.active {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-  }
-
-  .tab-icon {
-    flex-shrink: 0;
-    opacity: 0.7;
-  }
-
-  .terminal-tab.active .tab-icon {
-    opacity: 1;
-    color: var(--accent);
-  }
-
-  .tab-name {
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .tab-close {
-    font-size: 14px;
-    line-height: 1;
-    color: var(--text-muted);
-    padding: 0 2px;
-    border-radius: 3px;
-    opacity: 0;
-    transition: opacity 0.1s;
-  }
-
-  .terminal-tab:hover .tab-close {
-    opacity: 1;
-  }
-
-  .tab-close:hover {
-    background: var(--bg-surface);
-    color: var(--error);
-  }
-
-  .new-tab-btn {
+  .terminal-actions {
     display: flex;
+    gap: 4px;
+  }
+
+  .header-btn,
+  .pane-close {
+    display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 24px;
     height: 24px;
     border-radius: 4px;
     color: var(--text-muted);
-    flex-shrink: 0;
-    transition: all 0.1s;
   }
 
-  .new-tab-btn:hover {
+  .header-btn:hover,
+  .pane-close:hover {
     background: var(--bg-surface);
     color: var(--text-primary);
   }
 
   .terminal-content {
     flex: 1;
-    padding: 4px;
-    overflow: hidden;
-    position: relative;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    gap: 6px;
+    padding: 6px;
   }
 
-  .terminal-content :global(.xterm) {
+  .terminal-content.split-right {
+    flex-direction: row;
+  }
+
+  .terminal-content.split-bottom {
+    flex-direction: column;
+  }
+
+  .terminal-pane {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--bg-primary);
+  }
+
+  .terminal-pane.active {
+    border-color: var(--accent);
+  }
+
+  .pane-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 28px;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+    flex-shrink: 0;
+  }
+
+  .pane-title {
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pane-body {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 4px;
+    overflow: hidden;
+  }
+
+  .pane-body :global(.xterm),
+  .pane-body :global(.xterm-viewport),
+  .pane-body :global(.xterm-screen) {
     height: 100%;
   }
 
@@ -456,6 +531,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    width: 100%;
     height: 100%;
     color: var(--text-muted);
     font-size: 13px;

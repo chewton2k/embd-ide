@@ -23,7 +23,16 @@ export const activeFileModified = derived(
   }
 );
 
-const MAX_TABS = 9;
+// Session limits (persisted)
+export const maxRecentProjects = writable<number>(
+  parseInt(localStorage.getItem('embd-max-recent-projects') || '3', 10)
+);
+export const maxTabs = writable<number>(
+  parseInt(localStorage.getItem('embd-max-tabs') || '9', 10)
+);
+
+maxRecentProjects.subscribe(v => localStorage.setItem('embd-max-recent-projects', String(v)));
+maxTabs.subscribe(v => localStorage.setItem('embd-max-tabs', String(v)));
 
 export function addFile(path: string, name: string) {
   openFiles.update(files => {
@@ -40,8 +49,9 @@ export function addFile(path: string, name: string) {
       pinned: false,
       version: 0
     }];
+    const limit = get(maxTabs);
     // Drop the oldest unmodified tab when over the limit
-    while (updated.length > MAX_TABS) {
+    while (updated.length > limit) {
       const oldest = updated.find(
         f => !f.pinned && !f.modified && f.path !== path
       );
@@ -100,7 +110,7 @@ export const unpinnedFiles = derived(openFiles, files =>
 export function closeFile(path: string) {
   openFiles.update(files => {
     const file = files.find(f => f.path === path);
-    if (file?.pinned) return files; // 🚫 don’t close pinned
+    if (file?.pinned) return files; // don’t close pinned
 
     const newFiles = files.filter(f => f.path !== path);
 
@@ -154,11 +164,33 @@ export interface ChatMessage {
 }
 
 export const chatMessages = writable<ChatMessage[]>([]);
+export type AiProvider = 'openrouter' | 'openai' | 'anthropic';
+
+// Legacy alias: OpenRouter key. Kept so older code paths keep working.
 export const apiKey = writable<string>(localStorage.getItem('embd-api-key') || '');
+export const openaiApiKey = writable<string>(localStorage.getItem('embd-openai-key') || '');
+export const anthropicApiKey = writable<string>(localStorage.getItem('embd-anthropic-key') || '');
+
+export const aiProvider = writable<AiProvider>(
+  (localStorage.getItem('embd-ai-provider') as AiProvider) || 'openrouter'
+);
+export const aiModel = writable<string>(localStorage.getItem('embd-ai-model') || 'openrouter/auto');
 
 apiKey.subscribe(key => {
   if (key) localStorage.setItem('embd-api-key', key);
   else localStorage.removeItem('embd-api-key');
+});
+openaiApiKey.subscribe(key => {
+  if (key) localStorage.setItem('embd-openai-key', key);
+  else localStorage.removeItem('embd-openai-key');
+});
+anthropicApiKey.subscribe(key => {
+  if (key) localStorage.setItem('embd-anthropic-key', key);
+  else localStorage.removeItem('embd-anthropic-key');
+});
+aiProvider.subscribe(p => localStorage.setItem('embd-ai-provider', p));
+aiModel.subscribe(model => {
+  if (model) localStorage.setItem('embd-ai-model', model);
 });
 
 export const projectRoot = writable<string | null>(null);
@@ -200,8 +232,61 @@ autosaveDelay.subscribe(v => localStorage.setItem('embd-autosave-delay', String(
 // Settings modal visibility
 export const showSettings = writable<boolean>(false);
 
+// Chat and Git panel visibility
+export const showChat = writable<boolean>(false);
+export const showGit = writable<boolean>(false);
+export const triggerSearchInFile = writable<number>(0);
+export const openFileSearchSignal = writable<number>(0);
+export const openPreviewSignal = writable<number>(0);
+
+// Breadcrumb navigation target — set to a path to scroll FileTree to that item
+export const fileTreeNavTarget = writable<string | null>(null);
+
+export function toggleChatPanel() {
+  const next = !get(showChat);
+  showChat.set(next);
+  if (next) showGit.set(false);
+}
+
+export function toggleGitPanel() {
+  const next = !get(showGit);
+  showGit.set(next);
+  if (next) showChat.set(false);
+}
+
 // Terminal panel visibility
-export const showTerminal = writable<boolean>(true);
+export const showTerminal = writable<boolean>(false);
+
+// Terminal layout is kept as 'tab' so terminal lives inside the editor tab strip.
+export const terminalLayout = writable<'tab'>('tab');
+
+// Terminal workspace tracking
+export const TERMINAL_SENTINEL_PREFIX = '__terminal__';
+export const TERMINAL_WORKSPACE_PATH = `${TERMINAL_SENTINEL_PREFIX}workspace`;
+
+export function isTerminalPath(path: string | null): boolean {
+  return !!path?.startsWith(TERMINAL_SENTINEL_PREFIX);
+}
+
+export function terminalPath(): string {
+  return TERMINAL_WORKSPACE_PATH;
+}
+
+export interface TerminalSessionInfo {
+  id: number;
+  name: string;
+}
+
+export const terminalSessions = writable<TerminalSessionInfo[]>([]);
+// Increment to signal Terminal component to ensure a terminal exists and focus it
+export const createTerminalSignal = writable<number>(0);
+// Set to a session id to signal Terminal component to kill that pane, or 'all' to close the workspace
+export const killTerminalSignal = writable<number | 'all' | null>(null);
+export const splitTerminalSignal = writable<{ count: number; direction: 'right' | 'bottom' }>({
+  count: 0,
+  direction: 'right'
+});
+export const collapseTerminalSplitsSignal = writable<number>(0);
 
 // Editor settings
 export const editorFontSize = writable<number>(
@@ -484,3 +569,37 @@ export const hiddenPatterns = writable<{ pattern: string; enabled: boolean }[]>(
 hiddenPatterns.subscribe(patterns => {
   localStorage.setItem('embd-hidden-patterns', JSON.stringify(patterns));
 });
+
+// --- Cross-window settings sync ---
+// When the Settings window (a separate webview) writes to localStorage,
+// the main window receives a `storage` event and we mirror the change
+// into the corresponding store. setItem with an unchanged value does
+// not refire the event, so this can't loop.
+const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
+  'embd-autosave':            { set: v => autosaveEnabled.set(v !== 'false') },
+  'embd-autosave-delay':      { set: v => autosaveDelay.set(parseInt(v || '1000', 10)) },
+  'embd-editor-font-size':    { set: v => editorFontSize.set(parseInt(v || '13', 10)) },
+  'embd-editor-tab-size':     { set: v => editorTabSize.set(parseInt(v || '2', 10)) },
+  'embd-editor-word-wrap':    { set: v => editorWordWrap.set(v === 'true') },
+  'embd-editor-line-numbers': { set: v => editorLineNumbers.set(v !== 'false') },
+  'embd-terminal-font-size':  { set: v => terminalFontSize.set(parseInt(v || '13', 10)) },
+  'embd-theme':               { set: v => currentThemeId.set(v || 'catppuccin-mocha') },
+  'embd-ui-font-size':        { set: v => uiFontSize.set(parseInt(v || '13', 10)) },
+  'embd-ui-density':          { set: v => uiDensity.set((v as 'compact' | 'comfortable') || 'comfortable') },
+  'embd-hidden-patterns':     { set: v => { try { hiddenPatterns.set(JSON.parse(v || '[]')); } catch { /* ignore */ } } },
+  'embd-max-recent-projects': { set: v => maxRecentProjects.set(parseInt(v || '3', 10)) },
+  'embd-max-tabs':            { set: v => maxTabs.set(parseInt(v || '9', 10)) },
+  'embd-api-key':             { set: v => apiKey.set(v || '') },
+  'embd-openai-key':          { set: v => openaiApiKey.set(v || '') },
+  'embd-anthropic-key':       { set: v => anthropicApiKey.set(v || '') },
+  'embd-ai-provider':         { set: v => aiProvider.set((v as AiProvider) || 'openrouter') },
+  'embd-ai-model':            { set: v => aiModel.set(v || 'openrouter/auto') },
+};
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (!e.key) return;
+    const entry = SETTINGS_SYNC[e.key];
+    if (entry) entry.set(e.newValue);
+  });
+}

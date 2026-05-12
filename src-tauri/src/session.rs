@@ -29,7 +29,6 @@ pub struct AppState {
 
 pub struct AppStateHandle(pub Mutex<AppState>);
 
-const MAX_RECENT: usize = 3;
 const MAX_SESSION_FILES: usize = 20;
 
 fn state_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -82,7 +81,10 @@ fn save_state_to_disk(app: &AppHandle, state: &AppState) -> Result<(), String> {
 #[tauri::command]
 pub fn get_recent_projects(app: AppHandle) -> Result<Vec<RecentProject>, String> {
     let handle = app.state::<AppStateHandle>();
-    let guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+    let guard = handle
+        .0
+        .lock()
+        .map_err(|e| format!("state lock failed: {e}"))?;
     Ok(guard.recent_projects.clone())
 }
 
@@ -91,6 +93,7 @@ pub fn save_session(
     app: AppHandle,
     project_path: String,
     mut session: SessionData,
+    max_recent: usize,
 ) -> Result<(), String> {
     validate_path(&project_path)?;
 
@@ -99,7 +102,10 @@ pub fn save_session(
 
     let state_snapshot = {
         let handle = app.state::<AppStateHandle>();
-        let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+        let mut guard = handle
+            .0
+            .lock()
+            .map_err(|e| format!("state lock failed: {e}"))?;
 
         let name = std::path::Path::new(&project_path)
             .file_name()
@@ -125,8 +131,8 @@ pub fn save_session(
             },
         );
 
-        // Truncate to max
-        guard.recent_projects.truncate(MAX_RECENT);
+        // Truncate to max (clamped to 0..=30)
+        guard.recent_projects.truncate(max_recent.min(30));
 
         guard.clone()
     }; // guard dropped here, mutex unlocked
@@ -140,7 +146,10 @@ pub fn remove_recent_project(app: AppHandle, project_path: String) -> Result<(),
 
     let state_snapshot = {
         let handle = app.state::<AppStateHandle>();
-        let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+        let mut guard = handle
+            .0
+            .lock()
+            .map_err(|e| format!("state lock failed: {e}"))?;
         guard.recent_projects.retain(|p| p.path != project_path);
         guard.clone()
     }; // guard dropped here, mutex unlocked

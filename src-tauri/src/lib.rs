@@ -9,7 +9,7 @@ use tauri::Manager;
 pub fn run() {
     let terminal_state = terminal::create_terminal_state();
     let project_root_state = fs_commands::create_project_root_state();
-    let api_key_state = ai::create_api_key_state();
+    let api_key_state = ai::create_provider_keys_state();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -64,6 +64,7 @@ pub fn run() {
             terminal::kill_terminal,
             terminal::resize_terminal,
             ai::set_api_key,
+            ai::set_provider_key,
             ai::ai_chat,
             session::get_recent_projects,
             session::save_session,
@@ -78,12 +79,12 @@ pub fn run() {
                 )?;
             }
             // Preload session state from disk
-            let loaded = session::load_state_from_disk(app.handle())
-                .unwrap_or_default();
+            let loaded = session::load_state_from_disk(app.handle()).unwrap_or_default();
             let handle = app.state::<session::AppStateHandle>();
-            let mut guard = handle.0.lock().map_err(|e| {
-                format!("failed to lock app state during setup: {e}")
-            })?;
+            let mut guard = handle
+                .0
+                .lock()
+                .map_err(|e| format!("failed to lock app state during setup: {e}"))?;
             *guard = loaded;
             Ok(())
         })
