@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentThemeId, getTheme, uiFontSize, uiDensity } from '../stores';
+  import { currentThemeId, getTheme, uiFontSize, uiDensity } from '../modules/stores';
   import GeneralSection   from './sections/GeneralSection.svelte';
   import ShortcutsSection from './sections/ShortcutsSection.svelte';
   import ModelsSection    from './sections/ModelsSection.svelte';

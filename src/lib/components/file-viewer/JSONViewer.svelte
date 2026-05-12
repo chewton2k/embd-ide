@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import Editor from './Editor.svelte';
+  import Editor from '../editor/Editor.svelte';
 
   let { filePath }: { filePath: string } = $props();
 

@@ -1,35 +1,50 @@
+use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
-pub type ProviderKeysState = Arc<Mutex<HashMap<String, String>>>;
+const SERVICE_NAME: &str = "leo-ide";
 
-pub fn create_provider_keys_state() -> ProviderKeysState {
-    Arc::new(Mutex::new(HashMap::new()))
+fn keyring_entry(provider: &str) -> Result<Entry, String> {
+    Entry::new(SERVICE_NAME, provider).map_err(|e| format!("Keyring error: {}", e))
 }
 
-/// Legacy single-key command — maps to the OpenRouter provider so older
-/// frontend code that calls `set_api_key` keeps working.
-#[tauri::command]
-pub fn set_api_key(state: tauri::State<'_, ProviderKeysState>, key: String) -> Result<(), String> {
-    set_provider_key(state, "openrouter".to_string(), key)
-}
-
-#[tauri::command]
-pub fn set_provider_key(
-    state: tauri::State<'_, ProviderKeysState>,
-    provider: String,
-    key: String,
-) -> Result<(), String> {
-    let mut keys = state.lock().map_err(|e| e.to_string())?;
-    let provider = provider.to_lowercase();
-    if key.is_empty() {
-        keys.remove(&provider);
-    } else {
-        keys.insert(provider, key);
+fn get_key(provider: &str) -> Result<Option<String>, String> {
+    let entry = keyring_entry(provider)?;
+    match entry.get_password() {
+        Ok(pw) => Ok(Some(pw)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("Failed to read key from keychain: {}", e)),
     }
-    Ok(())
+}
+
+fn set_key(provider: &str, key: &str) -> Result<(), String> {
+    let entry = keyring_entry(provider)?;
+    if key.is_empty() {
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(format!("Failed to delete key from keychain: {}", e)),
+        }
+    } else {
+        entry
+            .set_password(key)
+            .map_err(|e| format!("Failed to store key in keychain: {}", e))
+    }
+}
+
+/// Legacy single-key command — maps to the OpenRouter provider.
+#[tauri::command]
+pub fn set_api_key(key: String) -> Result<(), String> {
+    set_key("openrouter", &key)
+}
+
+#[tauri::command]
+pub fn set_provider_key(provider: String, key: String) -> Result<(), String> {
+    set_key(&provider.to_lowercase(), &key)
+}
+
+#[tauri::command]
+pub fn get_provider_key(provider: String) -> Result<String, String> {
+    Ok(get_key(&provider.to_lowercase())?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]
@@ -37,30 +52,22 @@ pub struct AiRequest {
     pub prompt: String,
     pub context: Option<String>,
     pub model: Option<String>,
-    /// "openrouter" (default), "openai", or "anthropic".
     pub provider: Option<String>,
 }
 
-const SYSTEM_PROMPT: &str = "You are an AI coding assistant embedded in a lightweight IDE called embd. \
+const SYSTEM_PROMPT: &str = "You are an AI coding assistant embedded in a lightweight IDE called leo. \
     Help the user with their code: explain, debug, refactor, or write new code. \
     Keep responses concise and code-focused.";
 
 #[tauri::command]
-pub async fn ai_chat(
-    state: tauri::State<'_, ProviderKeysState>,
-    request: AiRequest,
-) -> Result<String, String> {
+pub async fn ai_chat(request: AiRequest) -> Result<String, String> {
     let provider = request
         .provider
         .clone()
         .unwrap_or_else(|| "openrouter".to_string())
         .to_lowercase();
 
-    let api_key = {
-        let keys = state.lock().map_err(|e| e.to_string())?;
-        keys.get(&provider).cloned()
-    };
-    let api_key = api_key.ok_or_else(|| {
+    let api_key = get_key(&provider)?.ok_or_else(|| {
         format!(
             "No API key configured for {}. Set it in Settings → Models.",
             display_provider(&provider)
@@ -76,9 +83,7 @@ pub async fn ai_chat(
 
     match provider.as_str() {
         "openrouter" => {
-            let model = request
-                .model
-                .unwrap_or_else(|| "openrouter/auto".to_string());
+            let model = request.model.unwrap_or_else(|| "openrouter/auto".to_string());
             call_openai_compatible(
                 "https://openrouter.ai/api/v1/chat/completions",
                 &api_key,
@@ -100,9 +105,7 @@ pub async fn ai_chat(
             .await
         }
         "anthropic" => {
-            let model = request
-                .model
-                .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
+            let model = request.model.unwrap_or_else(|| "claude-sonnet-4-6".to_string());
             call_anthropic(&api_key, &model, &user_content).await
         }
         other => Err(format!("Unknown provider: {}", other)),
@@ -142,14 +145,8 @@ async fn call_openai_compatible(
         model,
         max_tokens: 4096,
         messages: vec![
-            OAMessage {
-                role: "system",
-                content: SYSTEM_PROMPT,
-            },
-            OAMessage {
-                role: "user",
-                content: user_content,
-            },
+            OAMessage { role: "system", content: SYSTEM_PROMPT },
+            OAMessage { role: "user", content: user_content },
         ],
     };
 
@@ -161,11 +158,7 @@ async fn call_openai_compatible(
     if let Some((k, v)) = extra_header {
         req = req.header(k, v);
     }
-    let response = req
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+    let response = req.json(&body).send().await.map_err(|e| format!("Request failed: {}", e))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -173,10 +166,7 @@ async fn call_openai_compatible(
         return Err(format!("API error {}: {}", status, body));
     }
 
-    let parsed: Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    let parsed: Value = response.json().await.map_err(|e| format!("Failed to parse response: {}", e))?;
 
     parsed
         .get("choices")
@@ -193,9 +183,7 @@ async fn call_anthropic(api_key: &str, model: &str, user_content: &str) -> Resul
         "model": model,
         "max_tokens": 4096,
         "system": SYSTEM_PROMPT,
-        "messages": [
-            { "role": "user", "content": user_content }
-        ]
+        "messages": [{ "role": "user", "content": user_content }]
     });
 
     let client = reqwest::Client::new();
@@ -215,10 +203,7 @@ async fn call_anthropic(api_key: &str, model: &str, user_content: &str) -> Resul
         return Err(format!("API error {}: {}", status, body));
     }
 
-    let parsed: Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    let parsed: Value = response.json().await.map_err(|e| format!("Failed to parse response: {}", e))?;
 
     parsed
         .get("content")

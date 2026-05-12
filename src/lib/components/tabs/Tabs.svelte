@@ -1,6 +1,6 @@
 <script lang="ts">
   import { TerminalSquare, Plus, FolderOpen, Eye, Pin, PinOff } from 'lucide-svelte';
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal, openPreviewSignal } from './stores';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal, openPreviewSignal } from '../../modules/stores';
 
   let tabsBar: HTMLDivElement | undefined = $state();
   let addMenuOpen = $state(false);

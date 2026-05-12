@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { HTMLButtonAttributes } from 'svelte/elements';
-  import { cn } from '../../../utils';
+  import { cn } from '../../../modules/utils';
   import { buttonVariants, type ButtonVariant } from './button';
 
   let {

@@ -11,7 +11,7 @@
     activeFilePath, openFiles, terminalSessions, createTerminalSignal,
     killTerminalSignal, splitTerminalSignal, collapseTerminalSplitsSignal,
     isTerminalPath, terminalPath
-  } from './stores';
+  } from '../../modules/stores';
   import { get } from 'svelte/store';
   import { SplitSquareVertical, PanelBottom, Columns2, TerminalSquare } from 'lucide-svelte';
   import '@xterm/xterm/css/xterm.css';

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { ConflictHunk, Resolution } from './mergeUtils';
-  import { resolveHunkLines } from './mergeUtils';
+  import type { ConflictHunk, Resolution } from '../../modules/mergeUtils';
+  import { resolveHunkLines } from '../../modules/mergeUtils';
 
   interface Props {
     rawContent: string;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, type AiProvider } from '../../stores';
+  import { apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, type AiProvider } from '../../modules/stores';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
@@ -130,7 +130,7 @@
 <div class="root">
   <SectionHeader
     title="Models"
-    description="Bring your own keys. They live in your local app data and are sent only to the matching provider."
+    description="Bring your own keys. They are stored securely in your OS keychain and sent only to the matching provider."
   />
 
   <!-- Default model -->

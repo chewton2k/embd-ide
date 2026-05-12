@@ -25,8 +25,8 @@
 </script>
 
 <div class="hero">
-  <img src="/embd.png" alt="embd" class="logo" />
-  <div class="title">embd</div>
+  <img src="/leo.png" alt="leo" class="logo" />
+  <div class="title">leo</div>
   <div class="subtitle">A minimal Tauri-based code IDE.</div>
   <div class="version">Version {appVersion}</div>
 </div>
@@ -34,7 +34,7 @@
 <div class="grid">
   <div class="cell"><span class="k">Platform</span><span class="v">{osPlatform} ({osArch})</span></div>
   <div class="cell"><span class="k">Tauri</span><span class="v">{tauriVersion}</span></div>
-  <div class="cell"><span class="k">Bundle ID</span><span class="v">com.embd.ide</span></div>
+  <div class="cell"><span class="k">Bundle ID</span><span class="v">com.leo.ide</span></div>
   <div class="cell"><span class="k">License</span><span class="v">Apache 2.0</span></div>
 </div>
 

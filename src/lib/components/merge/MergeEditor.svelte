@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { projectRoot, sharedGitStatus } from './stores';
-  import { parseConflicts, buildResolvedContent, type ConflictHunk, type Resolution } from './mergeUtils';
+  import { projectRoot, sharedGitStatus } from '../../modules/stores';
+  import { parseConflicts, buildResolvedContent, type ConflictHunk, type Resolution } from '../../modules/mergeUtils';
   import MergeConflictInline from './MergeConflictInline.svelte';
   import MergeConflictSideBySide from './MergeConflictSideBySide.svelte';
 

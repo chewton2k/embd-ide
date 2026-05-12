@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AiProvider } from '../../stores';
+  import type { AiProvider } from '../../modules/stores';
   import ProviderIcon from './ProviderIcon.svelte';
   import { open as openUrl } from '@tauri-apps/plugin-shell';
 

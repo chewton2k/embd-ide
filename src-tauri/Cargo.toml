@@ -1,5 +1,5 @@
 [package]
-name = "embd"
+name = "leo"
 version = "0.1.6"
 description = "A lightweight AI-powered IDE"
 authors = ["you"]
@@ -31,3 +31,4 @@ dirs = "5"
 base64 = "0.22"
 trash = "5"
 tauri-plugin-drag = "2.1.0"
+keyring = "3"

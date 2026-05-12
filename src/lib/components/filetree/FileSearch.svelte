@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { projectRoot, addFile } from './stores';
+  import { projectRoot, addFile } from '../../modules/stores';
 
   let { onClose }: { onClose: () => void } = $props();
 

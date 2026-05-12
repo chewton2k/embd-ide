@@ -1,7 +1,7 @@
 <script lang="ts">
-  import Tabs from './Tabs.svelte';
+  import Tabs from '../tabs/Tabs.svelte';
   import { PanelLeft, SplitSquareVertical, Search, MessageSquareText, GitBranch, CheckSquare, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
-  import { showTerminal, showSettings, autosaveEnabled, showChat, showGit, gitBranch, triggerSearchInFile, toggleChatPanel, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath } from './stores';
+  import { showTerminal, showSettings, autosaveEnabled, showChat, showGit, gitBranch, triggerSearchInFile, toggleChatPanel, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath } from '../../modules/stores';
 
   let splitMenuOpen = $state(false);
   let splitMenuPos = $state<{ top: number; left: number } | null>(null);

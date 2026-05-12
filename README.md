@@ -1,4 +1,4 @@
-# embd-IDE
+# leo-IDE
 
 A lightweight (~20MB) IDE that's written with a rust backend for speed and consistency. 
 
@@ -36,8 +36,8 @@ For other platforms, see [rustup.rs](https://rustup.rs)
 
 ### Setup
 ```bash
-  git clone https://github.com/chewton2k/embd-ide.git
-  cd embd-ide
+  git clone https://github.com/chewton2k/leo-ide.git
+  cd leo-ide
   npm install
 ```
 
@@ -62,7 +62,7 @@ To test the latest in-progress features, switch to the beta branch after cloning
 > **Warning:** Beta builds are unstable. Do not use them for important work.
 
 ### Themes
-Themes are configured in `src/lib/stores.ts` inside the `THEMES` export:
+Themes are configured in `src/lib/themes.ts` inside the `THEMES` export:
 ```ts
 export const THEMES: ThemePreset[] = [ ... ]
 ```

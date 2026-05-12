@@ -6,7 +6,7 @@
     autosaveEnabled, autosaveDelay,
     maxRecentProjects, maxTabs,
     hiddenPatterns,
-  } from '../../stores';
+  } from '../../modules/stores';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
   import SectionHeader from '../components/SectionHeader.svelte';
@@ -36,13 +36,13 @@
   ];
 
   const EXPORT_KEYS = [
-    'embd-autosave', 'embd-autosave-delay',
-    'embd-editor-font-size', 'embd-editor-tab-size', 'embd-editor-word-wrap', 'embd-editor-line-numbers',
-    'embd-terminal-font-size',
-    'embd-theme',
-    'embd-ui-font-size', 'embd-ui-density',
-    'embd-hidden-patterns',
-    'embd-max-recent-projects', 'embd-max-tabs',
+    'leo-autosave', 'leo-autosave-delay',
+    'leo-editor-font-size', 'leo-editor-tab-size', 'leo-editor-word-wrap', 'leo-editor-line-numbers',
+    'leo-terminal-font-size',
+    'leo-theme',
+    'leo-ui-font-size', 'leo-ui-density',
+    'leo-hidden-patterns',
+    'leo-max-recent-projects', 'leo-max-tabs',
   ];
 
   async function exportSettings() {
@@ -51,7 +51,7 @@
       const v = localStorage.getItem(k);
       if (v !== null) data[k] = v;
     }
-    const path = await save({ defaultPath: 'embd-settings.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const path = await save({ defaultPath: 'leo-settings.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
     if (!path) return;
     await writeTextFile(path, JSON.stringify(data, null, 2));
     exportImportStatus = 'Settings exported';
@@ -63,7 +63,7 @@
     if (!path) return;
     const data = JSON.parse(await readTextFile(path as string)) as Record<string, string>;
     for (const [k, v] of Object.entries(data)) {
-      if (!k.startsWith('embd-') || k === 'embd-api-key') continue;
+      if (!k.startsWith('leo-') || k === 'leo-api-key') continue;
       localStorage.setItem(k, v);
     }
     location.reload();

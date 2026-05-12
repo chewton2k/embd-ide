@@ -1,20 +1,20 @@
 <script lang="ts">
-  import FileTree from './lib/FileTree.svelte';
-  import Editor from './lib/Editor.svelte';
-  import FileViewer from './lib/FileViewer.svelte';
-  import JSONViewer from './lib/JSONViewer.svelte';
-  import MergeEditor from './lib/MergeEditor.svelte';
-  import Toolbar from './lib/Toolbar.svelte';
-  import Terminal from './lib/Terminal.svelte';
-  import ChatPanel from './lib/ChatPanel.svelte';
-  import GitPanel from './lib/GitPanel.svelte';
-  import FileSearch from './lib/FileSearch.svelte';
+  import FileTree from './lib/components/filetree/FileTree.svelte';
+  import Editor from './lib/components/editor/Editor.svelte';
+  import FileViewer from './lib/components/file-viewer/FileViewer.svelte';
+  import JSONViewer from './lib/components/file-viewer/JSONViewer.svelte';
+  import MergeEditor from './lib/components/merge/MergeEditor.svelte';
+  import Toolbar from './lib/components/toolbar/Toolbar.svelte';
+  import Terminal from './lib/components/shell/Terminal.svelte';
+  import ChatPanel from './lib/components/ai/ChatPanel.svelte';
+  import GitPanel from './lib/components/git/GitPanel.svelte';
+  import FileSearch from './lib/components/filetree/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/stores';
-  import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/modules/stores';
+  import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
 
@@ -171,15 +171,14 @@
   }
 
   onMount(async () => {
-    // Sync stored API keys to backend on startup
-    const providerKeys: { provider: string; storageKey: string }[] = [
-      { provider: 'openrouter', storageKey: 'embd-api-key' },
-      { provider: 'openai',     storageKey: 'embd-openai-key' },
-      { provider: 'anthropic',  storageKey: 'embd-anthropic-key' },
-    ];
-    for (const { provider, storageKey } of providerKeys) {
-      const key = localStorage.getItem(storageKey);
-      if (key) invoke('set_provider_key', { provider, key }).catch(() => {});
+    // Load API keys from OS keychain into stores
+    const providers = ['openrouter', 'openai', 'anthropic'] as const;
+    const storeMap = { openrouter: apiKey, openai: openaiApiKey, anthropic: anthropicApiKey } as const;
+    for (const provider of providers) {
+      try {
+        const key: string = await invoke('get_provider_key', { provider });
+        if (key) storeMap[provider].set(key);
+      } catch { /* keychain unavailable or empty */ }
     }
     // Load recent projects
     try {

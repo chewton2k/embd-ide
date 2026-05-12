@@ -1,6 +1,6 @@
 # Themes
 
-embd ships with 12 built-in themes. You can also add your own by editing the source.
+leo ships with 12 built-in themes. You can also add your own by editing the source.
 
 ## Adding a Custom Theme
 
