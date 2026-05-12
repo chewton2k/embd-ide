@@ -80,18 +80,19 @@
   .list { display: flex; flex-direction: column; }
   .row {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 8px 0;
+    padding: 10px 0;
   }
   .row + .row { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-  .label { font-size: 13px; color: var(--text-primary); }
+  .label { font-size: 13px; color: var(--text-primary); font-weight: 500; }
   kbd {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--text-primary);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 3px 8px;
-    font-weight: 500;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
   }
 </style>

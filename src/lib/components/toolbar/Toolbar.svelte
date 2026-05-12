@@ -111,7 +111,7 @@
       aria-label="Toggle AI chat"
       aria-pressed={$showChat}
     >
-      <MessageSquareText size={14} />
+      <MessageSquareText size={15} />
     </button>
 
     <button
@@ -123,7 +123,7 @@
       aria-label="Toggle source control"
       aria-pressed={$showGit}
     >
-      <GitBranch size={14} />
+      <GitBranch size={15} />
       {#if $gitBranch}
         <span class="branch-label">{$gitBranch}</span>
       {/if}
@@ -138,7 +138,7 @@
       aria-label="Settings"
       aria-pressed={$showSettings}
     >
-      <Settings2 size={14} />
+      <Settings2 size={15} />
     </button>
   </div>
 </div>
@@ -168,8 +168,8 @@
   .toolbar-right {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 0 10px;
+    gap: 2px;
+    padding: 0 12px;
     flex-shrink: 0;
     height: 100%;
   }
@@ -177,9 +177,10 @@
   .toolbar-btn {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 5px 8px;
-    border-radius: 4px;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 10px;
+    border-radius: 6px;
     color: var(--text-muted);
     font-size: 11px;
     flex-shrink: 0;
@@ -252,8 +253,8 @@
   .toolbar-search {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
+    gap: 8px;
+    padding: 5px 12px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 20px;
@@ -262,20 +263,23 @@
     cursor: pointer;
     white-space: nowrap;
     transition: border-color 0.1s, color 0.1s;
-    margin-right: 8px;
-    min-width: 140px;
+    margin-right: 10px;
+    min-width: 150px;
   }
   .toolbar-search:hover {
     border-color: var(--text-muted);
     color: var(--text-secondary);
   }
   .toolbar-search kbd {
-    font-size: 10px;
-    padding: 1px 4px;
-    border-radius: 3px;
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: 5px;
     background: var(--bg-surface);
-    color: var(--text-muted);
+    color: var(--text-primary);
     margin-left: auto;
+    font-family: var(--font-ui);
+    font-weight: 700;
+    letter-spacing: 0.5px;
   }
 
   .branch-label {

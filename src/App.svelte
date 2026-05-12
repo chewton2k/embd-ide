@@ -352,13 +352,9 @@
                   {/if}
                   <p>Open a file from the sidebar to start editing</p>
                   <div class="shortcuts">
-                    <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
-                    <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
-                    <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
-                    <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
-                    <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
-                    <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
-                    <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
+                    <div><kbd>⌘O</kbd> Search Files</div>
+                    <div><kbd>⌃`</kbd> Terminal</div>
+                    <div><kbd>⌘G</kbd> Source Control</div>
                   </div>
                 </div>
               {/if}
@@ -524,8 +520,9 @@
     margin-top: 20px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    font-size: 12px;
+    gap: 14px;
+    font-size: 14px;
+    font-weight: 500;
   }
 
   .recent-projects {
@@ -586,9 +583,13 @@
 
   .shortcuts kbd {
     background: var(--bg-surface);
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 11px;
+    padding: 4px 8px;
+    border-radius: 5px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    margin-right: 10px;
+    color: var(--text-primary);
   }
 
   /* Resize handles */
