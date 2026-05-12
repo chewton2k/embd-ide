@@ -81,7 +81,10 @@ fn save_state_to_disk(app: &AppHandle, state: &AppState) -> Result<(), String> {
 #[tauri::command]
 pub fn get_recent_projects(app: AppHandle) -> Result<Vec<RecentProject>, String> {
     let handle = app.state::<AppStateHandle>();
-    let guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+    let guard = handle
+        .0
+        .lock()
+        .map_err(|e| format!("state lock failed: {e}"))?;
     Ok(guard.recent_projects.clone())
 }
 
@@ -99,7 +102,10 @@ pub fn save_session(
 
     let state_snapshot = {
         let handle = app.state::<AppStateHandle>();
-        let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+        let mut guard = handle
+            .0
+            .lock()
+            .map_err(|e| format!("state lock failed: {e}"))?;
 
         let name = std::path::Path::new(&project_path)
             .file_name()
@@ -140,7 +146,10 @@ pub fn remove_recent_project(app: AppHandle, project_path: String) -> Result<(),
 
     let state_snapshot = {
         let handle = app.state::<AppStateHandle>();
-        let mut guard = handle.0.lock().map_err(|e| format!("state lock failed: {e}"))?;
+        let mut guard = handle
+            .0
+            .lock()
+            .map_err(|e| format!("state lock failed: {e}"))?;
         guard.recent_projects.retain(|p| p.path != project_path);
         guard.clone()
     }; // guard dropped here, mutex unlocked

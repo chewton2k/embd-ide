@@ -1,10 +1,10 @@
+use base64::Engine;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf, Component};
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use base64::Engine;
 
 pub type ProjectRootState = Arc<Mutex<Option<PathBuf>>>;
 
@@ -13,7 +13,10 @@ pub fn create_project_root_state() -> ProjectRootState {
 }
 
 #[tauri::command]
-pub fn set_project_root(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+pub fn set_project_root(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<(), String> {
     let canonical = fs::canonicalize(&path).map_err(|e| format!("Invalid path: {}", e))?;
     let mut root = state.lock().map_err(|e| e.to_string())?;
     *root = Some(canonical);
@@ -22,9 +25,14 @@ pub fn set_project_root(state: tauri::State<'_, ProjectRootState>, path: String)
 
 /// Validate that a path is within the current project root.
 /// Returns the canonicalized path on success.
-fn validate_path(path: &str, state: &tauri::State<'_, ProjectRootState>) -> Result<PathBuf, String> {
+fn validate_path(
+    path: &str,
+    state: &tauri::State<'_, ProjectRootState>,
+) -> Result<PathBuf, String> {
     let root = state.lock().map_err(|e| e.to_string())?;
-    let root = root.as_ref().ok_or_else(|| "No project is open".to_string())?;
+    let root = root
+        .as_ref()
+        .ok_or_else(|| "No project is open".to_string())?;
 
     let p = PathBuf::from(path);
     // For paths that don't exist yet (create_file/create_folder), walk up to find
@@ -51,7 +59,8 @@ fn validate_path(path: &str, state: &tauri::State<'_, ProjectRootState>) -> Resu
                 return Err("Invalid path: no existing ancestor found".to_string());
             }
         }
-        let mut canonical = fs::canonicalize(ancestor).map_err(|e| format!("Invalid path: {}", e))?;
+        let mut canonical =
+            fs::canonicalize(ancestor).map_err(|e| format!("Invalid path: {}", e))?;
         // Re-attach the non-existent trailing components
         for part in trailing_parts.iter().rev() {
             // Reject traversal components in trailing parts
@@ -72,9 +81,14 @@ fn validate_path(path: &str, state: &tauri::State<'_, ProjectRootState>) -> Resu
 }
 
 /// Validate that a repo_path is within (or equal to) the project root for git commands.
-fn validate_repo_path(repo_path: &str, state: &tauri::State<'_, ProjectRootState>) -> Result<PathBuf, String> {
+fn validate_repo_path(
+    repo_path: &str,
+    state: &tauri::State<'_, ProjectRootState>,
+) -> Result<PathBuf, String> {
     let root = state.lock().map_err(|e| e.to_string())?;
-    let root = root.as_ref().ok_or_else(|| "No project is open".to_string())?;
+    let root = root
+        .as_ref()
+        .ok_or_else(|| "No project is open".to_string())?;
     let canonical = fs::canonicalize(repo_path).map_err(|e| format!("Invalid repo path: {}", e))?;
     if !canonical.starts_with(root) {
         return Err("Access denied: repo path is outside the project directory".to_string());
@@ -91,7 +105,7 @@ fn validate_git_file_path(file_path: &str) -> Result<(), String> {
     if file_path.contains('\0') {
         return Err("Invalid file path: null bytes not allowed".to_string());
     }
-  
+
     let path = Path::new(file_path);
     for component in path.components() {
         match component {
@@ -119,13 +133,21 @@ pub struct FileEntry {
 }
 
 #[tauri::command]
-pub fn read_dir_tree(state: tauri::State<'_, ProjectRootState>, path: String, depth: Option<u32>) -> Result<Vec<FileEntry>, String> {
+pub fn read_dir_tree(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+    depth: Option<u32>,
+) -> Result<Vec<FileEntry>, String> {
     validate_path(&path, &state)?;
     let max_depth = depth.unwrap_or(1).min(50); // Cap depth to prevent abuse
     read_dir_recursive(&PathBuf::from(path), 0, max_depth)
 }
 
-fn read_dir_recursive(path: &PathBuf, current_depth: u32, max_depth: u32) -> Result<Vec<FileEntry>, String> {
+fn read_dir_recursive(
+    path: &PathBuf,
+    current_depth: u32,
+    max_depth: u32,
+) -> Result<Vec<FileEntry>, String> {
     let entries = fs::read_dir(path).map_err(|e| e.to_string())?;
     let mut result: Vec<FileEntry> = Vec::new();
 
@@ -165,26 +187,38 @@ fn read_dir_recursive(path: &PathBuf, current_depth: u32, max_depth: u32) -> Res
 
     // Sort: directories first, then alphabetical
     result.sort_by(|a, b| {
-        b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
     });
 
     Ok(result)
 }
 
 #[tauri::command]
-pub fn read_file_content(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<String, String> {
+pub fn read_file_content(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<String, String> {
     validate_path(&path, &state)?;
     fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))
 }
 
 #[tauri::command]
-pub fn write_file_content(state: tauri::State<'_, ProjectRootState>, path: String, content: String) -> Result<(), String> {
+pub fn write_file_content(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+    content: String,
+) -> Result<(), String> {
     validate_path(&path, &state)?;
     fs::write(&path, &content).map_err(|e| format!("Failed to write file: {}", e.kind()))
 }
 
 #[tauri::command]
-pub fn read_file_binary(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<String, String> {
+pub fn read_file_binary(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<String, String> {
     validate_path(&path, &state)?;
     let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
@@ -211,7 +245,10 @@ pub fn create_file(state: tauri::State<'_, ProjectRootState>, path: String) -> R
 }
 
 #[tauri::command]
-pub fn create_folder(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+pub fn create_folder(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<(), String> {
     validate_path(&path, &state)?;
     let p = PathBuf::from(&path);
     if p.exists() {
@@ -221,7 +258,10 @@ pub fn create_folder(state: tauri::State<'_, ProjectRootState>, path: String) ->
 }
 
 #[tauri::command]
-pub fn delete_entries(state: tauri::State<'_, ProjectRootState>, paths: Vec<String>) -> Result<(), String> {
+pub fn delete_entries(
+    state: tauri::State<'_, ProjectRootState>,
+    paths: Vec<String>,
+) -> Result<(), String> {
     for path in &paths {
         validate_path(path, &state)?;
     }
@@ -236,14 +276,22 @@ pub fn delete_entries(state: tauri::State<'_, ProjectRootState>, paths: Vec<Stri
 }
 
 #[tauri::command]
-pub fn rename_entry(state: tauri::State<'_, ProjectRootState>, old_path: String, new_path: String) -> Result<(), String> {
+pub fn rename_entry(
+    state: tauri::State<'_, ProjectRootState>,
+    old_path: String,
+    new_path: String,
+) -> Result<(), String> {
     validate_path(&old_path, &state)?;
     validate_path(&new_path, &state)?;
     fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename: {}", e))
 }
 
 #[tauri::command]
-pub fn move_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+pub fn move_entries(
+    state: tauri::State<'_, ProjectRootState>,
+    sources: Vec<String>,
+    dest_dir: String,
+) -> Result<(), String> {
     for src in &sources {
         validate_path(src, &state)?;
     }
@@ -258,7 +306,10 @@ pub fn move_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<Stri
         let src_path = fs::canonicalize(src).map_err(|e| format!("Invalid source: {}", e))?;
         // Prevent moving a folder into itself or its descendants
         if dest.starts_with(&src_path) {
-            return Err(format!("Cannot move '{}' into itself or a subdirectory", src));
+            return Err(format!(
+                "Cannot move '{}' into itself or a subdirectory",
+                src
+            ));
         }
         let file_name = src_path.file_name().ok_or("Invalid source file name")?;
         let dst_path = dest.join(file_name);
@@ -272,7 +323,11 @@ pub fn move_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<Stri
 }
 
 #[tauri::command]
-pub fn import_external_files(state: tauri::State<'_, ProjectRootState>, sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+pub fn import_external_files(
+    state: tauri::State<'_, ProjectRootState>,
+    sources: Vec<String>,
+    dest_dir: String,
+) -> Result<(), String> {
     // Only validate destination is within project root (sources are from OS drag-drop)
     validate_path(&dest_dir, &state)?;
     let dest = PathBuf::from(&dest_dir);
@@ -285,7 +340,8 @@ pub fn import_external_files(state: tauri::State<'_, ProjectRootState>, sources:
             return Err(format!("Source does not exist: {}", src));
         }
         // Block importing from sensitive directories
-        let canonical_src = fs::canonicalize(&src_path).map_err(|e| format!("Invalid source: {}", e))?;
+        let canonical_src =
+            fs::canonicalize(&src_path).map_err(|e| format!("Invalid source: {}", e))?;
         let blocked = [".ssh", ".gnupg", ".aws"];
         let is_sensitive = canonical_src.components().any(|c| {
             matches!(
@@ -302,8 +358,15 @@ pub fn import_external_files(state: tauri::State<'_, ProjectRootState>, sources:
         let mut target = dest.join(file_name);
         // Avoid overwriting — add " copy" suffix if needed
         if target.exists() {
-            let stem = target.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let stem = target
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let ext = target
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
             let mut i = 1;
             loop {
                 if i > 10_000 {
@@ -315,7 +378,9 @@ pub fn import_external_files(state: tauri::State<'_, ProjectRootState>, sources:
                     format!("{} copy {}{}", stem, i, ext)
                 };
                 target = dest.join(&name);
-                if !target.exists() { break; }
+                if !target.exists() {
+                    break;
+                }
                 i += 1;
             }
         }
@@ -323,15 +388,18 @@ pub fn import_external_files(state: tauri::State<'_, ProjectRootState>, sources:
             copy_dir_recursive(&src_path, &target)
                 .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
         } else {
-            fs::copy(&src_path, &target)
-                .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
+            fs::copy(&src_path, &target).map_err(|e| format!("Failed to copy {}: {}", src, e))?;
         }
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn paste_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<String>, dest_dir: String) -> Result<(), String> {
+pub fn paste_entries(
+    state: tauri::State<'_, ProjectRootState>,
+    sources: Vec<String>,
+    dest_dir: String,
+) -> Result<(), String> {
     for src in &sources {
         validate_path(src, &state)?;
     }
@@ -348,8 +416,15 @@ pub fn paste_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<Str
         let mut target = dest.join(file_name);
         // Avoid overwriting — add " copy" suffix if needed
         if target.exists() {
-            let stem = target.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let ext = target.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let stem = target
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let ext = target
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
             let mut i = 1;
             loop {
                 if i > 10_000 {
@@ -361,7 +436,9 @@ pub fn paste_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<Str
                     format!("{} copy {}{}", stem, i, ext)
                 };
                 target = dest.join(&name);
-                if !target.exists() { break; }
+                if !target.exists() {
+                    break;
+                }
                 i += 1;
             }
         }
@@ -369,23 +446,32 @@ pub fn paste_entries(state: tauri::State<'_, ProjectRootState>, sources: Vec<Str
             copy_dir_recursive(&src_path, &target)
                 .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
         } else {
-            fs::copy(&src_path, &target)
-                .map_err(|e| format!("Failed to copy {}: {}", src, e))?;
+            fs::copy(&src_path, &target).map_err(|e| format!("Failed to copy {}: {}", src, e))?;
         }
     }
     Ok(())
 }
 
 #[tauri::command]
-pub fn duplicate_entry(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+pub fn duplicate_entry(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<(), String> {
     validate_path(&path, &state)?;
     let src_path = PathBuf::from(&path);
     if !src_path.exists() {
         return Err("Path does not exist".to_string());
     }
     let parent = src_path.parent().ok_or("No parent directory")?;
-    let stem = src_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-    let ext = src_path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let stem = src_path
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let ext = src_path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     let is_dir = src_path.is_dir();
 
     let mut target;
@@ -406,7 +492,9 @@ pub fn duplicate_entry(state: tauri::State<'_, ProjectRootState>, path: String) 
             format!("{} copy {}{}", stem, i, ext)
         };
         target = parent.join(&name);
-        if !target.exists() { break; }
+        if !target.exists() {
+            break;
+        }
         i += 1;
     }
 
@@ -419,7 +507,10 @@ pub fn duplicate_entry(state: tauri::State<'_, ProjectRootState>, path: String) 
 }
 
 #[tauri::command]
-pub fn reveal_in_file_manager(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+pub fn reveal_in_file_manager(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<(), String> {
     validate_path(&path, &state)?;
     #[cfg(target_os = "macos")]
     {
@@ -481,7 +572,10 @@ fn copy_dir_recursive_inner(src: &Path, dst: &Path, depth: u32) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn list_all_files(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<Vec<String>, String> {
+pub fn list_all_files(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<Vec<String>, String> {
     validate_path(&path, &state)?;
     let root = PathBuf::from(&path);
     let mut files = Vec::new();
@@ -501,7 +595,9 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>, depth: u32) {
         Err(_) => return,
     };
     for entry in entries.flatten() {
-        if out.len() >= MAX_COLLECT_FILES { return; }
+        if out.len() >= MAX_COLLECT_FILES {
+            return;
+        }
         let name = entry.file_name().to_string_lossy().to_string();
         if name == ".git" || name == "node_modules" || name == "target" || name == ".DS_Store" {
             continue;
@@ -512,7 +608,9 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>, depth: u32) {
             Err(_) => continue,
         };
         // Skip symlinks to prevent cycles
-        if ft.is_symlink() { continue; }
+        if ft.is_symlink() {
+            continue;
+        }
         let path = entry.path();
         if ft.is_dir() {
             collect_files(root, &path, out, depth + 1);
@@ -528,7 +626,10 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>, depth: u32) {
 /// Status codes: "M" = modified (unstaged), "A" = staged new, "S" = staged modified,
 /// "D" = deleted, "?" = untracked, "R" = renamed
 #[tauri::command]
-pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<HashMap<String, String>, String> {
+pub fn get_git_status(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<HashMap<String, String>, String> {
     validate_repo_path(&path, &state)?;
     let output = Command::new("git")
         .args(["status", "--porcelain", "-uall", "-z"])
@@ -548,7 +649,10 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
     let mut i = 0;
     while i < entries.len() {
         let entry = entries[i];
-        if entry.len() < 4 { i += 1; continue; }
+        if entry.len() < 4 {
+            i += 1;
+            continue;
+        }
         let index_status = entry.as_bytes()[0];
         let wt_status = entry.as_bytes()[1];
         let file_path = &entry[3..];
@@ -566,15 +670,20 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
 
         // Determine status — staged takes priority display, but show modified if only worktree changed
         let status = match (index_status, wt_status) {
-            (b'?', b'?') => "U",  // untracked
-            (b'U', b'U') | (b'A', b'A') | (b'D', b'D') |
-            (b'A', b'U') | (b'U', b'A') | (b'D', b'U') | (b'U', b'D') => "C", // conflict
-            (b'A', _) => "A",     // staged new file
-            (b'R', _) => "A",     // renamed (treat as staged)
+            (b'?', b'?') => "U", // untracked
+            (b'U', b'U')
+            | (b'A', b'A')
+            | (b'D', b'D')
+            | (b'A', b'U')
+            | (b'U', b'A')
+            | (b'D', b'U')
+            | (b'U', b'D') => "C", // conflict
+            (b'A', _) => "A",    // staged new file
+            (b'R', _) => "A",    // renamed (treat as staged)
             (b'M', b' ') | (b'M', b'\0') => "S", // staged modified only
             (b'D', b' ') | (b'D', b'\0') => "S", // staged deletion
-            (_, b'D') => "D", // unstaged deletion
-            (_, b'M') => "M",     // modified in worktree (includes staged + further modified)
+            (_, b'D') => "D",    // unstaged deletion
+            (_, b'M') => "M",    // modified in worktree (includes staged + further modified)
             _ => "M",
         };
 
@@ -588,7 +697,10 @@ pub fn get_git_status(state: tauri::State<'_, ProjectRootState>, path: String) -
 /// Returns a map of abs_path -> status_code for files that differ between HEAD and the upstream
 /// tracking branch. Call after `git fetch` to see incoming remote changes.
 #[tauri::command]
-pub fn get_git_remote_status(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<HashMap<String, String>, String> {
+pub fn get_git_remote_status(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<HashMap<String, String>, String> {
     validate_repo_path(&path, &state)?;
 
     // Check if an upstream tracking branch exists
@@ -618,7 +730,9 @@ pub fn get_git_remote_status(state: tauri::State<'_, ProjectRootState>, path: St
 
     for line in stdout.lines() {
         let line = line.trim();
-        if line.is_empty() { continue; }
+        if line.is_empty() {
+            continue;
+        }
 
         let mut parts = line.splitn(2, '\t');
         let status_code = match parts.next() {
@@ -631,15 +745,21 @@ pub fn get_git_remote_status(state: tauri::State<'_, ProjectRootState>, path: St
         };
 
         // Normalize status: renames show as R### — treat as A
-        let code = if status_code.starts_with('R') { "A" }
-            else if status_code == "M" { "M" }
-            else if status_code == "A" { "A" }
-            else if status_code == "D" { "D" }
-            else { "M" };
+        let code = if status_code.starts_with('R') {
+            "A"
+        } else if status_code == "M" {
+            "M"
+        } else if status_code == "A" {
+            "A"
+        } else if status_code == "D" {
+            "D"
+        } else {
+            "M"
+        };
 
         // For renames, the path field is "old\tnew" — use the new path
         let actual_path = if status_code.starts_with('R') {
-            file_path.split('\t').last().unwrap_or(file_path)
+            file_path.split('\t').next_back().unwrap_or(file_path)
         } else {
             file_path
         };
@@ -653,11 +773,20 @@ pub fn get_git_remote_status(state: tauri::State<'_, ProjectRootState>, path: St
 }
 
 #[tauri::command]
-pub fn get_git_ignored(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<Vec<String>, String> {
+pub fn get_git_ignored(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<Vec<String>, String> {
     validate_repo_path(&path, &state)?;
     // List all files, then use git check-ignore to filter
     let output = Command::new("git")
-        .args(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"])
+        .args([
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+        ])
         .current_dir(&path)
         .output()
         .map_err(|e| e.to_string())?;
@@ -691,7 +820,13 @@ pub struct DiffLine {
 }
 
 #[tauri::command]
-pub fn git_diff(state: tauri::State<'_, ProjectRootState>, repo_path: String, file_path: String, staged: bool, is_untracked: Option<bool>) -> Result<Vec<DiffLine>, String> {
+pub fn git_diff(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    file_path: String,
+    staged: bool,
+    is_untracked: Option<bool>,
+) -> Result<Vec<DiffLine>, String> {
     validate_repo_path(&repo_path, &state)?;
     validate_git_file_path(&file_path)?;
 
@@ -747,8 +882,19 @@ fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
             if let Some(rest) = raw.strip_prefix("@@ -") {
                 let parts: Vec<&str> = rest.splitn(2, '+').collect();
                 if parts.len() == 2 {
-                    old_line = parts[0].split(',').next().unwrap_or("1").trim().parse().unwrap_or(1);
-                    new_line = parts[1].split(|c: char| c == ',' || c == ' ').next().unwrap_or("1").parse().unwrap_or(1);
+                    old_line = parts[0]
+                        .split(',')
+                        .next()
+                        .unwrap_or("1")
+                        .trim()
+                        .parse()
+                        .unwrap_or(1);
+                    new_line = parts[1]
+                        .split([',', ' '])
+                        .next()
+                        .unwrap_or("1")
+                        .parse()
+                        .unwrap_or(1);
                 }
             }
             lines.push(DiffLine {
@@ -792,7 +938,11 @@ fn parse_unified_diff(diff: &str) -> Vec<DiffLine> {
 }
 
 #[tauri::command]
-pub fn git_stage(state: tauri::State<'_, ProjectRootState>, repo_path: String, paths: Vec<String>) -> Result<(), String> {
+pub fn git_stage(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
     validate_repo_path(&repo_path, &state)?;
     for p in &paths {
         validate_git_file_path(p)?;
@@ -811,12 +961,20 @@ pub fn git_stage(state: tauri::State<'_, ProjectRootState>, repo_path: String, p
 }
 
 #[tauri::command]
-pub fn git_unstage(state: tauri::State<'_, ProjectRootState>, repo_path: String, paths: Vec<String>) -> Result<(), String> {
+pub fn git_unstage(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
     validate_repo_path(&repo_path, &state)?;
     for p in &paths {
         validate_git_file_path(p)?;
     }
-    let mut args = vec!["restore".to_string(), "--staged".to_string(), "--".to_string()];
+    let mut args = vec![
+        "restore".to_string(),
+        "--staged".to_string(),
+        "--".to_string(),
+    ];
     args.extend(paths);
     let output = Command::new("git")
         .args(&args)
@@ -830,14 +988,24 @@ pub fn git_unstage(state: tauri::State<'_, ProjectRootState>, repo_path: String,
 }
 
 #[tauri::command]
-pub fn git_discard(state: tauri::State<'_, ProjectRootState>, repo_path: String, paths: Vec<String>) -> Result<(), String> {
+pub fn git_discard(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    paths: Vec<String>,
+) -> Result<(), String> {
     validate_repo_path(&repo_path, &state)?;
     for p in &paths {
         validate_git_file_path(p)?;
     }
 
     // Scope status check to only the requested files (avoids full-repo scan)
-    let mut status_args = vec!["status".to_string(), "--porcelain".to_string(), "-z".to_string(), "-uall".to_string(), "--".to_string()];
+    let mut status_args = vec![
+        "status".to_string(),
+        "--porcelain".to_string(),
+        "-z".to_string(),
+        "-uall".to_string(),
+        "--".to_string(),
+    ];
     status_args.extend(paths.iter().cloned());
     let status_output = Command::new("git")
         .args(&status_args)
@@ -854,7 +1022,10 @@ pub fn git_discard(state: tauri::State<'_, ProjectRootState>, repo_path: String,
     let mut idx = 0;
     while idx < entries.len() {
         let entry = entries[idx];
-        if entry.len() < 4 { idx += 1; continue; }
+        if entry.len() < 4 {
+            idx += 1;
+            continue;
+        }
         let ix = entry.as_bytes()[0];
         let wt = entry.as_bytes()[1];
         let file = &entry[3..];
@@ -891,7 +1062,9 @@ pub fn git_discard(state: tauri::State<'_, ProjectRootState>, repo_path: String,
     // Remove untracked files (use trash for safety, validate paths)
     if !untracked.is_empty() {
         let root = state.lock().map_err(|e| e.to_string())?;
-        let root = root.as_ref().ok_or_else(|| "No project is open".to_string())?;
+        let root = root
+            .as_ref()
+            .ok_or_else(|| "No project is open".to_string())?;
         for file in &untracked {
             let full_path = PathBuf::from(&repo_path).join(file);
             // Canonicalize and validate against project root
@@ -901,9 +1074,13 @@ pub fn git_discard(state: tauri::State<'_, ProjectRootState>, repo_path: String,
                 continue; // File doesn't exist, skip
             };
             if !canonical.starts_with(root) {
-                return Err(format!("Access denied: '{}' is outside the project directory", file));
+                return Err(format!(
+                    "Access denied: '{}' is outside the project directory",
+                    file
+                ));
             }
-            trash::delete(&canonical).map_err(|e| format!("Failed to discard '{}': {}", file, e))?;
+            trash::delete(&canonical)
+                .map_err(|e| format!("Failed to discard '{}': {}", file, e))?;
         }
     }
 
@@ -911,7 +1088,11 @@ pub fn git_discard(state: tauri::State<'_, ProjectRootState>, repo_path: String,
 }
 
 #[tauri::command]
-pub fn git_commit(state: tauri::State<'_, ProjectRootState>, repo_path: String, message: String) -> Result<String, String> {
+pub fn git_commit(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    message: String,
+) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     let output = Command::new("git")
         .args(["commit", "-m", &message])
@@ -934,7 +1115,10 @@ pub fn git_commit(state: tauri::State<'_, ProjectRootState>, repo_path: String, 
 }
 
 #[tauri::command]
-pub fn git_push(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+pub fn git_push(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     let output = Command::new("git")
         .args(["push"])
@@ -950,7 +1134,9 @@ pub fn git_push(state: tauri::State<'_, ProjectRootState>, repo_path: String) ->
                 .current_dir(&repo_path)
                 .output()
                 .map_err(|e| e.to_string())?;
-            let branch_name = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+            let branch_name = String::from_utf8_lossy(&branch_output.stdout)
+                .trim()
+                .to_string();
             if branch_name.is_empty() {
                 return Err(stderr);
             }
@@ -970,7 +1156,10 @@ pub fn git_push(state: tauri::State<'_, ProjectRootState>, repo_path: String) ->
 }
 
 #[tauri::command]
-pub fn git_fetch(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+pub fn git_fetch(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     let output = Command::new("git")
         .args(["fetch"])
@@ -984,7 +1173,10 @@ pub fn git_fetch(state: tauri::State<'_, ProjectRootState>, repo_path: String) -
 }
 
 #[tauri::command]
-pub fn git_pull(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+pub fn git_pull(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     let output = Command::new("git")
         .args(["pull"])
@@ -1000,7 +1192,10 @@ pub fn git_pull(state: tauri::State<'_, ProjectRootState>, repo_path: String) ->
 }
 
 #[tauri::command]
-pub fn git_pull_rebase(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<String, String> {
+pub fn git_pull_rebase(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     let output = Command::new("git")
         .args(["pull", "--rebase"])
@@ -1016,7 +1211,12 @@ pub fn git_pull_rebase(state: tauri::State<'_, ProjectRootState>, repo_path: Str
 }
 
 #[tauri::command]
-pub fn git_delete_branch(state: tauri::State<'_, ProjectRootState>, repo_path: String, branch: String, force: bool) -> Result<String, String> {
+pub fn git_delete_branch(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    branch: String,
+    force: bool,
+) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     // Sanitize branch name
     if branch.contains("..") || branch.contains(' ') {
@@ -1028,7 +1228,9 @@ pub fn git_delete_branch(state: tauri::State<'_, ProjectRootState>, repo_path: S
         .current_dir(&repo_path)
         .output()
         .map_err(|e| e.to_string())?;
-    let current_branch = String::from_utf8_lossy(&head_output.stdout).trim().to_string();
+    let current_branch = String::from_utf8_lossy(&head_output.stdout)
+        .trim()
+        .to_string();
     if branch == current_branch {
         return Err("Cannot delete the currently checked-out branch".to_string());
     }
@@ -1052,7 +1254,10 @@ pub struct AheadBehind {
 }
 
 #[tauri::command]
-pub fn git_ahead_behind(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<AheadBehind, String> {
+pub fn git_ahead_behind(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+) -> Result<AheadBehind, String> {
     validate_repo_path(&repo_path, &state)?;
     // Get upstream name
     let upstream_out = Command::new("git")
@@ -1062,10 +1267,16 @@ pub fn git_ahead_behind(state: tauri::State<'_, ProjectRootState>, repo_path: St
         .map_err(|e| e.to_string())?;
 
     if !upstream_out.status.success() {
-        return Ok(AheadBehind { ahead: 0, behind: 0, upstream: None });
+        return Ok(AheadBehind {
+            ahead: 0,
+            behind: 0,
+            upstream: None,
+        });
     }
 
-    let upstream = String::from_utf8_lossy(&upstream_out.stdout).trim().to_string();
+    let upstream = String::from_utf8_lossy(&upstream_out.stdout)
+        .trim()
+        .to_string();
 
     let output = Command::new("git")
         .args(["rev-list", "--count", "--left-right", "HEAD...@{u}"])
@@ -1074,7 +1285,11 @@ pub fn git_ahead_behind(state: tauri::State<'_, ProjectRootState>, repo_path: St
         .map_err(|e| e.to_string())?;
 
     if !output.status.success() {
-        return Ok(AheadBehind { ahead: 0, behind: 0, upstream: Some(upstream) });
+        return Ok(AheadBehind {
+            ahead: 0,
+            behind: 0,
+            upstream: Some(upstream),
+        });
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1082,7 +1297,11 @@ pub fn git_ahead_behind(state: tauri::State<'_, ProjectRootState>, repo_path: St
     let ahead = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
     let behind = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
 
-    Ok(AheadBehind { ahead, behind, upstream: Some(upstream) })
+    Ok(AheadBehind {
+        ahead,
+        behind,
+        upstream: Some(upstream),
+    })
 }
 
 #[derive(Serialize, Clone)]
@@ -1093,7 +1312,11 @@ pub struct DiffRange {
 }
 
 #[tauri::command]
-pub fn git_diff_line_ranges(state: tauri::State<'_, ProjectRootState>, repo_path: String, file_path: String) -> Result<Vec<DiffRange>, String> {
+pub fn git_diff_line_ranges(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    file_path: String,
+) -> Result<Vec<DiffRange>, String> {
     validate_repo_path(&repo_path, &state)?;
     validate_git_file_path(&file_path)?;
     let output = Command::new("git")
@@ -1106,11 +1329,15 @@ pub fn git_diff_line_ranges(state: tauri::State<'_, ProjectRootState>, repo_path
     let mut ranges = Vec::new();
 
     for line in stdout.lines() {
-        if !line.starts_with("@@") { continue; }
+        if !line.starts_with("@@") {
+            continue;
+        }
         // Parse @@ -old[,count] +new[,count] @@
         if let Some(rest) = line.strip_prefix("@@ -") {
             let parts: Vec<&str> = rest.splitn(2, '+').collect();
-            if parts.len() != 2 { continue; }
+            if parts.len() != 2 {
+                continue;
+            }
 
             let old_part = parts[0].trim().trim_end_matches(',');
             let new_part = parts[1].split_whitespace().next().unwrap_or("0");
@@ -1162,13 +1389,23 @@ pub struct GitGraphRow {
 }
 
 #[tauri::command]
-pub fn git_log(state: tauri::State<'_, ProjectRootState>, repo_path: String, count: Option<u32>) -> Result<Vec<GitGraphRow>, String> {
+pub fn git_log(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    count: Option<u32>,
+) -> Result<Vec<GitGraphRow>, String> {
     validate_repo_path(&repo_path, &state)?;
     let limit = count.unwrap_or(50).min(500).to_string();
     // Use a unique separator unlikely to appear in commit messages
-    let format = format!("%H\x09%h\x09%an\x09%ar\x09%s");
+    let format = "%H\x09%h\x09%an\x09%ar\x09%s".to_string();
     let output = Command::new("git")
-        .args(["log", "--graph", &format!("--format=format:{}", format), "-n", &limit])
+        .args([
+            "log",
+            "--graph",
+            &format!("--format=format:{}", format),
+            "-n",
+            &limit,
+        ])
         .current_dir(&repo_path)
         .output()
         .map_err(|e| e.to_string())?;
@@ -1224,7 +1461,11 @@ pub fn git_log(state: tauri::State<'_, ProjectRootState>, repo_path: String, cou
 fn parse_hunk_range(s: &str) -> (u32, u32) {
     let parts: Vec<&str> = s.split(',').collect();
     let start: u32 = parts[0].parse().unwrap_or(0);
-    let count: u32 = if parts.len() > 1 { parts[1].parse().unwrap_or(1) } else { 1 };
+    let count: u32 = if parts.len() > 1 {
+        parts[1].parse().unwrap_or(1)
+    } else {
+        1
+    };
     (start, count)
 }
 
@@ -1236,7 +1477,10 @@ pub struct BranchInfo {
 }
 
 #[tauri::command]
-pub fn git_list_branches(state: tauri::State<'_, ProjectRootState>, repo_path: String) -> Result<Vec<BranchInfo>, String> {
+pub fn git_list_branches(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+) -> Result<Vec<BranchInfo>, String> {
     validate_repo_path(&repo_path, &state)?;
     let output = Command::new("git")
         .args(["branch", "-a", "--no-color"])
@@ -1253,20 +1497,32 @@ pub fn git_list_branches(state: tauri::State<'_, ProjectRootState>, repo_path: S
 
     for line in stdout.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() { continue; }
+        if trimmed.is_empty() {
+            continue;
+        }
         // Skip HEAD pointer lines like "remotes/origin/HEAD -> origin/main"
-        if trimmed.contains("->") { continue; }
+        if trimmed.contains("->") {
+            continue;
+        }
 
         let is_current = trimmed.starts_with('*');
-        let name = trimmed.trim_start_matches("* ").trim_start_matches("remotes/").to_string();
+        let name = trimmed
+            .trim_start_matches("* ")
+            .trim_start_matches("remotes/")
+            .to_string();
         let is_remote = line.contains("remotes/");
 
-        branches.push(BranchInfo { name, is_current, is_remote });
+        branches.push(BranchInfo {
+            name,
+            is_current,
+            is_remote,
+        });
     }
 
     // Sort: current first, then local, then remote
     branches.sort_by(|a, b| {
-        b.is_current.cmp(&a.is_current)
+        b.is_current
+            .cmp(&a.is_current)
             .then(a.is_remote.cmp(&b.is_remote))
             .then(a.name.cmp(&b.name))
     });
@@ -1275,7 +1531,12 @@ pub fn git_list_branches(state: tauri::State<'_, ProjectRootState>, repo_path: S
 }
 
 #[tauri::command]
-pub fn git_checkout_branch(state: tauri::State<'_, ProjectRootState>, repo_path: String, branch: String, is_remote: bool) -> Result<String, String> {
+pub fn git_checkout_branch(
+    state: tauri::State<'_, ProjectRootState>,
+    repo_path: String,
+    branch: String,
+    is_remote: bool,
+) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
     // Sanitize branch name
     if branch.contains("..") || branch.contains(' ') {
@@ -1309,10 +1570,15 @@ pub fn git_checkout_branch(state: tauri::State<'_, ProjectRootState>, repo_path:
 }
 
 #[tauri::command]
-pub fn get_git_branch(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<Option<String>, String> {
+pub fn get_git_branch(
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<Option<String>, String> {
     // Validate path is within project root
     let root = state.lock().map_err(|e| e.to_string())?;
-    let root = root.as_ref().ok_or_else(|| "No project is open".to_string())?;
+    let root = root
+        .as_ref()
+        .ok_or_else(|| "No project is open".to_string())?;
     let canonical = fs::canonicalize(&path).map_err(|e| format!("Invalid path: {}", e))?;
     if !canonical.starts_with(root) {
         return Err("Access denied: path is outside the project directory".to_string());

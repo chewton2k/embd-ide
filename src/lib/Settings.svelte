@@ -129,7 +129,7 @@
   <div class="modal">
     <div class="modal-header">
       <h2>Settings</h2>
-      <button class="close-btn" onclick={close}>
+      <button class="close-btn" onclick={close} aria-label="Close settings" title="Close settings">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="14" height="14">
           <path d="M4 4l8 8M12 4l-8 8" />
         </svg>
@@ -228,6 +228,8 @@
             class="toggle-btn"
             class:active={$editorWordWrap}
             onclick={() => editorWordWrap.update(v => !v)}
+            aria-label="Toggle word wrap"
+            title="Toggle word wrap"
           >
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </button>
@@ -238,6 +240,8 @@
             class="toggle-btn"
             class:active={$editorLineNumbers}
             onclick={() => editorLineNumbers.update(v => !v)}
+            aria-label="Toggle line numbers"
+            title="Toggle line numbers"
           >
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </button>
@@ -255,6 +259,8 @@
             class="toggle-btn"
             class:active={$autosaveEnabled}
             onclick={() => autosaveEnabled.update(v => !v)}
+            aria-label="Toggle autosave"
+            title="Toggle autosave"
           >
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </button>
@@ -572,28 +578,6 @@
   .pill.active {
     color: var(--bg-tertiary);
     background: var(--accent);
-  }
-
-  /* Color swatches */
-  .color-swatches {
-    display: flex;
-    gap: 6px;
-  }
-
-  .swatch {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    transition: border-color 0.15s, transform 0.1s;
-  }
-
-  .swatch:hover {
-    transform: scale(1.15);
-  }
-
-  .swatch.active {
-    border-color: var(--text-primary);
   }
 
   /* Pattern list (file visibility) */

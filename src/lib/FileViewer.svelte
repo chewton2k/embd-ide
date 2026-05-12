@@ -19,7 +19,7 @@
   let error = $state<string | null>(null);
   let zoom = $state(100);
   let fileSize = $state('');
-  let pdfContainer: HTMLDivElement;
+  let pdfContainer: HTMLDivElement | undefined = $state();
   let pdfPageCount = $state(0);
   let pdfDoc: pdfjsLib.PDFDocumentProxy | null = null;
 
@@ -286,9 +286,6 @@
     border-radius: 4px;
   }
 
-  .svg-container {
-  }
-
   .svg-container :global(svg) {
     max-width: 100%;
     max-height: 100%;
@@ -302,9 +299,6 @@
     height: 100%;
     overflow: auto;
     padding: 12px;
-  }
-
-  .pdf-scroll div {
   }
 
   .media-player {

@@ -219,6 +219,8 @@ export const showSettings = writable<boolean>(false);
 export const showChat = writable<boolean>(false);
 export const showGit = writable<boolean>(false);
 export const triggerSearchInFile = writable<number>(0);
+export const openFileSearchSignal = writable<number>(0);
+export const openPreviewSignal = writable<number>(0);
 
 // Breadcrumb navigation target — set to a path to scroll FileTree to that item
 export const fileTreeNavTarget = writable<string | null>(null);
@@ -236,7 +238,38 @@ export function toggleGitPanel() {
 }
 
 // Terminal panel visibility
-export const showTerminal = writable<boolean>(true);
+export const showTerminal = writable<boolean>(false);
+
+// Terminal layout is kept as 'tab' so terminal lives inside the editor tab strip.
+export const terminalLayout = writable<'tab'>('tab');
+
+// Terminal workspace tracking
+export const TERMINAL_SENTINEL_PREFIX = '__terminal__';
+export const TERMINAL_WORKSPACE_PATH = `${TERMINAL_SENTINEL_PREFIX}workspace`;
+
+export function isTerminalPath(path: string | null): boolean {
+  return !!path?.startsWith(TERMINAL_SENTINEL_PREFIX);
+}
+
+export function terminalPath(): string {
+  return TERMINAL_WORKSPACE_PATH;
+}
+
+export interface TerminalSessionInfo {
+  id: number;
+  name: string;
+}
+
+export const terminalSessions = writable<TerminalSessionInfo[]>([]);
+// Increment to signal Terminal component to ensure a terminal exists and focus it
+export const createTerminalSignal = writable<number>(0);
+// Set to a session id to signal Terminal component to kill that pane, or 'all' to close the workspace
+export const killTerminalSignal = writable<number | 'all' | null>(null);
+export const splitTerminalSignal = writable<{ count: number; direction: 'right' | 'bottom' }>({
+  count: 0,
+  direction: 'right'
+});
+export const collapseTerminalSplitsSignal = writable<number>(0);
 
 // Editor settings
 export const editorFontSize = writable<number>(

@@ -54,19 +54,23 @@ struct OpenRouterChoiceMessage {
 }
 
 #[tauri::command]
-pub async fn ai_chat(state: tauri::State<'_, ApiKeyState>, request: AiRequest) -> Result<String, String> {
+pub async fn ai_chat(
+    state: tauri::State<'_, ApiKeyState>,
+    request: AiRequest,
+) -> Result<String, String> {
     let api_key = {
         let stored = state.lock().map_err(|e| e.to_string())?;
         stored.clone()
     };
-    let api_key = api_key
-        .ok_or_else(|| "No API key configured. Set it in Settings.".to_string())?;
+    let api_key =
+        api_key.ok_or_else(|| "No API key configured. Set it in Settings.".to_string())?;
 
     if api_key.is_empty() {
         return Err("No API key configured. Set it in Settings.".to_string());
     }
 
-    let system_prompt = "You are an AI coding assistant embedded in a lightweight IDE called embd. \
+    let system_prompt =
+        "You are an AI coding assistant embedded in a lightweight IDE called embd. \
         Help the user with their code: explain, debug, refactor, or write new code. \
         Keep responses concise and code-focused.";
 
@@ -75,7 +79,8 @@ pub async fn ai_chat(state: tauri::State<'_, ApiKeyState>, request: AiRequest) -
         user_content = format!("Code context:\n```\n{}\n```\n\n{}", ctx, user_content);
     }
 
-    let model = request.model
+    let model = request
+        .model
         .unwrap_or_else(|| "openrouter/free".to_string());
 
     let body = OpenRouterRequest {

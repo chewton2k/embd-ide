@@ -78,12 +78,12 @@ pub fn run() {
                 )?;
             }
             // Preload session state from disk
-            let loaded = session::load_state_from_disk(app.handle())
-                .unwrap_or_default();
+            let loaded = session::load_state_from_disk(app.handle()).unwrap_or_default();
             let handle = app.state::<session::AppStateHandle>();
-            let mut guard = handle.0.lock().map_err(|e| {
-                format!("failed to lock app state during setup: {e}")
-            })?;
+            let mut guard = handle
+                .0
+                .lock()
+                .map_err(|e| format!("failed to lock app state during setup: {e}"))?;
             *guard = loaded;
             Ok(())
         })

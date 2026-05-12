@@ -1,6 +1,39 @@
 <script lang="ts">
   import Tabs from './Tabs.svelte';
-  import { showTerminal, showSettings, autosaveEnabled, showChat, showGit, gitBranch, triggerSearchInFile, toggleChatPanel, toggleGitPanel, activeFilePath } from './stores';
+  import { PanelLeft, SplitSquareVertical, Search, MessageSquareText, GitBranch, CheckSquare, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
+  import { showTerminal, showSettings, autosaveEnabled, showChat, showGit, gitBranch, triggerSearchInFile, toggleChatPanel, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath } from './stores';
+
+  let splitMenuOpen = $state(false);
+  let splitMenuPos = $state<{ top: number; left: number } | null>(null);
+  let splitBtnEl: HTMLDivElement | undefined = $state();
+
+  let splitActive = $derived($showTerminal && $terminalSessions.length > 1);
+
+  function handleSplitBtn() {
+    if (splitActive) {
+      collapseTerminalSplitsSignal.update(n => n + 1);
+      splitMenuOpen = false;
+    } else {
+      if (!splitMenuOpen) {
+        const rect = splitBtnEl?.getBoundingClientRect();
+        if (rect) splitMenuPos = { top: rect.bottom + 2, left: rect.left };
+      }
+      splitMenuOpen = !splitMenuOpen;
+    }
+  }
+
+  function activateSplit(dir: 'bottom' | 'right') {
+    $showTerminal = true;
+    $activeFilePath = terminalPath();
+    splitTerminalSignal.update(({ count }) => ({ count: count + 1, direction: dir === 'bottom' ? 'bottom' : 'right' }));
+    splitMenuOpen = false;
+  }
+
+  function handleDocumentClick(e: MouseEvent) {
+    if (splitMenuOpen && splitBtnEl && !splitBtnEl.contains(e.target as Node)) {
+      splitMenuOpen = false;
+    }
+  }
 
   let { sidebarVisible, onToggleSidebar }: {
     sidebarVisible: boolean;
@@ -20,6 +53,8 @@
   });
 </script>
 
+<svelte:document onclick={handleDocumentClick} />
+
 <div class="toolbar">
   <button
     type="button"
@@ -30,11 +65,39 @@
     aria-label="Toggle sidebar"
     aria-pressed={sidebarVisible}
   >
-    <svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14">
-      <rect x="1" y="1" width="4" height="14" rx="1" opacity={sidebarVisible ? 1 : 0.4}/>
-      <rect x="7" y="1" width="8" height="14" rx="1"/>
-    </svg>
+    {#if sidebarVisible}
+      <SidebarOpen size={14} />
+    {:else}
+      <SidebarClose size={14} />
+    {/if}
   </button>
+
+  <div class="split-btn-container" bind:this={splitBtnEl}>
+    <button
+      type="button"
+      class="toolbar-btn split-btn"
+      class:active={splitActive}
+      onclick={handleSplitBtn}
+      title={splitActive ? 'Close split' : 'Split terminal'}
+      aria-label={splitActive ? 'Close split' : 'Split terminal'}
+      aria-pressed={splitActive}
+    >
+      <SplitSquareVertical size={14} />
+    </button>
+
+    {#if splitMenuOpen && splitMenuPos}
+      <div class="split-menu" role="menu" style="top: {splitMenuPos.top}px; left: {splitMenuPos.left}px;">
+        <button class="split-menu-item" role="menuitem" onclick={() => activateSplit('right')}>
+          <SplitSquareVertical size={12} />
+          Split Right
+        </button>
+        <button class="split-menu-item" role="menuitem" onclick={() => activateSplit('bottom')}>
+          <PanelLeft size={12} style="transform: rotate(-90deg);" />
+          Split Below
+        </button>
+      </div>
+    {/if}
+  </div>
 
   <div class="tabs-wrapper">
     <Tabs />
@@ -42,31 +105,9 @@
 
   <div class="toolbar-right">
     <button type="button" class="toolbar-search-btn" class:disabled={!searchEnabled} onclick={triggerSearch} disabled={!searchEnabled} title="Search in file (Cmd/Ctrl+F)" aria-label="Search in file">
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="12" height="12">
-        <circle cx="7" cy="7" r="4.5"/>
-        <path d="M10.5 10.5L14 14"/>
-      </svg>
+      <Search size={13} />
       <span>Search in file</span>
     </button>
-
-    <div class="toolbar-divider"></div>
-
-    <button
-      type="button"
-      class="toolbar-btn"
-      class:active={$showTerminal}
-      onclick={() => showTerminal.update(v => !v)}
-      title="Toggle terminal (Ctrl+`)"
-      aria-label="Toggle terminal"
-      aria-pressed={$showTerminal}
-    >
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="13" height="13">
-        <rect x="1" y="2" width="14" height="12" rx="2"/>
-        <path d="M4 6.5l3 2-3 2"/>
-        <path d="M9 10.5h3"/>
-      </svg>
-    </button>
-
     <button
       type="button"
       class="toolbar-btn"
@@ -76,9 +117,7 @@
       aria-label="Toggle AI chat"
       aria-pressed={$showChat}
     >
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="13" height="13">
-        <path d="M14 5H2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h2v2l3-2h7a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z"/>
-      </svg>
+      <MessageSquareText size={14} />
     </button>
 
     <button
@@ -90,9 +129,7 @@
       aria-label="Toggle source control"
       aria-pressed={$showGit}
     >
-      <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-        <path d="M14.7 7.3L8.7 1.3a1 1 0 0 0-1.4 0L5.7 2.9l1.8 1.8A1.2 1.2 0 0 1 9 5.9v4.3a1.2 1.2 0 1 1-1-.1V6.1L6.3 7.8a1.2 1.2 0 1 1-.9-.5l1.8-1.8-1.8-1.8L1.3 7.3a1 1 0 0 0 0 1.4l6 6a1 1 0 0 0 1.4 0l6-6a1 1 0 0 0 0-1.4z"/>
-      </svg>
+      <GitBranch size={14} />
       {#if $gitBranch}
         <span class="branch-label">{$gitBranch}</span>
       {/if}
@@ -107,10 +144,7 @@
       aria-label="Toggle autosave"
       aria-pressed={$autosaveEnabled}
     >
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" width="13" height="13">
-        <path d="M13 5l-5 5-2-2"/>
-        <rect x="1" y="1" width="14" height="14" rx="2"/>
-      </svg>
+      <CheckSquare size={14} />
     </button>
 
     <button
@@ -122,9 +156,7 @@
       aria-label="Settings"
       aria-pressed={$showSettings}
     >
-      <svg viewBox="0 0 16 14" fill="currentColor" width="13" height="13">
-        <path d="M8 1l1.3.8.8-.5 1 1-.5.8.5 1H12.5v1.4l-.8.5.2 1 .9.5-.3 1.2-1 .1-.3 1 .6.8-.7 1.1-1-.3-.7.8.1 1L8 13l-1.3-.8-.8.5-1-1 .5-.8-.5-1H3.5V8.5l.8-.5-.2-1-.9-.5.3-1.2 1-.1.3-1-.6-.8.7-1.1 1 .3.7-.8L6.5 2 8 1zm0 4.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/>
-      </svg>
+      <Settings2 size={14} />
     </button>
   </div>
 </div>
@@ -161,14 +193,6 @@
     height: 100%;
   }
 
-  .toolbar-divider {
-    width: 1px;
-    height: 16px;
-    background: var(--border);
-    margin: 0 4px;
-    flex-shrink: 0;
-  }
-
   .toolbar-btn {
     display: flex;
     align-items: center;
@@ -193,9 +217,53 @@
   .sidebar-toggle {
     padding: 4px 8px;
     margin-left: 4px;
-    border-right: 1px solid var(--border);
     border-radius: 0;
     height: 100%;
+  }
+
+  .split-btn-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    padding: 0 2px;
+    border-right: 1px solid var(--border);
+    height: 100%;
+  }
+
+  .split-btn {
+    padding: 4px 6px;
+  }
+
+  .split-menu {
+    position: fixed;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 130px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .split-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .split-menu-item:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
   }
 
   .toolbar-search-btn {

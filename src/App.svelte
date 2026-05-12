@@ -11,10 +11,9 @@
   import Settings from './lib/Settings.svelte';
   import FileSearch from './lib/FileSearch.svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { getVersion } from '@tauri-apps/api/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget } from './lib/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -56,7 +55,6 @@
 
   let showFileSearch = $state(false);
   let sidebarWidth = $state(220);
-  let terminalHeight = $state(220);
   let sidebarVisible = $state(true);
 
   function toggleSidebar() {
@@ -67,13 +65,13 @@
   let gitWidth = $state(360);
 
   // --- Drag resize logic ---
-  let dragging = $state<'sidebar' | 'terminal' | 'chat' | 'git' | null>(null);
+  let dragging = $state<'sidebar' | 'chat' | 'git' | null>(null);
 
-  function startDrag(target: 'sidebar' | 'terminal' | 'chat' | 'git') {
+  function startDrag(target: 'sidebar' | 'chat' | 'git') {
     return (e: MouseEvent) => {
       e.preventDefault();
       dragging = target;
-      document.body.style.cursor = target === 'terminal' ? 'row-resize' : 'col-resize';
+      document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
       window.addEventListener('mousemove', onDrag);
       window.addEventListener('mouseup', stopDrag);
@@ -83,10 +81,6 @@
   function onDrag(e: MouseEvent) {
     if (dragging === 'sidebar') {
       sidebarWidth = Math.max(140, Math.min(500, e.clientX));
-    } else if (dragging === 'terminal') {
-      const sbHeight = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--density-statusbar-height') || '24');
-      const windowH = window.innerHeight - sbHeight;
-      terminalHeight = Math.max(100, Math.min(windowH - 150, windowH - e.clientY));
     } else if (dragging === 'chat') {
       chatWidth = Math.max(200, Math.min(600, window.innerWidth - e.clientX));
     } else if (dragging === 'git') {
@@ -103,10 +97,15 @@
   }
 
   function toggleTerminal() {
-    $showTerminal = !$showTerminal;
+    const sessions = get(terminalSessions);
+    if (!$showTerminal || sessions.length === 0) {
+      $showTerminal = true;
+      createTerminalSignal.update(n => n + 1);
+    } else if (!isTerminalPath($activeFilePath)) {
+      activeFilePath.set(terminalPath());
+    }
   }
 
-  let appVersion = $state('');
   let isClosing = false;
 
   let breadcrumbSegments = $derived.by(() => {
@@ -136,7 +135,6 @@
   }
 
   onMount(async () => {
-    getVersion().then(v => appVersion = v);
     // Sync stored API key to backend on startup
     const storedKey = localStorage.getItem('embd-api-key');
     if (storedKey) {
@@ -221,6 +219,12 @@
     }
   });
 
+  $effect(() => {
+    if ($openFileSearchSignal > 0) {
+      showFileSearch = true;
+    }
+  });
+
   function handleKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === '`') {
       e.preventDefault();
@@ -269,53 +273,59 @@
     <div class="resize-handle resize-handle-col" class:hidden={!sidebarVisible} onmousedown={startDrag('sidebar')}></div>
 
     <div class="main-area">
-      <div class="editor-area" style="flex: 1; min-height: 0;">
-        <div class="editor-container">
-          {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
-            <MergeEditor filePath={$activeFile} />
-          {:else if $activeFile && isJsonFile($activeFile)}
-            <JSONViewer filePath={$activeFile} />
-          {:else if $activeFile && isViewerFile($activeFile)}
-            <FileViewer filePath={$activeFile} />
-          {:else if $activeFile}
-            <Editor filePath={$activeFile} />
-          {:else}
-            <div class="welcome">
-              {#if recentProjects.length > 0}
-                <div class="recent-projects">
-                  <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
-                  {#each (showAllRecent ? recentProjects : recentProjects.slice(0, 3)) as project}
-                    <button class="recent-item" onclick={() => openRecentProject(project)}>
-                      <span class="recent-name">{project.name}</span>
-                      <span class="recent-path">{project.path}</span>
-                    </button>
-                  {/each}
-                  {#if recentProjects.length > 3}
-                    <button class="show-more-btn" onclick={() => showAllRecent = !showAllRecent}>
-                      {showAllRecent ? 'Show less' : `Show more (${recentProjects.length - 3})`}
-                    </button>
+      <div class="editor-col">
+        <div class="editor-area" style="flex: 1; min-height: 0;">
+          <div class="editor-container">
+            <!-- Terminal tab slot: always rendered (visibility:hidden when unfocused) to keep PTY sessions alive -->
+            {#if $showTerminal}
+              <div class="terminal-tab-slot" class:focused={$showTerminal && isTerminalPath($activeFilePath)}>
+                <Terminal />
+              </div>
+            {/if}
+            <!-- File editor — hidden while a terminal tab is focused -->
+            {#if !($showTerminal && isTerminalPath($activeFilePath))}
+              {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
+                <MergeEditor filePath={$activeFile} />
+              {:else if $activeFile && isJsonFile($activeFile)}
+                <JSONViewer filePath={$activeFile} />
+              {:else if $activeFile && isViewerFile($activeFile)}
+                <FileViewer filePath={$activeFile} />
+              {:else if $activeFile}
+                <Editor filePath={$activeFile} />
+              {:else}
+                <div class="welcome">
+                  {#if recentProjects.length > 0}
+                    <div class="recent-projects">
+                      <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
+                      {#each (showAllRecent ? recentProjects : recentProjects.slice(0, 3)) as project}
+                        <button class="recent-item" onclick={() => openRecentProject(project)}>
+                          <span class="recent-name">{project.name}</span>
+                          <span class="recent-path">{project.path}</span>
+                        </button>
+                      {/each}
+                      {#if recentProjects.length > 3}
+                        <button class="show-more-btn" onclick={() => showAllRecent = !showAllRecent}>
+                          {showAllRecent ? 'Show less' : `Show more (${recentProjects.length - 3})`}
+                        </button>
+                      {/if}
+                    </div>
                   {/if}
+                  <p>Open a file from the sidebar to start editing</p>
+                  <div class="shortcuts">
+                    <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
+                    <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
+                    <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
+                    <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
+                    <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
+                    <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
+                    <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
+                  </div>
                 </div>
               {/if}
-              <p>Open a file from the sidebar to start editing</p>
-              <div class="shortcuts">
-                <div><kbd>Ctrl</kbd> + <kbd>`</kbd> Terminal</div>
-                <div><kbd>Ctrl</kbd> + <kbd>L</kbd> AI Chat</div>
-                <div><kbd>Cmd</kbd> + <kbd>O</kbd> Search Files</div>
-                <div><kbd>Cmd</kbd> + <kbd>F</kbd> Search Within Files</div>
-                <div><kbd>Cmd</kbd> + <kbd>G</kbd> Source Control</div>
-                <div><kbd>Ctrl</kbd> + <kbd>Tab</kbd> Next Tab</div>
-                <div><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> Prev Tab</div>
-              </div>
-            </div>
-          {/if}
+            {/if}
+          </div>
         </div>
-      </div>
 
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="resize-handle resize-handle-row" class:hidden={!$showTerminal} onmousedown={startDrag('terminal')}></div>
-      <div class="bottom-panel" class:hidden={!$showTerminal} style="height: {terminalHeight}px;">
-        <Terminal />
       </div>
     </div>
 
@@ -381,7 +391,6 @@
           {/if}
         </span>
       {/if}
-      <span>embd v{appVersion}</span>
     </div>
   </div>
 </div>
@@ -415,6 +424,14 @@
   .main-area {
     flex: 1;
     display: flex;
+    flex-direction: row;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .editor-col {
+    flex: 1;
+    display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
@@ -429,6 +446,22 @@
   .editor-container {
     flex: 1;
     overflow: hidden;
+    position: relative;
+  }
+
+  .terminal-tab-slot {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    visibility: hidden;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .terminal-tab-slot.focused {
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .welcome {
@@ -439,14 +472,6 @@
     height: 100%;
     color: var(--text-muted);
     gap: 12px;
-  }
-
-  .welcome-logo {
-    height: 75px;
-    width: auto;
-    object-fit: contain;
-    opacity: 0.7;
-    border-radius: 18px;
   }
 
   .shortcuts {
@@ -536,19 +561,6 @@
   .resize-handle-col {
     width: 3px;
     cursor: col-resize;
-  }
-
-  .resize-handle-row {
-    height: 3px;
-    cursor: row-resize;
-    width: 100%;
-  }
-
-  .bottom-panel {
-    background: var(--bg-tertiary);
-    display: flex;
-    flex-direction: column;
-    flex-shrink: 0;
   }
 
   .hidden {

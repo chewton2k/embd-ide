@@ -32,7 +32,7 @@
   import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile } from './stores';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from './stores';
 
   let { filePath }: { filePath: string } = $props();
 
@@ -1071,6 +1071,16 @@
         input.setAttribute('autocorrect', 'off');
       });
     });
+  });
+
+  let lastPreviewTrigger = 0;
+  $effect(() => {
+    const trigger = $openPreviewSignal;
+    if (trigger === 0 || trigger === lastPreviewTrigger) return;
+    lastPreviewTrigger = trigger;
+    if (!view || $activeFilePath !== filePath || !isMarkdown) return;
+    showPreview = true;
+    updatePreview(view.state.doc.toString());
   });
 </script>
 
