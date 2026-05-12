@@ -2,7 +2,7 @@
   import {
     appearanceMode, editorTheme, uiFontSize, uiDensity,
     editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers,
-    terminalFontSize,
+    terminalFontSize, previewUrl,
     autosaveEnabled, autosaveDelay,
     maxRecentProjects, maxTabs,
     hiddenPatterns,
@@ -187,6 +187,7 @@
   </div>
 
   <!-- Terminal -->
+  <!-- Terminal -->
   <div class="card">
     <div class="card-head"><div class="card-title">Terminal</div></div>
     <div class="rows">
@@ -197,6 +198,20 @@
           <span class="step-val">{$terminalFontSize}px</span>
           <button class="step-btn" onclick={() => terminalFontSize.update(v => Math.min(24, v + 1))}>+</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Preview -->
+  <div class="card">
+    <div class="card-head"><div class="card-title">Preview</div></div>
+    <div class="rows">
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Default URL</div>
+          <div class="row-help">The URL loaded when you open a new Preview tab.</div>
+        </div>
+        <input class="text-input" type="text" value={$previewUrl} onchange={(e) => previewUrl.set((e.currentTarget as HTMLInputElement).value)} spellcheck="false" />
       </div>
     </div>
   </div>
@@ -451,6 +466,14 @@
     cursor: pointer; appearance: auto;
   }
   .select:focus { border-color: var(--accent); outline: none; }
+
+  .text-input {
+    width: 180px; padding: 6px 10px; border-radius: 6px;
+    background: var(--bg-secondary); color: var(--text-primary);
+    border: 1px solid var(--border); font-size: 12px;
+    font-family: var(--font-mono);
+  }
+  .text-input:focus { border-color: var(--accent); outline: none; }
 
   /* File visibility patterns */
   .pattern-list {

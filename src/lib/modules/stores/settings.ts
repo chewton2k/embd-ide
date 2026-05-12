@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { persistedNumber, persistedBool, persistedBoolDefaultTrue } from '../persisted';
+import { persistedString, persistedNumber, persistedBool, persistedBoolDefaultTrue } from '../persisted';
 
 export const autosaveEnabled = persistedBoolDefaultTrue('leo-autosave');
 export const autosaveDelay = persistedNumber('leo-autosave-delay', 1000);
@@ -8,6 +8,7 @@ export const editorTabSize = persistedNumber('leo-editor-tab-size', 2);
 export const editorWordWrap = persistedBool('leo-editor-word-wrap', false);
 export const editorLineNumbers = persistedBoolDefaultTrue('leo-editor-line-numbers');
 export const terminalFontSize = persistedNumber('leo-terminal-font-size', 13);
+export const previewUrl = persistedString('leo-preview-url', 'http://localhost:3000');
 
 const DEFAULT_HIDDEN_PATTERNS = ['node_modules', 'target', '.git', '.vscode', '.DS_Store'];
 

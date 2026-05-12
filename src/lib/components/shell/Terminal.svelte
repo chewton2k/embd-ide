@@ -439,8 +439,6 @@
     background: var(--bg-tertiary);
   }
 
-  .terminal-pane.active { }
-
   .pane-body {
     flex: 1;
     min-height: 0;

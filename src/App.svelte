@@ -401,10 +401,19 @@
 
   <div class="statusbar">
     <div class="statusbar-left">
-      {#if breadcrumbSegments.length > 0}
+      {#if isTerminalPath($activeFilePath) || isPreviewPath($activeFilePath)}
+        <span class="breadcrumb-plain">{isTerminalPath($activeFilePath) ? 'Terminal' : 'Preview'}</span>
+      {:else if breadcrumbSegments.length > 0}
         <div class="breadcrumb">
           {#each breadcrumbSegments as seg, i}
-            <span class="breadcrumb-seg" role="button" tabindex="0" onclick={() => navigateBreadcrumb(seg.path)} onkeydown={(e) => e.key === 'Enter' && navigateBreadcrumb(seg.path)}>{seg.name}</span>
+            <span class="breadcrumb-seg" role="button" tabindex="0" onclick={() => navigateBreadcrumb(seg.path)} onkeydown={(e) => e.key === 'Enter' && navigateBreadcrumb(seg.path)}>
+              {#if i === 0}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="flex-shrink:0;">
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
+                </svg>
+              {/if}
+              {seg.name}
+            </span>
             {#if i < breadcrumbSegments.length - 1}
               <span class="breadcrumb-sep">›</span>
             {/if}
@@ -708,15 +717,15 @@
   }
 
   .breadcrumb-seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     background: color-mix(in srgb, currentColor 18%, transparent);
     padding: 1px 8px;
     border-radius: 10px;
     white-space: nowrap;
     font-size: 11.5px;
     font-weight: 600;
-    max-width: 130px;
-    overflow: hidden;
-    text-overflow: ellipsis;
     color: inherit;
     cursor: pointer;
     transition: background 0.1s;
@@ -732,5 +741,11 @@
     font-weight: 600;
     flex-shrink: 0;
     color: inherit;
+  }
+
+  .breadcrumb-plain {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    padding: 0 8px;
   }
 </style>

@@ -287,7 +287,6 @@
     text-align: left; white-space: nowrap;
   }
   .tab-add-menu-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
-  .tab-add-menu-item.disabled { opacity: 0.45; cursor: default; }
 
   .ctx-backdrop { position: fixed; inset: 0; z-index: 999; }
   .ctx-menu {

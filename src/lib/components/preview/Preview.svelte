@@ -1,9 +1,12 @@
 <script lang="ts">
   import { RefreshCw, Globe, ExternalLink } from 'lucide-svelte';
   import { open as openExternal } from '@tauri-apps/plugin-shell';
+  import { previewUrl } from '../../modules/stores';
+  import { get } from 'svelte/store';
 
-  let url = $state('http://localhost:3000');
-  let inputValue = $state(url);
+  const defaultUrl = get(previewUrl) || 'http://localhost:3000';
+  let url = $state(defaultUrl);
+  let inputValue = $state(defaultUrl);
   let nonce = $state(0);
   let loading = $state(false);
 
