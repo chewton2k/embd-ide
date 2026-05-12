@@ -13,6 +13,7 @@ import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWo
 import { appearanceMode, editorTheme, uiFontSize, uiDensity } from './ui';
 import { maxRecentProjects, maxTabs } from './files';
 import { aiProvider, aiModel, type AiProvider } from './ai';
+import { terminalMode, terminalPanelHeight, type TerminalMode } from './shell';
 import type { AppearanceMode, EditorThemeId } from '../themes';
 
 const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
@@ -24,6 +25,8 @@ const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
   'leo-editor-line-numbers': { set: v => editorLineNumbers.set(v !== 'false') },
   'leo-editor-show-error-lens': { set: v => editorShowErrorLens.set(v !== 'false') },
   'leo-terminal-font-size':  { set: v => terminalFontSize.set(parseInt(v || '13', 10)) },
+  'leo-terminal-mode':       { set: v => terminalMode.set((v as TerminalMode) || 'tab') },
+  'leo-terminal-panel-height': { set: v => terminalPanelHeight.set(parseInt(v || '260', 10)) },
   'leo-appearance':          { set: v => appearanceMode.set((v as AppearanceMode) || 'system') },
   'leo-editor-theme':        { set: v => editorTheme.set((v as EditorThemeId) || 'one-dark') },
   'leo-ui-font-size':        { set: v => uiFontSize.set(parseInt(v || '13', 10)) },

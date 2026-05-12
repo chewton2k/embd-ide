@@ -1,12 +1,13 @@
 <script lang="ts">
   import FileTree from './lib/components/filetree/FileTree.svelte';
-  import { Sparkles } from 'lucide-svelte';
+  import { Sparkles, TerminalSquare } from 'lucide-svelte';
   import Editor from './lib/components/editor/Editor.svelte';
   import FileViewer from './lib/components/file-viewer/FileViewer.svelte';
   import JSONViewer from './lib/components/file-viewer/JSONViewer.svelte';
   import MergeEditor from './lib/components/merge/MergeEditor.svelte';
   import Toolbar from './lib/components/toolbar/Toolbar.svelte';
   import Terminal from './lib/components/shell/Terminal.svelte';
+  import TerminalPanel from './lib/components/shell/TerminalPanel.svelte';
   import FloatingChat from './lib/components/ai/FloatingChat.svelte';
   import GitPanel from './lib/components/git/GitPanel.svelte';
   import FileSearch from './lib/components/filetree/FileSearch.svelte';
@@ -16,7 +17,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from './lib/modules/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, killTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode } from './lib/modules/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -102,6 +103,24 @@
 
   function toggleTerminal() {
     const tabs = get(terminalTabs);
+    const mode = get(terminalMode);
+
+    // ── Bottom-panel mode ───────────────────────────────────────
+    // The editor always stays visible; the panel simply hides/shows.
+    // Ctrl+` ⇒ open the panel (creating the first tab if needed) or
+    // close it when already open.
+    if (mode === 'panel') {
+      if (!$showTerminal) {
+        $showTerminal = true;
+        // Create the first tab if none exists.
+        createTerminalSignal.update(s => ({ count: s.count + 1, forceNew: false }));
+      } else {
+        $showTerminal = false;
+      }
+      return;
+    }
+
+    // ── Legacy tab mode ─────────────────────────────────────────
     if (!$showTerminal || tabs.length === 0) {
       // Show the terminal; if nothing exists yet, ensure (non-force) will
       // create the first tab. If tabs exist but the panel is hidden, this
@@ -216,6 +235,15 @@
     try {
       recentProjects = await getRecentProjects();
     } catch { /* ignore */ }
+
+    // Handle restored sessions: if the user's saved `activeFilePath` is
+    // a terminal sentinel but their current layout is panel mode, move
+    // the editor off the terminal path once on startup. The mode-change
+    // $effect above handles live flips; this is the one-shot equivalent
+    // for cold start.
+    if (get(terminalMode) === 'panel' && isTerminalPath(get(activeFilePath))) {
+      activeFilePath.set(get(openFiles).at(-1)?.path ?? null);
+    }
     // Save session on window close — await the save before destroying
     const appWindow = getCurrentWindow();
     await appWindow.onCloseRequested(async (event) => {
@@ -265,6 +293,29 @@
   // Apply UI density
   $effect(() => {
     document.documentElement.dataset.density = $uiDensity;
+  });
+
+  // ── Terminal mode transitions ──────────────────────────────────
+  //
+  // When the user flips between 'tab' ↔ 'panel' we wipe the slate:
+  // kill every PTY, hide the terminal surface, and redirect the editor
+  // off any terminal sentinel. We deliberately do NOT auto-spawn a new
+  // terminal in the new container — doing so in tab mode would steal
+  // `activeFilePath` (Terminal.svelte routes it to the new terminal on
+  // create) and cover whatever file the user was editing. The user
+  // opens a terminal themselves via the status-bar button / Ctrl+` /
+  // the "+" menu when they actually want one.
+  let prevTerminalMode: 'tab' | 'panel' | null = null;
+  $effect(() => {
+    const mode = $terminalMode;
+    if (prevTerminalMode !== null && prevTerminalMode !== mode) {
+      killTerminalSignal.set({ kind: 'all' });
+      showTerminal.set(false);
+      if (isTerminalPath(get(activeFilePath))) {
+        activeFilePath.set(get(openFiles).at(-1)?.path ?? null);
+      }
+    }
+    prevTerminalMode = mode;
   });
 
   // Auto-save session when open files or active file changes
@@ -351,8 +402,14 @@
       <div class="editor-col">
         <div class="editor-area" style="flex: 1; min-height: 0;">
           <div class="editor-container">
-            <!-- Terminal tab slot: always rendered (visibility:hidden when unfocused) to keep PTY sessions alive -->
-            {#if $showTerminal}
+            <!--
+              Tab-mode terminal slot: visible only when the user has chosen
+              the legacy in-tab terminal layout. In panel mode the terminal
+              is rendered by <TerminalPanel /> below and this slot is absent.
+              Kept in the DOM (visibility:hidden when unfocused) so PTY
+              sessions survive tab switches within tab mode.
+            -->
+            {#if $terminalMode === 'tab' && $showTerminal}
               <div class="terminal-tab-slot" class:focused={$showTerminal && isTerminalPath($activeFilePath)}>
                 <Terminal />
               </div>
@@ -444,6 +501,16 @@
     {/if}
   </div>
 
+  {#if $terminalMode === 'panel'}
+    <!--
+      Bottom-docked terminal panel (VSCode / Xcode / Zed style). The panel
+      stays in the DOM while in panel mode so xterm + PTY state survives
+      visibility toggles; the component CSS-hides itself when
+      `$showTerminal` is false.
+    -->
+    <TerminalPanel />
+  {/if}
+
   <div class="statusbar">
     <div class="statusbar-left">
       {#if isTerminalPath($activeFilePath) || isPreviewPath($activeFilePath)}
@@ -469,6 +536,24 @@
       {/if}
     </div>
     <div class="statusbar-right">
+      {#if $terminalMode === 'panel'}
+        <!--
+          Bottom-right status-bar button to toggle the docked terminal
+          panel. Only rendered in panel mode; tab-mode users still have
+          Ctrl+` plus the top tab bar to open terminals.
+        -->
+        <button
+          class="statusbar-terminal-btn"
+          class:active={$showTerminal}
+          onclick={toggleTerminal}
+          title="Toggle terminal (Ctrl+`)"
+          aria-label="Toggle terminal panel"
+          aria-pressed={$showTerminal}
+        >
+          <TerminalSquare size={12} />
+          <span>Terminal</span>
+        </button>
+      {/if}
       {#if $activeFile}
         <span class="save-indicator" class:saved={!$activeFileModified} class:unsaved={$activeFileModified}>
           {#if $activeFileModified}
@@ -496,11 +581,52 @@
 <style>
   .ide-layout {
     display: grid;
-    grid-template-rows: var(--density-tabs-height, 36px) 1fr var(--density-statusbar-height, 24px);
+    /*
+     * Row layout:
+     *   1. toolbar / tab bar
+     *   2. main content (minmax(0, 1fr) — absorbs remaining height, but is
+     *      also allowed to shrink to zero so the terminal panel can take
+     *      as much vertical space as the user drags it to)
+     *   3. terminal panel (auto — collapses to 0 when not rendered)
+     *   4. statusbar
+     *
+     * `minmax(0, 1fr)` instead of plain `1fr` is critical: a bare `1fr`
+     * is really `minmax(auto, 1fr)`, which refuses to shrink below the
+     * main content's min-content height. When the terminal panel gets
+     * tall, that would push the statusbar out of the viewport (clipped
+     * by `overflow: hidden` on this container) — observed as the
+     * breadcrumbs row "moving" / disappearing.
+     *
+     * Each direct child is also pinned to an explicit `grid-row` below
+     * (see selectors). That prevents a very subtle failure mode where
+     * auto-flow would collapse positions when the panel row is unused:
+     *   - In tab mode there is no TerminalPanel child, only 3 elements.
+     *   - In panel mode with the panel hidden, its <section> has
+     *     `display: none`, so it's excluded from grid placement.
+     * Without explicit pinning, the statusbar would land in row 3
+     * (the `auto` panel row), leaving row 4 as a 24px empty gap and
+     * appearing "pushed up" off the bottom.
+     */
+    grid-template-rows:
+      [toolbar] var(--density-tabs-height, 36px)
+      [main]    minmax(0, 1fr)
+      [panel]   auto
+      [status]  var(--density-statusbar-height, 24px);
     height: 100vh;
     width: 100vw;
     overflow: hidden;
   }
+
+  /*
+   * Pin every direct grid child to its intended row by named grid lines.
+   * This makes the layout robust to conditional rendering and to any
+   * component hiding itself via `display: none`. The named lines above
+   * in `grid-template-rows` are what these selectors reference.
+   */
+  .ide-layout > :global(.toolbar)        { grid-row: toolbar; }
+  .ide-layout > .ide-top                 { grid-row: main; }
+  .ide-layout > :global(.terminal-panel) { grid-row: panel; }
+  .ide-layout > .statusbar               { grid-row: status; }
 
   .ide-top {
     display: flex;
@@ -775,6 +901,37 @@
   .statusbar-ai-btn.active {
     color: #000;
     background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  /*
+   * Bottom-right terminal toggle. Only rendered in panel mode; kept
+   * close to the AI button so the two "utility toggles" cluster visually
+   * on the right edge, matching VSCode/Zed conventions.
+   */
+  .statusbar-terminal-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 7px;
+    height: 20px;
+    border-radius: 4px;
+    color: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    background: transparent;
+    border: none;
+    transition: background 0.15s ease;
+  }
+  .statusbar-terminal-btn:hover {
+    background: color-mix(in srgb, currentColor 18%, transparent);
+  }
+  .statusbar-terminal-btn.active {
+    background: color-mix(in srgb, currentColor 26%, transparent);
+  }
+  .statusbar-terminal-btn:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: -2px;
   }
 
   .breadcrumb {

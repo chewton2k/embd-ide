@@ -1,250 +1,475 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { invoke } from '@tauri-apps/api/core';
+  import { fade, fly } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
+  import { Network, List as ListIcon, RefreshCw, Trash2 } from 'lucide-svelte';
   import SectionHeader from '../components/SectionHeader.svelte';
+  import KnowledgeGraphView from '../../components/knowledge/KnowledgeGraphView.svelte';
+  import KnowledgeListView from '../../components/knowledge/KnowledgeListView.svelte';
+  import ConversationViewer from '../../components/knowledge/ConversationViewer.svelte';
+  import {
+    listProjects, deleteProject, deleteAllKnowledge, formatBytes,
+    type ProjectInfo, type ConversationSummary,
+  } from '../../modules/knowledge';
 
-  let projectRoot = $state<string | null>(null);
-  let stats = $state<{ files: number; conversations: number; dbSize: string } | null>(null);
-  let files = $state<{ path: string; language: string; exports: string }[]>([]);
-  let conversations = $state<{ id: string; title: string; updated_at: number }[]>([]);
+  // ── State ────────────────────────────────────────────────────
+
+  let projects = $state<ProjectInfo[]>([]);
   let loading = $state(true);
+  let error = $state<string | null>(null);
+  let reloadKey = $state(0);
+  let view = $state<'list' | 'graph'>('list');
   let message = $state('');
+  let confirmAll = $state(false);
 
-  onMount(async () => {
-    // Get project root from localStorage (shared across windows)
-    projectRoot = localStorage.getItem('leo-project-root');
-    if (projectRoot) await loadData();
-    loading = false;
+  let selectedConv = $state<{
+    projectRoot: string;
+    id: string;
+    title: string;
+    updatedAt: number;
+  } | null>(null);
+
+  // ── Derived totals ───────────────────────────────────────────
+
+  const totals = $derived({
+    projects: projects.length,
+    conversations: projects.reduce((acc, p) => acc + p.conversation_count, 0),
+    files: projects.reduce((acc, p) => acc + p.file_count, 0),
+    bytes: projects.reduce((acc, p) => acc + p.db_size_bytes, 0),
   });
 
-  async function loadData() {
-    if (!projectRoot) return;
+  // ── Data loading ─────────────────────────────────────────────
+
+  onMount(() => { refresh(); });
+
+  async function refresh() {
+    loading = true;
+    error = null;
     try {
-      await invoke('knowledge_init', { projectRoot });
-
-      // Get conversations
-      conversations = await invoke('knowledge_list_conversations', { projectRoot });
-
-      // Get indexed files via context query (empty query returns all)
-      files = await invoke('knowledge_get_context', { projectRoot, query: '', currentFile: null });
-
-      // Estimate DB size
-      const fileCount = files.length;
-      const convCount = conversations.length;
-      const estimatedKb = Math.round((fileCount * 0.5 + convCount * 2));
-      stats = {
-        files: fileCount,
-        conversations: convCount,
-        dbSize: estimatedKb > 1024 ? `${(estimatedKb / 1024).toFixed(1)} MB` : `${estimatedKb} KB`,
-      };
+      projects = await listProjects();
+      reloadKey++;
     } catch (e) {
-      stats = { files: 0, conversations: 0, dbSize: '0 KB' };
+      error = String(e);
+    } finally {
+      loading = false;
     }
   }
 
-  async function clearConversations() {
-    if (!projectRoot) return;
-    try {
-      await invoke('knowledge_delete_conversations', { projectRoot });
-      conversations = [];
-      message = 'All conversations deleted.';
-      setTimeout(() => message = '', 3000);
-      await loadData();
-    } catch {}
+  function flashMessage(text: string) {
+    message = text;
+    setTimeout(() => { if (message === text) message = ''; }, 3000);
   }
 
-  async function reindexProject() {
-    if (!projectRoot) return;
-    message = 'Re-indexing...';
+  // ── Action handlers ──────────────────────────────────────────
+
+  function handleOpenConversation(projectRoot: string, conv: ConversationSummary) {
+    selectedConv = {
+      projectRoot,
+      id: conv.id,
+      title: conv.title,
+      updatedAt: conv.updated_at,
+    };
+  }
+
+  async function handleDeleteProject(projectRoot: string) {
     try {
-      await invoke('knowledge_index', { projectRoot });
-      message = 'Re-index complete.';
-      await loadData();
-      setTimeout(() => message = '', 3000);
-    } catch {
-      message = 'Re-index failed.';
+      await deleteProject(projectRoot);
+      flashMessage('Project knowledge deleted.');
+      await refresh();
+    } catch (e) {
+      error = `Delete failed: ${String(e)}`;
     }
+  }
+
+  async function handleDeleteAll() {
+    if (!confirmAll) {
+      confirmAll = true;
+      return;
+    }
+    confirmAll = false;
+    try {
+      await deleteAllKnowledge();
+      flashMessage('All knowledge deleted.');
+      await refresh();
+    } catch (e) {
+      error = `Delete all failed: ${String(e)}`;
+    }
+  }
+
+  function onConversationDeleted() {
+    selectedConv = null;
+    flashMessage('Chat deleted.');
+    refresh();
   }
 </script>
 
 <div class="root">
   <SectionHeader
-    title="Knowledge Graph"
-    description="View and manage the AI's knowledge about your project. Data is stored locally in SQLite."
+    title="Knowledge"
+    description="Every project's indexed code and saved AI conversations. Stored locally in SQLite under ~/.leo-ide/knowledge."
   />
 
-  {#if loading}
-    <div class="loading">Loading...</div>
-  {:else if !projectRoot}
-    <div class="empty">Open a project to see its knowledge graph.</div>
-  {:else}
-    <!-- Stats overview -->
-    {#if stats}
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value">{stats.files}</div>
-          <div class="stat-label">Indexed Files</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{stats.conversations}</div>
-          <div class="stat-label">Conversations</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{stats.dbSize}</div>
-          <div class="stat-label">Storage Used</div>
-        </div>
+  <!-- Totals — stagger-animated cards with hover lift. -->
+  <div class="totals" data-setting="knowledge-index">
+    {#each [
+      { value: totals.projects,       label: 'Projects' },
+      { value: totals.conversations,  label: 'Conversations' },
+      { value: totals.files,          label: 'Indexed files' },
+      { value: formatBytes(totals.bytes), label: 'Disk used' },
+    ] as stat, i (stat.label)}
+      <div
+        class="total-card"
+        in:fly={{ y: 8, duration: 260, delay: 40 + i * 55, easing: cubicOut }}
+      >
+        <div class="total-value">{stat.value}</div>
+        <div class="total-label">{stat.label}</div>
       </div>
-    {/if}
+    {/each}
+  </div>
 
-    <!-- Actions -->
-    <div class="section">
-      <div class="section-title">Actions</div>
-      <div class="actions">
-        <button class="btn" onclick={reindexProject} data-setting="knowledge-index">Re-index Project</button>
-        <button class="btn btn-danger" onclick={clearConversations} data-setting="knowledge-conversations">Clear All Conversations</button>
-      </div>
-      {#if message}
-        <div class="message">{message}</div>
+  <!-- Actions row -->
+  <div class="actions">
+    <!-- View toggle with a sliding accent indicator behind the active tab. -->
+    <div class="view-toggle" role="tablist" aria-label="Knowledge view">
+      <span class="view-indicator" class:on-graph={view === 'graph'} aria-hidden="true"></span>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === 'list'}
+        class="view-btn"
+        class:active={view === 'list'}
+        onclick={() => view = 'list'}
+        title="List view"
+      >
+        <ListIcon size={12} /> List
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={view === 'graph'}
+        class="view-btn"
+        class:active={view === 'graph'}
+        onclick={() => view = 'graph'}
+        title="Graph view"
+      >
+        <Network size={12} /> Graph
+      </button>
+    </div>
+
+    <button
+      type="button"
+      class="action-btn"
+      onclick={refresh}
+      disabled={loading}
+      title="Refresh"
+      aria-label="Refresh knowledge"
+    >
+      <RefreshCw size={12} class={loading ? 'spin' : ''} />
+      Refresh
+    </button>
+
+    <div class="danger-group" data-setting="knowledge-conversations">
+      {#if confirmAll}
+        <div class="confirm-row" in:fly={{ x: 6, duration: 160 }}>
+          <span class="confirm">Wipe every project's knowledge?</span>
+          <button class="action-btn danger" onclick={handleDeleteAll}>Confirm</button>
+          <button class="action-btn" onclick={() => confirmAll = false}>Cancel</button>
+        </div>
+      {:else}
+        <button
+          type="button"
+          class="action-btn danger-outline"
+          onclick={handleDeleteAll}
+          disabled={projects.length === 0}
+          title="Delete every project's knowledge DB"
+          in:fade={{ duration: 120 }}
+        >
+          <Trash2 size={12} /> Delete all
+        </button>
       {/if}
     </div>
+  </div>
 
-    <!-- Indexed files -->
-    <div class="section">
-      <div class="section-title">Indexed Files ({files.length})</div>
-      <div class="file-list">
-        {#each files as file}
-          <div class="file-item">
-            <span class="file-path">{file.path}</span>
-            <span class="file-lang">{file.language}</span>
-            {#if file.exports}
-              <span class="file-exports">{file.exports}</span>
-            {/if}
-          </div>
-        {/each}
-        {#if files.length === 0}
-          <div class="empty-list">No files indexed yet. Click "Re-index Project" to start.</div>
-        {/if}
-      </div>
-    </div>
-
-    <!-- Conversations -->
-    <div class="section">
-      <div class="section-title">Saved Conversations ({conversations.length})</div>
-      <div class="conv-list">
-        {#each conversations as conv}
-          <div class="conv-item">
-            <span class="conv-title">{conv.title}</span>
-            <span class="conv-date">{new Date(conv.updated_at * 1000).toLocaleDateString()}</span>
-          </div>
-        {/each}
-        {#if conversations.length === 0}
-          <div class="empty-list">No conversations saved yet.</div>
-        {/if}
-      </div>
+  <!-- Banners with smooth slide-in. -->
+  {#if message}
+    <div class="banner info" in:fly={{ y: -6, duration: 160 }} out:fade={{ duration: 120 }}>
+      {message}
     </div>
   {/if}
+  {#if error}
+    <div class="banner error" in:fly={{ y: -6, duration: 160 }} out:fade={{ duration: 120 }}>
+      {error}
+    </div>
+  {/if}
+
+  <!-- Main view with fade-through transition between list and graph. -->
+  <div class="view-stage">
+    {#if loading && projects.length === 0}
+      <div class="status" in:fade={{ duration: 140 }}>
+        <div class="skel-bar"></div>
+        <div class="skel-bar"></div>
+        <div class="skel-bar"></div>
+      </div>
+    {:else if view === 'list'}
+      {#key reloadKey + '-list'}
+        <div class="view-wrap" in:fade={{ duration: 180, delay: 40 }} out:fade={{ duration: 120 }}>
+          <KnowledgeListView
+            projects={projects}
+            onOpenConversation={handleOpenConversation}
+            onDeleteProject={handleDeleteProject}
+            onProjectChanged={refresh}
+          />
+        </div>
+      {/key}
+    {:else}
+      {#key reloadKey + '-graph'}
+        <div class="view-wrap" in:fade={{ duration: 180, delay: 40 }} out:fade={{ duration: 120 }}>
+          <KnowledgeGraphView
+            projects={projects}
+            onOpenConversation={handleOpenConversation}
+            onDeleteProject={handleDeleteProject}
+          />
+        </div>
+      {/key}
+    {/if}
+  </div>
 </div>
 
+{#if selectedConv}
+  <ConversationViewer
+    projectRoot={selectedConv.projectRoot}
+    conversationId={selectedConv.id}
+    conversationTitle={selectedConv.title}
+    updatedAt={selectedConv.updatedAt}
+    onClose={() => (selectedConv = null)}
+    onDeleted={onConversationDeleted}
+  />
+{/if}
+
 <style>
-  .root { display: flex; flex-direction: column; gap: 24px; }
+  .root { display: flex; flex-direction: column; gap: 16px; }
 
-  .loading, .empty {
-    color: var(--text-muted);
-    font-size: 13px;
-    padding: 20px 0;
-  }
-
-  .stats-grid {
+  /* ── Totals ──────────────────────────────────────────── */
+  .totals {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  @media (max-width: 640px) {
+    .totals { grid-template-columns: repeat(2, 1fr); }
   }
 
-  .stat-card {
-    background: var(--bg-tertiary);
+  .total-card {
+    position: relative;
+    background:
+      linear-gradient(135deg,
+        color-mix(in srgb, var(--accent) 5%, transparent),
+        transparent 65%),
+      var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-    text-align: center;
+    border-radius: 12px;
+    padding: 14px 16px;
+    overflow: hidden;
+    transition:
+      transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+      border-color 180ms ease,
+      box-shadow 180ms ease;
   }
+  .total-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(135deg,
+      color-mix(in srgb, var(--accent) 18%, transparent),
+      transparent 60%);
+    opacity: 0;
+    transition: opacity 200ms ease;
+    pointer-events: none;
+  }
+  .total-card:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .total-card:hover::before { opacity: 1; }
 
-  .stat-value {
+  .total-value {
     font-size: 22px;
     font-weight: 700;
     color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    position: relative;
   }
-
-  .stat-label {
-    font-size: 11px;
-    color: var(--text-muted);
+  .total-label {
     margin-top: 4px;
-  }
-
-  .section { display: flex; flex-direction: column; gap: 8px; }
-
-  .section-title {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 10.5px;
     color: var(--text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.3px;
+    letter-spacing: 0.4px;
+    position: relative;
   }
 
-  .actions { display: flex; gap: 8px; }
-
-  .btn {
-    padding: 7px 14px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-  }
-
-  .btn:hover { background: var(--border); }
-
-  .btn-danger {
-    color: var(--error, #f14c4c);
-    border-color: color-mix(in srgb, var(--error, #f14c4c) 30%, transparent);
-  }
-
-  .btn-danger:hover {
-    background: color-mix(in srgb, var(--error, #f14c4c) 10%, transparent);
-  }
-
-  .message {
-    font-size: 11px;
-    color: var(--accent);
-    padding: 4px 0;
-  }
-
-  .file-list, .conv-list {
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    max-height: 200px;
-    overflow-y: auto;
-  }
-
-  .file-item, .conv-item {
+  /* ── Actions row ─────────────────────────────────────── */
+  .actions {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    font-size: 12px;
+    flex-wrap: wrap;
   }
 
-  .file-item:last-child, .conv-item:last-child { border-bottom: none; }
+  /* View toggle with sliding indicator. */
+  .view-toggle {
+    position: relative;
+    display: inline-flex;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+  }
+  .view-indicator {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: calc(50% - 3px);
+    height: calc(100% - 6px);
+    background: var(--bg-surface);
+    border-radius: 5px;
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.18),
+      0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
+    transition: transform 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .view-indicator.on-graph { transform: translateX(100%); }
 
-  .file-path { flex: 1; color: var(--text-primary); font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file-lang { font-size: 10px; color: var(--text-muted); background: var(--bg-surface); padding: 1px 6px; border-radius: 4px; }
-  .file-exports { font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+  .view-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 14px;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: color 160ms ease;
+    z-index: 1;
+  }
+  .view-btn:hover { color: var(--text-primary); }
+  .view-btn.active { color: var(--text-primary); }
 
-  .conv-title { flex: 1; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .conv-date { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
+  /* Plain action buttons. */
+  .action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 11.5px;
+    font-weight: 500;
+    cursor: pointer;
+    transition:
+      background 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease,
+      transform 120ms ease;
+  }
+  .action-btn:hover:not(:disabled) {
+    background: var(--bg-surface);
+    transform: translateY(-1px);
+  }
+  .action-btn:active:not(:disabled) { transform: translateY(0); }
+  .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  .empty-list { padding: 16px; text-align: center; font-size: 11px; color: var(--text-muted); }
+  .action-btn.danger {
+    background: color-mix(in srgb, var(--error, #f14c4c) 20%, transparent);
+    border-color: color-mix(in srgb, var(--error, #f14c4c) 42%, transparent);
+    color: var(--error, #f14c4c);
+  }
+  .action-btn.danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--error, #f14c4c) 30%, transparent);
+  }
+  .action-btn.danger-outline:hover:not(:disabled) {
+    color: var(--error, #f14c4c);
+    border-color: color-mix(in srgb, var(--error, #f14c4c) 45%, var(--border));
+    background: color-mix(in srgb, var(--error, #f14c4c) 10%, transparent);
+  }
+
+  .danger-group { margin-left: auto; }
+  .confirm-row { display: inline-flex; align-items: center; gap: 6px; }
+  .confirm {
+    font-size: 11px;
+    color: var(--warning, #d79921);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  /* ── Banners ─────────────────────────────────────────── */
+  .banner {
+    padding: 9px 12px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    border: 1px solid transparent;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .banner.info {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+    color: var(--text-primary);
+  }
+  .banner.error {
+    background: color-mix(in srgb, var(--error, #f14c4c) 10%, transparent);
+    border-color: color-mix(in srgb, var(--error, #f14c4c) 40%, transparent);
+    color: var(--error, #f14c4c);
+  }
+
+  /* ── View stage (for fade-through) ───────────────────── */
+  .view-stage { position: relative; min-height: 120px; }
+  /* Layer both outgoing/incoming views on top of each other so the
+     crossfade doesn't cause layout shift. */
+  .view-stage > .view-wrap { width: 100%; }
+  .view-stage > .view-wrap:not(:last-child) { position: absolute; inset: 0; }
+
+  /* ── Loading skeleton ────────────────────────────────── */
+  .status {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 0;
+  }
+  .skel-bar {
+    height: 48px;
+    border-radius: 10px;
+    background: linear-gradient(90deg,
+      var(--bg-tertiary) 0%,
+      color-mix(in srgb, var(--bg-tertiary) 80%, var(--bg-surface)) 50%,
+      var(--bg-tertiary) 100%);
+    background-size: 220% 100%;
+    animation: skelShimmer 1.4s ease-in-out infinite;
+  }
+  .skel-bar:nth-child(2) { animation-delay: 0.1s; }
+  .skel-bar:nth-child(3) { animation-delay: 0.2s; }
+  @keyframes skelShimmer {
+    0%   { background-position: 120% 0; }
+    100% { background-position: -120% 0; }
+  }
+
+  :global(.spin) { animation: spin 0.8s linear infinite; }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .total-card:hover { transform: none; }
+    .action-btn:hover { transform: none; }
+    .skel-bar { animation: none; }
+    .view-indicator { transition: none; }
+  }
 </style>

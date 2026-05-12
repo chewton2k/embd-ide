@@ -38,6 +38,20 @@ pub struct ConversationSummary {
 }
 
 #[derive(Serialize, Clone)]
+pub struct ProjectInfo {
+    /// Filesystem path of the project root. "(unknown)" for DBs that predate
+    /// the project_meta migration (shouldn't happen for freshly-opened projects).
+    pub project_root: String,
+    /// First 16 hex chars of SHA-256(project_root) — matches the on-disk DB filename.
+    pub db_hash: String,
+    pub file_count: i64,
+    pub conversation_count: i64,
+    pub db_size_bytes: u64,
+    /// Latest of `conversations.updated_at` and `files.last_indexed`, 0 when empty.
+    pub last_updated: i64,
+}
+
+#[derive(Serialize, Clone)]
 pub struct IndexProgress {
     pub done: u32,
     pub total: u32,
@@ -45,11 +59,19 @@ pub struct IndexProgress {
 
 // ── DB Path ──
 
-fn db_path(project_root: &str) -> PathBuf {
-    let hash = format!("{:x}", Sha256::digest(project_root.as_bytes()));
+fn knowledge_dir() -> PathBuf {
     let dir = dirs::home_dir().unwrap_or_default().join(".leo-ide").join("knowledge");
     std::fs::create_dir_all(&dir).ok();
-    dir.join(format!("{}.db", &hash[..16]))
+    dir
+}
+
+fn db_hash_of(project_root: &str) -> String {
+    let full = format!("{:x}", Sha256::digest(project_root.as_bytes()));
+    full[..16].to_string()
+}
+
+fn db_path(project_root: &str) -> PathBuf {
+    knowledge_dir().join(format!("{}.db", db_hash_of(project_root)))
 }
 
 // ── Schema ──
@@ -110,6 +132,12 @@ pub async fn knowledge_init(
     let path = db_path(&project_root);
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open DB: {}", e))?;
     init_schema(&conn)?;
+    // Record the project root so `knowledge_list_projects` can enumerate DBs
+    // by their originating path rather than just their content hash.
+    conn.execute(
+        "INSERT OR REPLACE INTO project_meta (key, value) VALUES ('project_root', ?1)",
+        params![&project_root],
+    ).map_err(|e| format!("Failed to record project_root: {}", e))?;
     cleanup_old_data(&conn);
     let mut db = state.db.lock().await;
     *db = Some(conn);
@@ -269,6 +297,163 @@ pub async fn knowledge_delete_conversations(project_root: String) -> Result<(), 
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.execute("DELETE FROM conversations", []).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Delete a single conversation from a project's knowledge DB.
+#[tauri::command]
+pub async fn knowledge_delete_conversation(
+    project_root: String,
+    id: String,
+) -> Result<(), String> {
+    let db_p = db_path(&project_root);
+    let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
+    conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Enumerate all known projects by scanning `~/.leo-ide/knowledge/*.db`.
+///
+/// For each DB we read the `project_root` stored in `project_meta` (set at
+/// `knowledge_init` time). DBs that predate that migration fall back to
+/// "(unknown)" and still report their stats — so orphaned / unknown DBs
+/// remain visible and deletable in the UI.
+///
+/// Individual DB read errors are logged silently (via `.ok()`/defaults) and
+/// the project is skipped from the results, so a single corrupt DB can't
+/// break listing.
+#[tauri::command]
+pub async fn knowledge_list_projects() -> Result<Vec<ProjectInfo>, String> {
+    let dir = knowledge_dir();
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let read_dir = match std::fs::read_dir(&dir) {
+        Ok(r) => r,
+        Err(e) => return Err(format!("Failed to read knowledge dir: {}", e)),
+    };
+
+    let mut projects: Vec<ProjectInfo> = Vec::new();
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("db") {
+            continue;
+        }
+        // Skip sqlite side files (-journal, -wal, -shm).
+        let stem = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(s) => s.to_string(),
+            None => continue,
+        };
+
+        // Opening read-only would be nicer but rusqlite's bundled sqlite
+        // happily creates missing DBs — this file obviously exists so a
+        // normal open is fine. Failures are skipped so one bad DB doesn't
+        // poison the whole listing.
+        let Ok(conn) = Connection::open(&path) else { continue };
+
+        let project_root: String = conn
+            .query_row(
+                "SELECT value FROM project_meta WHERE key = 'project_root'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| "(unknown)".to_string());
+
+        let file_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))
+            .unwrap_or(0);
+        let conversation_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))
+            .unwrap_or(0);
+
+        // MAX() on an empty table returns NULL → use a nullable i64 to avoid
+        // "Invalid column type" errors on fresh projects.
+        let conv_max: Option<i64> = conn
+            .query_row("SELECT MAX(updated_at) FROM conversations", [], |r| r.get(0))
+            .ok()
+            .flatten();
+        let files_max: Option<i64> = conn
+            .query_row("SELECT MAX(last_indexed) FROM files", [], |r| r.get(0))
+            .ok()
+            .flatten();
+        let last_updated = conv_max.unwrap_or(0).max(files_max.unwrap_or(0));
+
+        let db_size_bytes = path.metadata().map(|m| m.len()).unwrap_or(0);
+
+        projects.push(ProjectInfo {
+            project_root,
+            db_hash: stem,
+            file_count,
+            conversation_count,
+            db_size_bytes,
+            last_updated,
+        });
+    }
+
+    // Most recently touched first.
+    projects.sort_by(|a, b| b.last_updated.cmp(&a.last_updated));
+    Ok(projects)
+}
+
+/// Delete an entire project's knowledge DB. Drops the in-memory handle
+/// first when it points at the same project, so the file isn't locked on
+/// Windows (noop on Unix but harmless).
+#[tauri::command]
+pub async fn knowledge_delete_project(
+    project_root: String,
+    state: tauri::State<'_, Arc<KnowledgeState>>,
+) -> Result<(), String> {
+    let db_p = db_path(&project_root);
+    // Drop any cached connection before touching the file.
+    {
+        let mut db = state.db.lock().await;
+        *db = None;
+    }
+    if db_p.exists() {
+        std::fs::remove_file(&db_p)
+            .map_err(|e| format!("Failed to delete {}: {}", db_p.display(), e))?;
+    }
+    // Also clean up sqlite sidecar files.
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let side = db_p.with_file_name(format!(
+            "{}{}",
+            db_p.file_name().and_then(|n| n.to_str()).unwrap_or(""),
+            suffix
+        ));
+        if side.exists() {
+            let _ = std::fs::remove_file(side);
+        }
+    }
+    Ok(())
+}
+
+/// Delete every project's knowledge DB. Used by the "Clear all knowledge"
+/// global action. Silently skips any file it can't remove so partial
+/// failures don't abort the operation.
+#[tauri::command]
+pub async fn knowledge_delete_all_projects(
+    state: tauri::State<'_, Arc<KnowledgeState>>,
+) -> Result<(), String> {
+    // Drop any cached connection first.
+    {
+        let mut db = state.db.lock().await;
+        *db = None;
+    }
+    let dir = knowledge_dir();
+    if !dir.exists() {
+        return Ok(());
+    }
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
     Ok(())
 }
 

@@ -8,6 +8,7 @@ import { buildProjectContext } from '../ai/contextBuilder';
 import { addEdits } from './pendingEdits';
 import { activeFilePath } from './files';
 import { projectRoot } from './git';
+import { isTerminalPath, isPreviewPath, isDiagramPath } from './shell';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -35,13 +36,63 @@ function generateSessionId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Size cap for auto-attached active file content. Keeps context cost
+ *  predictable; huge files aren't inlined and should be attached manually. */
+const AUTO_ATTACH_MAX_BYTES = 120_000;
+
+/**
+ * Load the content of the user's current file for inclusion as chat context.
+ * Returns `null` when there's no active file, when it's a virtual path
+ * (terminal/preview/diagram), when it's not inside the project root, or
+ * when reading fails. Content exceeding the size cap is truncated with a
+ * marker so the model knows it's partial.
+ */
+async function readActiveFileContext(): Promise<{ path: string; content: string } | null> {
+  const activeFile = get(activeFilePath);
+  if (!activeFile) return null;
+  if (isTerminalPath(activeFile) || isPreviewPath(activeFile) || isDiagramPath(activeFile)) {
+    return null;
+  }
+  const root = get(projectRoot);
+  // Only auto-attach files inside the opened project. Loose files opened
+  // ad-hoc don't get silently inlined.
+  if (!root || !activeFile.startsWith(root)) return null;
+
+  try {
+    const raw = await invoke<string>('read_file_content', { path: activeFile });
+    const name = activeFile.split('/').pop() || activeFile;
+    if (raw.length > AUTO_ATTACH_MAX_BYTES) {
+      const truncated = raw.slice(0, AUTO_ATTACH_MAX_BYTES);
+      return {
+        path: name,
+        content: `${truncated}\n\n… (${raw.length - AUTO_ATTACH_MAX_BYTES} more bytes truncated — attach the file manually to include the full contents)`,
+      };
+    }
+    return { path: name, content: raw };
+  } catch {
+    return null;
+  }
+}
+
 export async function sendStreamingMessage(userContent: string, fileContexts?: { path: string; content: string }[]) {
   if (get(isStreaming)) return;
 
+  // Auto-attach the active file's content if the user hasn't manually
+  // attached anything. This matches the "my chat should know what I'm
+  // looking at" expectation without double-sending when they explicitly
+  // added files via the paperclip button.
+  let effectiveContexts = fileContexts;
+  if (!effectiveContexts || effectiveContexts.length === 0) {
+    const auto = await readActiveFileContext();
+    if (auto) effectiveContexts = [auto];
+  }
+
   // Build context from attached files
   let contextPrefix = '';
-  if (fileContexts && fileContexts.length > 0) {
-    contextPrefix = fileContexts.map(f => `File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n') + '\n\n';
+  if (effectiveContexts && effectiveContexts.length > 0) {
+    contextPrefix = effectiveContexts
+      .map(f => `File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
+      .join('\n\n') + '\n\n';
   }
 
   const userMsg: ChatMessage = { role: 'user', content: userContent };

@@ -4,6 +4,7 @@
     editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers,
     editorShowErrorLens,
     terminalFontSize, previewUrl,
+    terminalMode,
     autosaveEnabled, autosaveDelay,
     maxRecentProjects, maxTabs,
     hiddenPatterns,
@@ -43,6 +44,7 @@
     'leo-editor-font-size', 'leo-editor-tab-size', 'leo-editor-word-wrap', 'leo-editor-line-numbers',
     'leo-editor-show-error-lens',
     'leo-terminal-font-size',
+    'leo-terminal-mode', 'leo-terminal-panel-height',
     'leo-appearance', 'leo-editor-theme',
     'leo-ui-font-size', 'leo-ui-density',
     'leo-hidden-patterns',
@@ -202,6 +204,33 @@
   <div class="card">
     <div class="card-head"><div class="card-title">Terminal</div></div>
     <div class="rows">
+      <div class="row" data-setting="terminal-mode">
+        <div class="row-info">
+          <div class="row-label">Layout</div>
+          <div class="row-help">
+            Show terminals as editor tabs, or dock them in a resizable
+            panel at the bottom of the window like VSCode, Xcode and Zed.
+            Switching layout closes any open terminals so they can be
+            restarted cleanly in the new container.
+          </div>
+        </div>
+        <div class="pills">
+          <button
+            class="pill"
+            class:active={$terminalMode === 'tab'}
+            onclick={() => terminalMode.set('tab')}
+            aria-pressed={$terminalMode === 'tab'}
+            title="Terminals open in the main editor tab bar"
+          >Tab</button>
+          <button
+            class="pill"
+            class:active={$terminalMode === 'panel'}
+            onclick={() => terminalMode.set('panel')}
+            aria-pressed={$terminalMode === 'panel'}
+            title="Terminals dock in a resizable bottom panel"
+          >Bottom panel</button>
+        </div>
+      </div>
       <div class="row" data-setting="terminal-font-size">
         <div class="row-info"><div class="row-label">Font size</div></div>
         <div class="stepper">

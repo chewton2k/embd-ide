@@ -1,8 +1,26 @@
-import { writable, get, derived } from 'svelte/store';
+import { writable, get, derived, type Writable } from 'svelte/store';
+import { persistedString, persistedNumber } from '../persisted';
 
 export const showTerminal = writable<boolean>(false);
 export const showPreview = writable<boolean>(false);
-export const terminalLayout = writable<'tab'>('tab');
+
+// ── Terminal layout mode ──────────────────────────────────────────
+//
+// Two valid values:
+//   'tab'   — terminals appear as ordinary editor tabs (legacy behavior).
+//   'panel' — terminals are docked in a resizable bottom panel like VSCode,
+//             Xcode or Zed. The editor always stays visible; terminal tabs
+//             live inside the panel's own tab strip.
+//
+// Persisted so the user's choice survives reloads. Defaults to 'tab' for
+// backward compatibility with existing sessions.
+export type TerminalMode = 'tab' | 'panel';
+export const terminalMode = persistedString('leo-terminal-mode', 'tab') as Writable<TerminalMode>;
+
+/** Height of the docked terminal panel in pixels. Bounded by the consumer
+ *  (TerminalPanel.svelte clamps to [120, 80vh] when applying). Persisted so
+ *  the layout survives reloads. */
+export const terminalPanelHeight = persistedNumber('leo-terminal-panel-height', 260);
 
 export const TERMINAL_SENTINEL_PREFIX = '__terminal__';
 export const PREVIEW_PATH = '__preview__';

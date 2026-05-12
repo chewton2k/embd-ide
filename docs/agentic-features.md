@@ -22,12 +22,6 @@ The bones are in place. The roadmap below is about hardening the agent loop, rai
 
 ---
 
-## 1. Serve the two user bases explicitly
-
-- **Distraction-free mode** — single toggle that hides the chat button, ghost-text, AI diff gutters, and command-palette AI entries. Stores still exist but nothing renders. Makes the "just an editor" pitch real.
-- **Separate keybinding profiles** — `editor` vs `agentic`. In agentic mode, `Cmd+K` opens inline-AI, `Cmd+L` opens chat with current selection, `Cmd+Enter` runs the agent on the selection. In editor mode those slots are free for normal CodeMirror commands.
-- **Per-project AI opt-in** — a `.leo/config.json` in the project that records whether AI features are on. Prevents AI from silently indexing a repo the user considered private.
-
 ## 2. Tighten the agent loop
 
 `agentLoop.ts` uses regex to parse tool calls against one non-streaming response per step. That works but leaves a lot on the table.

@@ -86,6 +86,10 @@ pub fn run() {
             knowledge::knowledge_list_conversations,
             knowledge::knowledge_load_conversation,
             knowledge::knowledge_delete_conversations,
+            knowledge::knowledge_delete_conversation,
+            knowledge::knowledge_list_projects,
+            knowledge::knowledge_delete_project,
+            knowledge::knowledge_delete_all_projects,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

@@ -13,6 +13,7 @@
     createTerminalSignal, killTerminalSignal,
     splitTerminalSignal, collapseTerminalSplitsSignal,
     isTerminalPath, terminalPath, terminalTabIdFromPath, allocateTerminalTabId,
+    terminalMode,
     type TerminalTabInfo,
   } from '../../modules/stores';
   import { get } from 'svelte/store';
@@ -211,6 +212,20 @@
     return terminalRoot?.querySelector(`[data-pane-terminal="${id}"]`) ?? null;
   }
 
+  /**
+   * Route the editor's `activeFilePath` to a terminal sentinel so the
+   * legacy in-tab terminal slot becomes the visible pane.
+   *
+   * In panel mode (`terminalMode === 'panel'`) the editor's focus is
+   * independent of the docked terminal panel — the user keeps the same
+   * file visible above the panel — so we skip the write. The panel
+   * drives focus via `activeTerminalTabId` instead.
+   */
+  function routeActiveFileToTerminal(tabId: number) {
+    if (get(terminalMode) === 'panel') return;
+    activeFilePath.set(terminalPath(tabId));
+  }
+
   function fitPane(pane: TerminalPane) {
     if (!pane.mounted) return;
     const mount = getPaneMount(pane.id);
@@ -250,7 +265,7 @@
     setActivePane(tabId, null);
     activeTerminalTabId.set(tabId);
     showTerminal.set(true);
-    activeFilePath.set(terminalPath(tabId));
+    routeActiveFileToTerminal(tabId);
     const pane = await createPane({ tabId });
     if (!pane) {
       // Backend refused to spawn — roll back the tab so the UI doesn't
@@ -280,7 +295,7 @@
   async function focusTab(tabId: number) {
     activeTerminalTabId.set(tabId);
     showTerminal.set(true);
-    activeFilePath.set(terminalPath(tabId));
+    routeActiveFileToTerminal(tabId);
     const activeInTab = activePaneByTab[tabId];
     if (activeInTab != null) {
       requestAnimationFrame(() => focusPane(activeInTab));
@@ -410,7 +425,7 @@
     showTerminal.set(true);
     if (get(activeTerminalTabId) !== tabId) activeTerminalTabId.set(tabId);
     if (!isTerminalPath(get(activeFilePath)) || terminalTabIdFromPath(get(activeFilePath)) !== tabId) {
-      activeFilePath.set(terminalPath(tabId));
+      routeActiveFileToTerminal(tabId);
     }
 
     // Wait for Svelte to render the mount div for this new pane.
@@ -634,8 +649,16 @@
     });
   });
 
+  // Auto-focus the active pane when the terminal becomes visible. In tab
+  // mode we key off `isTerminalPath($activeFilePath)` (the user just
+  // clicked a terminal tab). In panel mode the editor's path is
+  // independent, so we instead focus whenever the panel is shown and has
+  // an active pane — this mirrors VSCode's behavior when you toggle the
+  // bottom panel.
   $effect(() => {
-    if ($showTerminal && isTerminalPath($activeFilePath) && currentActivePaneId !== null) {
+    const inTerminalTab = $terminalMode === 'tab' && isTerminalPath($activeFilePath);
+    const panelShown = $terminalMode === 'panel';
+    if ($showTerminal && (inTerminalTab || panelShown) && currentActivePaneId !== null) {
       const paneId = currentActivePaneId;
       requestAnimationFrame(() => focusPane(paneId));
     }

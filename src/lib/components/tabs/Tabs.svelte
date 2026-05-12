@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
   import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw, GitBranch } from 'lucide-svelte';
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalTabs, activeTerminalTabId, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, terminalTabIdFromPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from '../../modules/stores';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalTabs, activeTerminalTabId, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, terminalTabIdFromPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode } from '../../modules/stores';
   import { triggerFileTreeRefresh } from '../../modules/stores';
   import { getFileIconName } from '../../modules/fileIcons';
 
@@ -118,7 +118,7 @@
     </div>
   {/each}
 
-  {#if $showTerminal}
+  {#if $showTerminal && $terminalMode === 'tab'}
     {#each $terminalTabs as termTab (termTab.id)}
       {@const termPath = terminalPath(termTab.id)}
       <div

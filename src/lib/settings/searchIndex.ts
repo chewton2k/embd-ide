@@ -59,6 +59,7 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
   { anchor: 'editor-error-lens',     tab: 'general', group: 'Editor', label: 'Error lens',               keywords: 'inline errors diagnostics syntax warnings squiggles' },
 
   // ── General › Terminal ──
+  { anchor: 'terminal-mode',         tab: 'general', group: 'Terminal', label: 'Terminal layout',        keywords: 'tab panel bottom docked vscode zed xcode placement position' },
   { anchor: 'terminal-font-size',    tab: 'general', group: 'Terminal', label: 'Terminal font size',     keywords: 'text size shell xterm' },
 
   // ── General › Preview ──
