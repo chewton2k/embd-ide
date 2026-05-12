@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
   import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw } from 'lucide-svelte';
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal, openPreviewSignal } from '../../modules/stores';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, isPreviewPath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal } from '../../modules/stores';
   import { triggerFileTreeRefresh } from '../../modules/stores';
   import { getFileIconName } from '../../modules/fileIcons';
 
@@ -63,14 +63,8 @@
     if (ctxMenu) closeCtx();
   }
 
-  const markdownExts = /\.(md|mdx|markdown)$/i;
-  let previewEnabled = $derived.by(() => {
-    const path = $activeFilePath;
-    return !!path && !isTerminalPath(path) && markdownExts.test(path);
-  });
-
   function openExistingFileTab() { openFileSearchSignal.update(n => n + 1); addMenuOpen = false; }
-  function openPreviewTab() { if (!previewEnabled) return; openPreviewSignal.update(n => n + 1); addMenuOpen = false; }
+  function openPreviewTab() { activeFilePath.set(PREVIEW_PATH); addMenuOpen = false; }
   function openTerminalTab() {
     $showTerminal = true;
     if ($terminalSessions.length === 0) createTerminalSignal.update(n => n + 1);
@@ -124,6 +118,22 @@
     </div>
   {/if}
 
+  {#if $showPreview}
+    <div
+      class="tab"
+      class:active={isPreviewPath($activeFilePath)}
+      role="tab"
+      tabindex="0"
+      title="Web Preview"
+      onclick={() => activeFilePath.set(PREVIEW_PATH)}
+      onkeydown={(e) => e.key === 'Enter' && activeFilePath.set(PREVIEW_PATH)}
+    >
+      <Eye size={13} />
+      <span class="tab-name">Preview</span>
+      <button class="tab-close" onclick={(e) => { e.stopPropagation(); showPreview.set(false); activeFilePath.set($openFiles.at(-1)?.path ?? null); }}>×</button>
+    </div>
+  {/if}
+
   <div class="tab-actions">
     <button type="button" class="tab-action-btn" onclick={() => triggerFileTreeRefresh()} title="Reload file tree" aria-label="Reload file tree">
       <RefreshCw size={12} />
@@ -139,7 +149,7 @@
     <button class="tab-add-menu-item" role="menuitem" onclick={openExistingFileTab}>
       <FolderOpen size={12} /> <span>Open File</span>
     </button>
-    <button class="tab-add-menu-item" class:disabled={!previewEnabled} role="menuitem" onclick={openPreviewTab} disabled={!previewEnabled}>
+    <button class="tab-add-menu-item" role="menuitem" onclick={openPreviewTab}>
       <Eye size={12} /> <span>Preview</span>
     </button>
     <button class="tab-add-menu-item" role="menuitem" onclick={openTerminalTab}>

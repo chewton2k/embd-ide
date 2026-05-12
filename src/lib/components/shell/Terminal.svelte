@@ -52,11 +52,11 @@
     const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     if (isDark) {
       return {
-        background: '#111111', foreground: '#e0e0e0', cursor: '#7aa2f7', selectionBackground: '#2e2e2e',
-        black: '#3a3a3a', red: '#f7768e', green: '#73daca', yellow: '#e0af68',
-        blue: '#7aa2f7', magenta: '#bb9af7', cyan: '#7dcfff', white: '#c0c0c0',
-        brightBlack: '#555555', brightRed: '#f7768e', brightGreen: '#73daca', brightYellow: '#e0af68',
-        brightBlue: '#7aa2f7', brightMagenta: '#bb9af7', brightCyan: '#7dcfff', brightWhite: '#e0e0e0',
+        background: '#131313', foreground: '#cccccc', cursor: '#7b9fc2', selectionBackground: '#2a3a4a',
+        black: '#3b3b3b', red: '#f14c4c', green: '#4ec9b0', yellow: '#dcdcaa',
+        blue: '#569cd6', magenta: '#c586c0', cyan: '#9cdcfe', white: '#cccccc',
+        brightBlack: '#5a5a5a', brightRed: '#f14c4c', brightGreen: '#4ec9b0', brightYellow: '#dcdcaa',
+        brightBlue: '#569cd6', brightMagenta: '#c586c0', brightCyan: '#9cdcfe', brightWhite: '#e0e0e0',
       };
     }
     return {

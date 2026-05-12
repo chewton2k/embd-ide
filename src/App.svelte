@@ -9,11 +9,12 @@
   import ChatPanel from './lib/components/ai/ChatPanel.svelte';
   import GitPanel from './lib/components/git/GitPanel.svelte';
   import FileSearch from './lib/components/filetree/FileSearch.svelte';
+  import Preview from './lib/components/preview/Preview.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/modules/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, PREVIEW_PATH, terminalSessions, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/modules/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -253,6 +254,11 @@
     }
   });
 
+  // Keep preview alive once opened
+  $effect(() => {
+    if (isPreviewPath($activeFilePath)) showPreview.set(true);
+  });
+
   function handleKeydown(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === '`') {
       e.preventDefault();
@@ -310,8 +316,14 @@
                 <Terminal />
               </div>
             {/if}
-            <!-- File editor — hidden while a terminal tab is focused -->
-            {#if !($showTerminal && isTerminalPath($activeFilePath))}
+            <!-- Preview tab: kept alive like terminal -->
+            {#if $showPreview}
+              <div class="terminal-tab-slot" class:focused={isPreviewPath($activeFilePath)}>
+                <Preview />
+              </div>
+            {/if}
+            <!-- File editor — hidden while a terminal or preview tab is focused -->
+            {#if !($showTerminal && isTerminalPath($activeFilePath)) && !isPreviewPath($activeFilePath)}
               {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
                 <MergeEditor filePath={$activeFile} />
               {:else if $activeFile && isJsonFile($activeFile)}

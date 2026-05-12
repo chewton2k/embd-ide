@@ -19,25 +19,25 @@
 
 /* ── Dark mode (default) ──────────────────────────────────────── */
 :root.dark {
-  --bg-primary: #1c1c1c;
-  --bg-secondary: #161616;
-  --bg-tertiary: #111111;
-  --bg-surface: #2a2a2a;
-  --text-primary: #e0e0e0;
-  --text-secondary: #a0a0a0;
-  --text-muted: #666666;
-  --accent: #a0a0a0;
-  --accent-hover: #c0c0c0;
-  --border: #2e2e2e;
-  --success: #73daca;
-  --warning: #e0af68;
-  --error: #f7768e;
-  --tab-active: #1c1c1c;
-  --tab-inactive: #161616;
-  --diff-add: #73daca;
-  --diff-del: #f7768e;
-  --git-graph-accent: #a0a0a0;
-  --git-notification: #73daca;
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #181818;
+  --bg-tertiary: #131313;
+  --bg-surface: #2d2d2d;
+  --text-primary: #e4e4e4;
+  --text-secondary: #ababab;
+  --text-muted: #6e6e6e;
+  --accent: #7b9fc2;
+  --accent-hover: #9ab8d6;
+  --border: #2b2b2b;
+  --success: #4ec9b0;
+  --warning: #dcdcaa;
+  --error: #f14c4c;
+  --tab-active: #1e1e1e;
+  --tab-inactive: #181818;
+  --diff-add: #4ec9b0;
+  --diff-del: #f14c4c;
+  --git-graph-accent: #7b9fc2;
+  --git-notification: #4ec9b0;
 }
 
 /* ── Light mode ───────────────────────────────────────────────── */
@@ -46,9 +46,9 @@
   --bg-secondary: #f2f2f2;
   --bg-tertiary: #eaeaea;
   --bg-surface: #e0e0e0;
-  --text-primary: #1a1a1a;
-  --text-secondary: #4a4a4a;
-  --text-muted: #7a7a7a;
+  --text-primary: #111111;
+  --text-secondary: #3d3d3d;
+  --text-muted: #6b6b6b;
   --accent: #4a4a4a;
   --accent-hover: #333333;
   --border: #d4d4d4;
