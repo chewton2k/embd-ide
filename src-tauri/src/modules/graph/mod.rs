@@ -580,7 +580,7 @@ fn parse_rust(content: &str) -> (Vec<ImportNode>, Vec<ExportNode>, Vec<SchemaNod
     let mut in_struct = false;
     let mut current_schema: Option<SchemaNode> = None;
 
-    for (_i, line) in lines.iter().enumerate() {
+    for line in lines.iter() {
         let trimmed = line.trim();
 
         if trimmed.starts_with("use ") {
@@ -681,7 +681,7 @@ fn parse_python(content: &str) -> (Vec<ImportNode>, Vec<ExportNode>, Vec<Endpoin
     let mut in_class = false;
     let mut current_schema: Option<SchemaNode> = None;
 
-    for (_i, line) in lines.iter().enumerate() {
+    for line in lines.iter() {
         let trimmed = line.trim();
 
         if trimmed.starts_with("from ") || trimmed.starts_with("import ") {

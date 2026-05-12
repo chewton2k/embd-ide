@@ -1,6 +1,7 @@
 mod modules;
 
-use modules::{ai, fs, git, graph, session, shell};
+use modules::{ai, fs, git, graph, knowledge, session, shell};
+use std::sync::Arc;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -15,6 +16,8 @@ pub fn run() {
         .plugin(tauri_plugin_drag::init())
         .manage(terminal_state)
         .manage(project_root_state)
+        .manage(Arc::new(ai::AiState::new()))
+        .manage(Arc::new(knowledge::KnowledgeState::new()))
         .manage(session::AppStateHandle(std::sync::Mutex::new(
             session::AppState::default(),
         )))
@@ -67,12 +70,22 @@ pub fn run() {
             ai::set_provider_key,
             ai::get_provider_key,
             ai::ai_chat,
+            ai::ai_chat_stream,
+            ai::ai_chat_cancel,
             // Session
             session::get_recent_projects,
             session::save_session,
             session::remove_recent_project,
             // Graph
             graph::analyze_file_graph,
+            // Knowledge
+            knowledge::knowledge_init,
+            knowledge::knowledge_index,
+            knowledge::knowledge_get_context,
+            knowledge::knowledge_save_conversation,
+            knowledge::knowledge_list_conversations,
+            knowledge::knowledge_load_conversation,
+            knowledge::knowledge_delete_conversations,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

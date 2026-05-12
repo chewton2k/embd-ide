@@ -4,6 +4,8 @@ export * from './git';
 export * from './settings';
 export * from './shell';
 export * from './ui';
+export * from './pendingEdits';
+export * from './aiHistory';
 export { EDITOR_THEMES, EDITOR_THEME_LABELS, isLightEditorTheme, type AppearanceMode, type EditorThemeId } from '../themes';
 
 // ── Cross-window settings sync ───────────────────────────────────

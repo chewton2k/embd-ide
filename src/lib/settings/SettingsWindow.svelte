@@ -4,15 +4,17 @@
   import ShortcutsSection from './sections/ShortcutsSection.svelte';
   import ModelsSection    from './sections/ModelsSection.svelte';
   import AgentsSection    from './sections/AgentsSection.svelte';
+  import KnowledgeSection from './sections/KnowledgeSection.svelte';
   import AboutSection     from './sections/AboutSection.svelte';
 
-  type TabId = 'general' | 'shortcuts' | 'models' | 'agents' | 'about';
+  type TabId = 'general' | 'shortcuts' | 'models' | 'agents' | 'knowledge' | 'about';
 
   const TABS: { id: TabId; label: string; icon: string; keywords: string }[] = [
     { id: 'general',   label: 'General',   keywords: 'appearance theme editor font tab autosave density hidden patterns terminal', icon: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6' },
     { id: 'shortcuts', label: 'Shortcuts', keywords: 'keyboard keybindings hotkeys', icon: 'M2 8h20v8H2z M6 12h.01 M10 12h.01 M14 12h.01 M18 12h.01' },
     { id: 'models',    label: 'Models',    keywords: 'ai api key openrouter openai anthropic provider', icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z' },
     { id: 'agents',    label: 'Agents',    keywords: 'assistant chat', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M3 21v-1a6 6 0 0 1 6-6 6 6 0 0 1 6 6v1 M17 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M14 14a4 4 0 0 1 8 0' },
+    { id: 'knowledge', label: 'Knowledge', keywords: 'database sqlite storage index brain memory', icon: 'M12 2L2 7l10 5 10-5-10-5Z M2 17l10 5 10-5 M2 12l10 5 10-5' },
     { id: 'about',     label: 'About',     keywords: 'version info', icon: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 8v4 M12 16h.01' },
   ];
 
@@ -99,6 +101,8 @@
         <ModelsSection />
       {:else if activeTab === 'agents'}
         <AgentsSection />
+      {:else if activeTab === 'knowledge'}
+        <KnowledgeSection />
       {:else if activeTab === 'about'}
         <AboutSection />
       {/if}

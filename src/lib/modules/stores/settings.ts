@@ -22,3 +22,9 @@ export const hiddenPatterns = writable<{ pattern: string; enabled: boolean }[]>(
 hiddenPatterns.subscribe(patterns => {
   localStorage.setItem('leo-hidden-patterns', JSON.stringify(patterns));
 });
+
+// AI preferences
+export const ghostTextEnabled = persistedBool('leo-ghost-text-enabled', true);
+export const ghostTextDelay = persistedNumber('leo-ghost-text-delay', 450);
+export const agentMaxStepsConfig = persistedNumber('leo-agent-max-steps', 10);
+export const agentAutoApproveConfig = persistedBool('leo-agent-auto-approve', false);

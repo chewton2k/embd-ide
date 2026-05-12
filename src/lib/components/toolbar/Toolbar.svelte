@@ -1,7 +1,7 @@
 <script lang="ts">
   import Tabs from '../tabs/Tabs.svelte';
-  import { PanelLeft, SplitSquareVertical, Search, MessageSquareText, GitBranch, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
-  import { showTerminal, showSettings, showChat, showGit, gitBranch, toggleChatPanel, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath, openFileSearchSignal } from '../../modules/stores';
+  import { PanelLeft, SplitSquareVertical, Search, GitBranch, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
+  import { showTerminal, showSettings, showGit, gitBranch, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath, openFileSearchSignal } from '../../modules/stores';
 
   let splitMenuOpen = $state(false);
   let splitMenuPos = $state<{ top: number; left: number } | null>(null);
@@ -102,17 +102,6 @@
       <span>Search files...</span>
       <kbd>⌘O</kbd>
     </div>
-    <button
-      type="button"
-      class="toolbar-btn"
-      class:active={$showChat}
-      onclick={toggleChatPanel}
-      title="AI Chat (Ctrl+L)"
-      aria-label="Toggle AI chat"
-      aria-pressed={$showChat}
-    >
-      <MessageSquareText size={15} />
-    </button>
 
     <button
       type="button"

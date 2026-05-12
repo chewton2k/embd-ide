@@ -1,12 +1,13 @@
 <script lang="ts">
   import FileTree from './lib/components/filetree/FileTree.svelte';
+  import { Sparkles } from 'lucide-svelte';
   import Editor from './lib/components/editor/Editor.svelte';
   import FileViewer from './lib/components/file-viewer/FileViewer.svelte';
   import JSONViewer from './lib/components/file-viewer/JSONViewer.svelte';
   import MergeEditor from './lib/components/merge/MergeEditor.svelte';
   import Toolbar from './lib/components/toolbar/Toolbar.svelte';
   import Terminal from './lib/components/shell/Terminal.svelte';
-  import ChatPanel from './lib/components/ai/ChatPanel.svelte';
+  import FloatingChat from './lib/components/ai/FloatingChat.svelte';
   import GitPanel from './lib/components/git/GitPanel.svelte';
   import FileSearch from './lib/components/filetree/FileSearch.svelte';
   import Preview from './lib/components/preview/Preview.svelte';
@@ -177,12 +178,19 @@
     // Load API keys from OS keychain into stores
     const providers = ['openrouter', 'openai', 'anthropic'] as const;
     const storeMap = { openrouter: apiKey, openai: openaiApiKey, anthropic: anthropicApiKey } as const;
-    for (const provider of providers) {
-      try {
-        const key: string = await invoke('get_provider_key', { provider });
-        if (key) storeMap[provider].set(key);
-      } catch { /* keychain unavailable or empty */ }
+    async function loadKeys() {
+      for (const provider of providers) {
+        try {
+          const key: string = await invoke('get_provider_key', { provider });
+          storeMap[provider].set(key || '');
+        } catch { /* keychain unavailable or empty */ }
+      }
     }
+    await loadKeys();
+
+    // Reload keys when window regains focus (e.g. after closing settings)
+    const onFocus = () => { loadKeys(); };
+    window.addEventListener('focus', onFocus);
     // Load recent projects
     try {
       recentProjects = await getRecentProjects();
@@ -380,15 +388,7 @@
     </div>
 
     {#if $showChat}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="resize-handle resize-handle-col" onmousedown={startDrag('chat')}></div>
-      <div class="chat-panel" style="width: {chatWidth}px">
-        <div class="panel-header">
-          <span>AI Chat</span>
-          <button onclick={toggleChatPanel}>✕</button>
-        </div>
-        <ChatPanel />
-      </div>
+      <!-- Floating chat rendered below -->
     {/if}
 
     {#if $showGit}
@@ -459,9 +459,14 @@
           {/if}
         </span>
       {/if}
+      <button class="statusbar-ai-btn" class:active={$showChat} onclick={() => showChat.update(v => !v)} title="Leo AI (Ctrl+L)">
+        <Sparkles size={13} />
+      </button>
     </div>
   </div>
 </div>
+
+<FloatingChat />
 
 <style>
   .ide-layout {
@@ -664,16 +669,6 @@
     color: var(--text-primary);
   }
 
-  .chat-panel {
-    background: var(--bg-secondary);
-    border-left: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    flex-shrink: 0;
-    min-width: 150px;
-  }
-
   .git-panel-container {
     background: var(--bg-secondary);
     border-left: 1px solid var(--border);
@@ -732,6 +727,29 @@
 
   .save-indicator.unsaved {
     opacity: 1;
+  }
+
+  .statusbar-ai-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    color: #000;
+    cursor: pointer;
+    transition: all 0.15s;
+    margin-left: 8px;
+  }
+
+  .statusbar-ai-btn:hover {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
+  .statusbar-ai-btn.active {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
   .breadcrumb {

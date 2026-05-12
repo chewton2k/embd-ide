@@ -108,6 +108,17 @@
   }
   onMount(() => {
     document.addEventListener('mousedown', handleDocClick);
+
+    // Load keys from OS keychain into stores (needed because settings is a separate window)
+    (async () => {
+      for (const p of PROVIDERS) {
+        try {
+          const key: string = await invoke('get_provider_key', { provider: p.id });
+          if (key) p.store.set(key);
+        } catch { /* ignore */ }
+      }
+    })();
+
     return () => document.removeEventListener('mousedown', handleDocClick);
   });
 

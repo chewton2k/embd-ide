@@ -29,6 +29,9 @@
   import { oneDark } from '@codemirror/theme-one-dark';
   import { tags } from '@lezer/highlight';
   import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+  import { aiDiffExtension, addDiffEffect, clearDiffEffect } from '../../modules/editor/aiDiffExtension';
+  import { ghostTextExtension } from '../../modules/editor/ghostText';
+  import { pendingEdits } from '../../modules/stores/pendingEdits';
 
   function buildEditorTheme(id: EditorThemeId): import('@codemirror/state').Extension {
     const themes: Record<EditorThemeId, () => import('@codemirror/state').Extension> = {
@@ -917,6 +920,9 @@
           { key: 'Alt-<', run: cursorDocStart },
           { key: 'Alt->', run: cursorDocEnd },
         ]),
+        // AI extensions
+        aiDiffExtension(),
+        ghostTextExtension(),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
             if (ignoreNextDocChange) {
@@ -1070,7 +1076,29 @@
     });
   });
 
+  // Sync pending AI edits into the editor's diff field
+  const unsubPendingEdits = pendingEdits.subscribe((allEdits) => {
+    if (!view) return;
+    const filePath = currentFilePath;
+    if (!filePath) { view.dispatch({ effects: clearDiffEffect.of(undefined) }); return; }
+    const fileEdits = allEdits[filePath];
+    if (fileEdits && fileEdits.length > 0) {
+      // Filter out edits with invalid line numbers
+      const validEdits = fileEdits.filter(e =>
+        e.startLine >= 1 && e.endLine <= view!.state.doc.lines
+      );
+      if (validEdits.length > 0) {
+        view.dispatch({ effects: addDiffEffect.of(validEdits) });
+      } else {
+        view.dispatch({ effects: clearDiffEffect.of(undefined) });
+      }
+    } else {
+      view.dispatch({ effects: clearDiffEffect.of(undefined) });
+    }
+  });
+
   onDestroy(() => {
+    unsubPendingEdits();
     window.removeEventListener('keydown', handleGlobalKeydown);
     if (unregisterRenameCallback) unregisterRenameCallback();
     stopWatching();
