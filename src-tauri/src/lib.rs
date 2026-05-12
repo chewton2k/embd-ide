@@ -1,6 +1,6 @@
 mod modules;
 
-use modules::{ai, fs, git, session, shell};
+use modules::{ai, fs, git, graph, session, shell};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -71,6 +71,8 @@ pub fn run() {
             session::get_recent_projects,
             session::save_session,
             session::remove_recent_project,
+            // Graph
+            graph::analyze_file_graph,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

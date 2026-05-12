@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
-  import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw } from 'lucide-svelte';
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, isPreviewPath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal } from '../../modules/stores';
+  import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw, GitBranch } from 'lucide-svelte';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from '../../modules/stores';
   import { triggerFileTreeRefresh } from '../../modules/stores';
   import { getFileIconName } from '../../modules/fileIcons';
 
@@ -80,6 +80,7 @@
 
   function openExistingFileTab() { openFileSearchSignal.update(n => n + 1); addMenuOpen = false; }
   function openPreviewTab() { activeFilePath.set(PREVIEW_PATH); addMenuOpen = false; }
+  function openDiagramTab() { openDiagramSearchSignal.update(n => n + 1); addMenuOpen = false; }
   function openTerminalTab() {
     $showTerminal = true;
     if ($terminalSessions.length === 0) createTerminalSignal.update(n => n + 1);
@@ -133,6 +134,23 @@
     </div>
   {/if}
 
+  {#each $openDiagrams as diagFile}
+    {@const dPath = diagramPath(diagFile)}
+    <div
+      class="tab"
+      class:active={$activeFilePath === dPath}
+      role="tab"
+      tabindex="0"
+      title="Diagram: {diagFile}"
+      onclick={() => activeFilePath.set(dPath)}
+      onkeydown={(e) => e.key === 'Enter' && activeFilePath.set(dPath)}
+    >
+      <GitBranch size={13} />
+      <span class="tab-name">◈ {diagFile.split('/').pop()}</span>
+      <button class="tab-close" onclick={(e) => { e.stopPropagation(); openDiagrams.update(d => d.filter(f => f !== diagFile)); if ($activeFilePath === dPath) activeFilePath.set($openFiles.at(-1)?.path ?? null); }}>×</button>
+    </div>
+  {/each}
+
   {#if $showPreview}
     <div
       class="tab"
@@ -163,6 +181,9 @@
   <div class="tab-add-menu" role="menu" style="top: {addMenuPos.top}px; right: {addMenuPos.right}px;">
     <button class="tab-add-menu-item" role="menuitem" onclick={openExistingFileTab}>
       <FolderOpen size={12} /> <span>Open File</span>
+    </button>
+    <button class="tab-add-menu-item" role="menuitem" onclick={openDiagramTab}>
+      <GitBranch size={12} /> <span>File Diagram</span>
     </button>
     <button class="tab-add-menu-item" role="menuitem" onclick={openPreviewTab}>
       <Eye size={12} /> <span>Preview</span>

@@ -10,11 +10,12 @@
   import GitPanel from './lib/components/git/GitPanel.svelte';
   import FileSearch from './lib/components/filetree/FileSearch.svelte';
   import Preview from './lib/components/preview/Preview.svelte';
+  import FileDiagram from './lib/components/diagram/FileDiagram.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, PREVIEW_PATH, terminalSessions, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/modules/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalSessions, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from './lib/modules/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -55,6 +56,7 @@
   }
 
   let showFileSearch = $state(false);
+  let showDiagramSearch = $state(false);
   let sidebarWidth = $state(220);
   let sidebarVisible = $state(true);
 
@@ -254,6 +256,12 @@
     }
   });
 
+  $effect(() => {
+    if ($openDiagramSearchSignal > 0) {
+      showDiagramSearch = true;
+    }
+  });
+
   // Keep preview alive once opened
   $effect(() => {
     if (isPreviewPath($activeFilePath)) showPreview.set(true);
@@ -322,8 +330,14 @@
                 <Preview />
               </div>
             {/if}
+            <!-- Diagram tab -->
+            {#if isDiagramPath($activeFilePath)}
+              <div class="terminal-tab-slot focused">
+                <FileDiagram filePath={getDiagramFilePath($activeFilePath ?? '')} />
+              </div>
+            {/if}
             <!-- File editor — hidden while a terminal or preview tab is focused -->
-            {#if !($showTerminal && isTerminalPath($activeFilePath)) && !isPreviewPath($activeFilePath)}
+            {#if !($showTerminal && isTerminalPath($activeFilePath)) && !isPreviewPath($activeFilePath) && !isDiagramPath($activeFilePath)}
               {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
                 <MergeEditor filePath={$activeFile} />
               {:else if $activeFile && isJsonFile($activeFile)}
@@ -393,12 +407,24 @@
     {#if showFileSearch}
       <FileSearch onClose={() => showFileSearch = false} />
     {/if}
+
+    {#if showDiagramSearch}
+      <FileSearch onClose={() => showDiagramSearch = false} onSelect={(relPath) => {
+        const root = get(projectRoot);
+        if (!root) return;
+        const fullPath = `${root}/${relPath}`;
+        openDiagrams.update(d => d.includes(fullPath) ? d : [...d, fullPath]);
+        activeFilePath.set(diagramPath(fullPath));
+      }} />
+    {/if}
   </div>
 
   <div class="statusbar">
     <div class="statusbar-left">
       {#if isTerminalPath($activeFilePath) || isPreviewPath($activeFilePath)}
         <span class="breadcrumb-plain">{isTerminalPath($activeFilePath) ? 'Terminal' : 'Preview'}</span>
+      {:else if isDiagramPath($activeFilePath)}
+        <span class="breadcrumb-plain">Diagram: {getDiagramFilePath($activeFilePath ?? '').split('/').pop()}</span>
       {:else if breadcrumbSegments.length > 0}
         <div class="breadcrumb">
           {#each breadcrumbSegments as seg, i}

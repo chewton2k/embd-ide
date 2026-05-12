@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { projectRoot, addFile } from '../../modules/stores';
 
-  let { onClose }: { onClose: () => void } = $props();
+  let { onClose, onSelect }: { onClose: () => void; onSelect?: (relPath: string) => void } = $props();
 
   let query = $state('');
   let debouncedQuery = $state('');
@@ -68,6 +68,11 @@
   });
 
   function selectFile(relPath: string) {
+    if (onSelect) {
+      onSelect(relPath);
+      onClose();
+      return;
+    }
     const root = $projectRoot;
     if (!root) return;
     const fullPath = `${root}/${relPath}`;

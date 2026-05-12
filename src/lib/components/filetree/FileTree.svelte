@@ -7,7 +7,7 @@
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import Icon from '@iconify/svelte';
   import { Search, FilePlus2, FolderPlus, FolderOpen, Folder, ChevronRight, FolderSymlink } from 'lucide-svelte';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget } from '../../modules/stores';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath } from '../../modules/stores';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
   import { exists } from '@tauri-apps/plugin-fs';
   import Button from '../ui/button/Button.svelte';
@@ -645,6 +645,34 @@
     }
   }
 
+  function openDiagram(path: string) {
+    closeContextMenu();
+    openDiagrams.update(d => d.includes(path) ? d : [...d, path]);
+    activeFilePath.set(diagramPath(path));
+  }
+
+  async function addToGitignore(path: string) {
+    closeContextMenu();
+    const root = $projectRoot;
+    if (!root) return;
+    const relativePath = path.startsWith(root) ? path.slice(root.length + 1) : path;
+    const gitignorePath = `${root}/.gitignore`;
+    try {
+      let content = '';
+      try {
+        content = await invoke<string>('read_file_content', { path: gitignorePath });
+      } catch { /* file doesn't exist yet */ }
+      const lines = content.split('\n');
+      if (lines.some(l => l.trim() === relativePath)) return; // already in .gitignore
+      const newContent = content.endsWith('\n') || content === ''
+        ? `${content}${relativePath}\n`
+        : `${content}\n${relativePath}\n`;
+      await invoke('write_file_content', { path: gitignorePath, content: newContent });
+    } catch (e) {
+      console.error('Failed to add to .gitignore:', e);
+    }
+  }
+
   async function confirmRename() {
     if (!renamingPath || !renameValue.trim()) {
       cancelRename();
@@ -1164,6 +1192,15 @@
       </button>
       <button class="context-item" onclick={() => revealInFileManager(contextMenu!.path)}>
         Reveal in File Manager
+      </button>
+      <div class="context-separator"></div>
+      {#if !contextMenu!.isDir}
+        <button class="context-item" onclick={() => openDiagram(contextMenu!.path)}>
+          Show Diagram
+        </button>
+      {/if}
+      <button class="context-item" onclick={() => addToGitignore(contextMenu!.path)}>
+        Add to .gitignore
       </button>
       <div class="context-separator"></div>
       <button class="context-item danger" onclick={deleteSelected}>

@@ -324,6 +324,7 @@
 
     if (remaining.length === 0) {
       showTerminal.set(false);
+      terminalSessions.set([]);
       if (isTerminalPath(get(activeFilePath))) {
         const files = get(openFiles);
         activeFilePath.set(files.at(-1)?.path ?? null);
