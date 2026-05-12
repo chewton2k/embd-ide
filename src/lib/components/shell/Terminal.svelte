@@ -8,17 +8,25 @@
   import { open } from '@tauri-apps/plugin-shell';
   import {
     projectRoot, terminalFontSize, appearanceMode, showTerminal,
-    activeFilePath, openFiles, terminalSessions, createTerminalSignal,
-    killTerminalSignal, splitTerminalSignal, collapseTerminalSplitsSignal,
-    isTerminalPath, terminalPath
+    activeFilePath, openFiles,
+    terminalSessions, terminalTabs, activeTerminalTabId,
+    createTerminalSignal, killTerminalSignal,
+    splitTerminalSignal, collapseTerminalSplitsSignal,
+    isTerminalPath, terminalPath, terminalTabIdFromPath, allocateTerminalTabId,
+    type TerminalTabInfo,
   } from '../../modules/stores';
   import { get } from 'svelte/store';
-  import { SplitSquareVertical, PanelBottom, Columns2, TerminalSquare } from 'lucide-svelte';
+  import { SplitSquareVertical, PanelBottom, Columns2 } from 'lucide-svelte';
   import '@xterm/xterm/css/xterm.css';
 
+  // ── Types ────────────────────────────────────────────────────────
+
   interface TerminalPane {
+    /** Backend PTY / session id. Also used as the DOM pane key. */
     id: number;
     sessionId: number;
+    /** Which terminal tab this pane belongs to. */
+    tabId: number;
     name: string;
     xterm: XTerm;
     fitAddon: FitAddon;
@@ -30,18 +38,44 @@
 
   type Rect = { top: number; left: number; width: number; height: number };
 
-  let terminalRoot: HTMLDivElement;
-  let panes = $state<TerminalPane[]>([]);
-  let activePaneId = $state<number | null>(null);
-  let contextMenu = $state<{ x: number; y: number; paneId: number | null } | null>(null);
-  let contextMenuEl = $state<HTMLDivElement | undefined>();
-  let opChain = Promise.resolve();
-
-  // ── Split tree for nested tmux-style splits ──
   type SplitNode =
     | { type: 'leaf'; paneId: number }
     | { type: 'split'; direction: 'horizontal' | 'vertical'; children: [SplitNode, SplitNode] };
-  let splitTree = $state<SplitNode | null>(null);
+
+  // ── State ────────────────────────────────────────────────────────
+
+  let terminalRoot: HTMLDivElement;
+  let panes = $state<TerminalPane[]>([]);
+
+  /** Per-tab split tree. Empty tabs have no entry. */
+  let splitTrees = $state<Record<number, SplitNode | null>>({});
+  /** Per-tab active pane id. Updated on click/focus/split/close. */
+  let activePaneByTab = $state<Record<number, number | null>>({});
+
+  let contextMenu = $state<{ x: number; y: number; paneId: number | null; tabId: number } | null>(null);
+  let contextMenuEl = $state<HTMLDivElement | undefined>();
+
+  /** Serialize pane-mutation ops so rapid split/close clicks don't interleave. */
+  let opChain = Promise.resolve();
+
+  // ── Derived views for the active tab ─────────────────────────────
+
+  const currentTabId = $derived($activeTerminalTabId);
+  const currentPanes = $derived(
+    currentTabId == null ? [] : panes.filter(p => p.tabId === currentTabId)
+  );
+  const currentSplitTree = $derived<SplitNode | null>(
+    currentTabId == null ? null : (splitTrees[currentTabId] ?? null)
+  );
+  const currentActivePaneId = $derived<number | null>(
+    currentTabId == null ? null : (activePaneByTab[currentTabId] ?? null)
+  );
+
+  /** Rect layout for the ACTIVE tab's panes (the only ones that matter for
+   *  layout — other tabs are CSS-hidden so their xterm stays alive). */
+  const paneRects = $derived(computePaneRects(currentSplitTree));
+
+  // ── Split tree helpers (pure functions) ──────────────────────────
 
   function findLeaf(node: SplitNode | null, paneId: number): boolean {
     if (!node) return false;
@@ -72,7 +106,6 @@
     return { type: 'split', direction: node.direction, children: [left, right] };
   }
 
-  /** Compute percentage-based rects for each leaf pane from the split tree. */
   function computePaneRects(tree: SplitNode | null): Record<number, Rect> {
     const rects: Record<number, Rect> = {};
     function walk(node: SplitNode, top: number, left: number, width: number, height: number) {
@@ -94,7 +127,22 @@
     return rects;
   }
 
-  let paneRects = $derived(computePaneRects(splitTree));
+  // ── Per-tab state mutators ───────────────────────────────────────
+
+  function setSplitTree(tabId: number, tree: SplitNode | null) {
+    splitTrees = { ...splitTrees, [tabId]: tree };
+  }
+  function setActivePane(tabId: number, paneId: number | null) {
+    activePaneByTab = { ...activePaneByTab, [tabId]: paneId };
+  }
+  function removeTabState(tabId: number) {
+    const { [tabId]: _tree, ...restTrees } = splitTrees;
+    splitTrees = restTrees;
+    const { [tabId]: _active, ...restActive } = activePaneByTab;
+    activePaneByTab = restActive;
+  }
+
+  // ── Context-menu positioning ─────────────────────────────────────
 
   $effect(() => {
     if (contextMenuEl && contextMenu) {
@@ -112,24 +160,29 @@
 
   function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
+    if (currentTabId == null) return;
     const target = e.target as HTMLElement;
     const paneEl = target.closest('[data-pane-terminal]');
-    const paneId = paneEl ? Number(paneEl.getAttribute('data-pane-terminal')) : activePaneId;
-    contextMenu = { x: e.clientX, y: e.clientY, paneId };
+    const paneId = paneEl ? Number(paneEl.getAttribute('data-pane-terminal')) : currentActivePaneId;
+    contextMenu = { x: e.clientX, y: e.clientY, paneId, tabId: currentTabId };
   }
 
   function closeContextMenu() { contextMenu = null; }
 
   function ctxAction(action: 'right' | 'bottom' | 'collapse' | 'close') {
     const paneId = contextMenu?.paneId;
+    const tabId = contextMenu?.tabId ?? currentTabId;
     contextMenu = null;
-    if (action === 'collapse') enqueue(() => collapseToActivePane());
+    if (tabId == null) return;
+    if (action === 'collapse') enqueue(() => collapseToActivePane(tabId));
     else if (action === 'close' && paneId != null) enqueue(() => closePane(paneId));
     else if (action === 'right' || action === 'bottom') {
-      if (paneId != null) activePaneId = paneId;
-      enqueue(() => splitTerminal(action));
+      if (paneId != null) setActivePane(tabId, paneId);
+      enqueue(() => splitTerminal(action, tabId));
     }
   }
+
+  // ── xterm theme ──────────────────────────────────────────────────
 
   function buildXtermTheme() {
     const mode = get(appearanceMode);
@@ -152,6 +205,8 @@
     };
   }
 
+  // ── Pane helpers ─────────────────────────────────────────────────
+
   function getPaneMount(id: number): HTMLDivElement | null {
     return terminalRoot?.querySelector(`[data-pane-terminal="${id}"]`) ?? null;
   }
@@ -164,9 +219,13 @@
   }
 
   function focusPane(id: number) {
-    activePaneId = id;
     const pane = panes.find((entry) => entry.id === id);
     if (!pane) return;
+    setActivePane(pane.tabId, id);
+    // Focus also implies making that tab the active terminal tab.
+    if (get(activeTerminalTabId) !== pane.tabId) {
+      activeTerminalTabId.set(pane.tabId);
+    }
     requestAnimationFrame(() => {
       fitPane(pane);
       if (pane.mounted) {
@@ -181,12 +240,88 @@
     return next;
   }
 
+  // ── Tab management ───────────────────────────────────────────────
+
+  /** Create a brand-new terminal tab and seed it with a single pane. */
+  async function createTab(): Promise<number | null> {
+    const tabId = allocateTerminalTabId();
+    terminalTabs.update(tabs => [...tabs, buildTabLabel(tabs, tabId)]);
+    setSplitTree(tabId, null);
+    setActivePane(tabId, null);
+    activeTerminalTabId.set(tabId);
+    showTerminal.set(true);
+    activeFilePath.set(terminalPath(tabId));
+    const pane = await createPane({ tabId });
+    if (!pane) {
+      // Backend refused to spawn — roll back the tab so the UI doesn't
+      // show an empty placeholder tab forever.
+      terminalTabs.update(tabs => tabs.filter(t => t.id !== tabId));
+      removeTabState(tabId);
+      if (get(activeTerminalTabId) === tabId) {
+        const remaining = get(terminalTabs);
+        activeTerminalTabId.set(remaining[0]?.id ?? null);
+      }
+      return null;
+    }
+    return tabId;
+  }
+
+  function buildTabLabel(existing: TerminalTabInfo[], id: number): TerminalTabInfo {
+    // Use the next available sequential number (fills gaps left by closed tabs).
+    const taken = new Set(existing.map(t => {
+      const m = t.name.match(/^Terminal (\d+)$/);
+      return m ? parseInt(m[1], 10) : 0;
+    }));
+    let n = 1;
+    while (taken.has(n)) n++;
+    return { id, name: `Terminal ${n}` };
+  }
+
+  async function focusTab(tabId: number) {
+    activeTerminalTabId.set(tabId);
+    showTerminal.set(true);
+    activeFilePath.set(terminalPath(tabId));
+    const activeInTab = activePaneByTab[tabId];
+    if (activeInTab != null) {
+      requestAnimationFrame(() => focusPane(activeInTab));
+    } else {
+      // Focus the first pane in this tab if any.
+      const firstPane = panes.find(p => p.tabId === tabId);
+      if (firstPane) {
+        setActivePane(tabId, firstPane.id);
+        requestAnimationFrame(() => focusPane(firstPane.id));
+      }
+    }
+  }
+
+  async function closeTab(tabId: number) {
+    // Close all panes in this tab; the per-pane close handler handles the
+    // tab removal when the last pane goes away.
+    const tabPanes = panes.filter(p => p.tabId === tabId);
+    for (const pane of tabPanes) {
+      await closePane(pane.id);
+    }
+  }
+
+  async function closeAllTabs() {
+    for (const pane of [...panes]) {
+      await closePane(pane.id);
+    }
+  }
+
+  // ── Pane lifecycle ───────────────────────────────────────────────
+
   /**
-   * Create a pane: spawn backend, build xterm, update tree, mount into DOM.
-   * If `target` is provided, splits from that pane; otherwise creates standalone.
+   * Create a pane. Pass `tabId` to add to a specific tab, plus an optional
+   * `splitFrom` pane + `direction` to split in-place.
    */
-  async function createPane(target?: { splitFrom: number; direction: 'horizontal' | 'vertical' }): Promise<TerminalPane | null> {
+  async function createPane(target: {
+    tabId: number;
+    splitFrom?: number;
+    direction?: 'horizontal' | 'vertical';
+  }): Promise<TerminalPane | null> {
     const cwd = get(projectRoot);
+    const { tabId } = target;
 
     const xterm = new XTerm({
       cursorBlink: true,
@@ -245,6 +380,7 @@
     const pane: TerminalPane = {
       id: sessionId,
       sessionId,
+      tabId,
       name,
       xterm,
       fitAddon,
@@ -254,26 +390,30 @@
       mounted: false,
     };
 
-    // Update panes + split tree atomically so Svelte renders the mount div.
     panes = [...panes, pane];
 
-    if (target && splitTree && findLeaf(splitTree, target.splitFrom)) {
-      splitTree = replaceLeaf(splitTree, target.splitFrom, {
+    // Update the split tree for this tab.
+    const currentTree = splitTrees[tabId] ?? null;
+    if (target.splitFrom && currentTree && findLeaf(currentTree, target.splitFrom) && target.direction) {
+      setSplitTree(tabId, replaceLeaf(currentTree, target.splitFrom, {
         type: 'split',
         direction: target.direction,
         children: [
           { type: 'leaf', paneId: target.splitFrom },
           { type: 'leaf', paneId: sessionId },
         ],
-      });
-    } else if (!splitTree) {
-      splitTree = { type: 'leaf', paneId: sessionId };
+      }));
+    } else if (!currentTree) {
+      setSplitTree(tabId, { type: 'leaf', paneId: sessionId });
     }
 
     showTerminal.set(true);
-    activeFilePath.set(terminalPath());
+    if (get(activeTerminalTabId) !== tabId) activeTerminalTabId.set(tabId);
+    if (!isTerminalPath(get(activeFilePath)) || terminalTabIdFromPath(get(activeFilePath)) !== tabId) {
+      activeFilePath.set(terminalPath(tabId));
+    }
 
-    // Wait for Svelte to render the mount div.
+    // Wait for Svelte to render the mount div for this new pane.
     await tick();
     await new Promise((r) => requestAnimationFrame(r));
 
@@ -290,7 +430,7 @@
       pane.resizeObserver = resizeObserver;
     }
 
-    activePaneId = sessionId;
+    setActivePane(tabId, sessionId);
     requestAnimationFrame(() => {
       if (pane.mounted) {
         try { pane.xterm.focus(); } catch { /* ignore */ }
@@ -305,6 +445,8 @@
     if (idx === -1) return;
 
     const pane = panes[idx];
+    const tabId = pane.tabId;
+
     pane.unlisten();
     pane.unlistenExit();
     pane.resizeObserver?.disconnect();
@@ -316,44 +458,70 @@
 
     const remaining = panes.filter((entry) => entry.id !== paneId);
     panes = remaining;
-    splitTree = removeLeaf(splitTree, paneId);
 
-    if (activePaneId === paneId) {
-      activePaneId = remaining[idx]?.id ?? remaining[idx - 1]?.id ?? remaining[0]?.id ?? null;
-    }
+    const newTree = removeLeaf(splitTrees[tabId] ?? null, paneId);
+    setSplitTree(tabId, newTree);
 
-    if (remaining.length === 0) {
-      showTerminal.set(false);
-      terminalSessions.set([]);
-      if (isTerminalPath(get(activeFilePath))) {
-        const files = get(openFiles);
-        activeFilePath.set(files.at(-1)?.path ?? null);
+    const tabPanes = remaining.filter(p => p.tabId === tabId);
+    if (tabPanes.length === 0) {
+      // Tab is now empty — remove it entirely.
+      removeTabState(tabId);
+      terminalTabs.update(tabs => tabs.filter(t => t.id !== tabId));
+      if (remaining.length === 0) {
+        showTerminal.set(false);
+        if (isTerminalPath(get(activeFilePath))) {
+          const files = get(openFiles);
+          activeFilePath.set(files.at(-1)?.path ?? null);
+        }
+        activeTerminalTabId.set(null);
+      } else {
+        // Switch to another tab.
+        const remainingTabs = get(terminalTabs);
+        const nextTabId = remainingTabs[0]?.id ?? null;
+        activeTerminalTabId.set(nextTabId);
+        if (nextTabId != null && isTerminalPath(get(activeFilePath))) {
+          activeFilePath.set(terminalPath(nextTabId));
+        }
       }
+    } else {
+      // Other panes remain in this tab — pick a new active pane.
+      const prevActive = activePaneByTab[tabId];
+      if (prevActive === paneId) {
+        setActivePane(tabId, tabPanes[0].id);
+      }
+      // Refit remaining panes after layout change.
+      await tick();
+      await new Promise((r) => requestAnimationFrame(r));
+      for (const p of tabPanes) fitPane(p);
+      const current = activePaneByTab[tabId];
+      if (current != null) focusPane(current);
+    }
+  }
+
+  // ── Split / collapse (within a tab) ──────────────────────────────
+
+  async function splitTerminal(direction: 'right' | 'bottom', tabId: number) {
+    const tabPanes = panes.filter(p => p.tabId === tabId);
+    if (tabPanes.length === 0) {
+      // Creating a split in an empty tab just spawns a pane.
+      await createPane({ tabId });
       return;
     }
+    const targetId = activePaneByTab[tabId] ?? tabPanes[0]?.id;
+    if (targetId == null) return;
+    const dir = direction === 'right' ? 'horizontal' : 'vertical';
+    await createPane({ tabId, splitFrom: targetId, direction: dir });
 
-    if (!remaining.some((entry) => entry.id === activePaneId)) {
-      activePaneId = remaining[0].id;
-    }
-
-    // Refit remaining panes after layout change.
     await tick();
     await new Promise((r) => requestAnimationFrame(r));
-    for (const p of remaining) fitPane(p);
-
-    if (activePaneId !== null) focusPane(activePaneId);
+    for (const p of tabPanes) fitPane(p);
   }
 
-  async function closeAllPanes() {
-    for (const pane of [...panes]) {
-      await closePane(pane.id);
-    }
-  }
-
-  async function collapseToActivePane() {
-    const keepId = activePaneId ?? panes[0]?.id ?? null;
-    if (keepId === null || panes.length <= 1) return;
-    for (const pane of [...panes]) {
+  async function collapseToActivePane(tabId: number) {
+    const tabPanes = panes.filter(p => p.tabId === tabId);
+    const keepId = activePaneByTab[tabId] ?? tabPanes[0]?.id ?? null;
+    if (keepId == null || tabPanes.length <= 1) return;
+    for (const pane of tabPanes) {
       if (pane.id !== keepId) {
         await closePane(pane.id);
       }
@@ -361,129 +529,121 @@
     focusPane(keepId);
   }
 
-  async function ensureTerminalVisible() {
-    showTerminal.set(true);
-    activeFilePath.set(terminalPath());
-    if (panes.length === 0) {
-      await createPane();
-      return;
-    }
-    if (activePaneId !== null) {
-      focusPane(activePaneId);
-    }
-  }
+  // ── External signal handlers ─────────────────────────────────────
 
-  async function splitTerminal(direction: 'right' | 'bottom') {
-    if (panes.length === 0) {
-      await createPane();
-      return;
-    }
-    const targetId = activePaneId ?? panes[0]?.id;
-    if (targetId == null) return;
-
-    const dir = direction === 'right' ? 'horizontal' : 'vertical';
-    await createPane({ splitFrom: targetId, direction: dir });
-
-    // Refit all panes since existing ones shrank.
-    await tick();
-    await new Promise((r) => requestAnimationFrame(r));
-    for (const p of panes) fitPane(p);
-  }
-
-  // Refit all panes when rects change (e.g. container resize).
+  // Mirror the panes list to the global `terminalSessions` store. This is
+  // how the agent loop and other components see what terminals exist.
   $effect(() => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    paneRects;
-    requestAnimationFrame(() => {
-      for (const p of panes) fitPane(p);
-    });
-  });
-
-  $effect(() => {
-    terminalSessions.set(panes.map((pane) => ({
+    terminalSessions.set(panes.map(pane => ({
       id: pane.id,
+      tabId: pane.tabId,
       name: pane.name,
     })));
   });
 
+  // Keep `activeTerminalTabId` in sync with `activeFilePath` when the user
+  // clicks a terminal tab in the top bar.
   $effect(() => {
     const path = $activeFilePath;
     if (!isTerminalPath(path)) return;
-    if (path !== terminalPath()) {
-      activeFilePath.set(terminalPath());
-      return;
+    const tabIdFromPath = terminalTabIdFromPath(path);
+    if (tabIdFromPath != null && tabIdFromPath !== get(activeTerminalTabId)) {
+      activeTerminalTabId.set(tabIdFromPath);
     }
-    if (activePaneId !== null) {
-      const paneId = activePaneId;
-      requestAnimationFrame(() => focusPane(paneId));
+    // Re-focus the active pane for this tab.
+    const current = tabIdFromPath != null ? activePaneByTab[tabIdFromPath] : null;
+    if (current != null) {
+      requestAnimationFrame(() => focusPane(current));
     }
   });
 
+  // createTerminalSignal: create a new tab if requested, or ensure ≥1 tab exists.
   let createCount = 0;
   $effect(() => {
     const sig = $createTerminalSignal;
-    if (sig > createCount) {
-      createCount = sig;
-      enqueue(async () => {
-        await ensureTerminalVisible();
-      });
-    }
+    if (sig.count <= createCount) return;
+    createCount = sig.count;
+    enqueue(async () => {
+      if (sig.forceNew) {
+        await createTab();
+        return;
+      }
+      // Toggle/ensure behavior: if no tabs exist, create one; otherwise focus.
+      const tabs = get(terminalTabs);
+      if (tabs.length === 0) {
+        await createTab();
+      } else {
+        const id = get(activeTerminalTabId) ?? tabs[0].id;
+        focusTab(id);
+      }
+    });
   });
 
   let splitCount = 0;
   $effect(() => {
     const sig = $splitTerminalSignal;
-    if (sig.count > splitCount) {
-      splitCount = sig.count;
-      enqueue(async () => {
-        await splitTerminal(sig.direction);
-      });
-    }
+    if (sig.count <= splitCount) return;
+    splitCount = sig.count;
+    enqueue(async () => {
+      let tabId = get(activeTerminalTabId);
+      if (tabId == null) {
+        // No tab exists — create one + split immediately doesn't make sense,
+        // so fall back to creating a single pane tab.
+        await createTab();
+        return;
+      }
+      await splitTerminal(sig.direction, tabId);
+    });
   });
 
   let collapseCount = 0;
   $effect(() => {
     const sig = $collapseTerminalSplitsSignal;
-    if (sig > collapseCount) {
-      collapseCount = sig;
-      // Defensive guard: collapse is only meaningful when >1 pane exists. The
-      // toolbar already gates this, but a stale derivation or race could still
-      // fire the signal. `collapseToActivePane` also checks, so this is a
-      // second line of defense that avoids needlessly queueing work.
-      if (panes.length > 1) {
-        enqueue(async () => {
-          await collapseToActivePane();
-        });
-      }
+    if (sig <= collapseCount) return;
+    collapseCount = sig;
+    const tabId = get(activeTerminalTabId);
+    if (tabId == null) return;
+    if (panes.filter(p => p.tabId === tabId).length > 1) {
+      enqueue(async () => { await collapseToActivePane(tabId); });
     }
   });
 
+  // killTerminalSignal: handle 'pane', 'tab', 'all' variants.
   $effect(() => {
     const target = $killTerminalSignal;
     if (target === null) return;
     killTerminalSignal.set(null);
     enqueue(async () => {
-      if (target === 'all') {
-        await closeAllPanes();
+      if (target.kind === 'all') {
+        await closeAllTabs();
+      } else if (target.kind === 'tab') {
+        await closeTab(target.id);
       } else {
-        await closePane(target);
+        await closePane(target.id);
       }
     });
   });
 
+  // Refit all panes when rects change (e.g. container resize or active tab switch).
   $effect(() => {
-    if ($showTerminal && isTerminalPath($activeFilePath) && activePaneId !== null) {
-      const paneId = activePaneId;
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    paneRects;
+    currentTabId;
+    requestAnimationFrame(() => {
+      for (const p of currentPanes) fitPane(p);
+    });
+  });
+
+  $effect(() => {
+    if ($showTerminal && isTerminalPath($activeFilePath) && currentActivePaneId !== null) {
+      const paneId = currentActivePaneId;
       requestAnimationFrame(() => focusPane(paneId));
     }
   });
 
-  onMount(() => {
-    // Auto-create a terminal pane when the component first mounts with none.
-    if (panes.length === 0) {
-      enqueue(() => createPane());
-    }
+  // ── Lifecycle ────────────────────────────────────────────────────
 
+  onMount(() => {
     const unsubFont = terminalFontSize.subscribe((size) => {
       for (const pane of panes) {
         pane.xterm.options.fontSize = size;
@@ -506,7 +666,9 @@
 
   onDestroy(() => {
     terminalSessions.set([]);
-    createTerminalSignal.set(0);
+    terminalTabs.set([]);
+    activeTerminalTabId.set(null);
+    createTerminalSignal.set({ count: 0, forceNew: false });
     for (const pane of panes) {
       pane.unlisten();
       pane.unlistenExit();
@@ -519,26 +681,39 @@
 <div class="terminal-panel">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="terminal-content" role="application" bind:this={terminalRoot} oncontextmenu={handleContextMenu}>
-    {#if panes.length === 0}
+    {#if $terminalTabs.length === 0}
       <div class="terminal-placeholder">Open a terminal to start a session.</div>
-    {:else}
-      {#each panes as pane (pane.id)}
-        {@const rect = paneRects[pane.id]}
-        {#if rect}
-          <div
-            class="terminal-pane"
-            class:active={activePaneId === pane.id}
-            style="top:{rect.top}%;left:{rect.left}%;width:{rect.width}%;height:{rect.height}%"
-            role="button"
-            tabindex="0"
-            onclick={() => focusPane(pane.id)}
-            onkeydown={(e) => e.key === 'Enter' && focusPane(pane.id)}
-          >
-            <div class="pane-body" data-pane-terminal={pane.id}></div>
-          </div>
-        {/if}
-      {/each}
     {/if}
+
+    <!--
+      We render each terminal tab as its own absolutely-positioned layer.
+      Inactive layers are CSS-hidden (visibility: hidden; pointer-events: none)
+      so their xterm DOM stays mounted and the PTY output keeps writing into
+      their scrollback — switching tabs is then instant with no loss of state.
+    -->
+    {#each $terminalTabs as tab (tab.id)}
+      {@const tabPanes = panes.filter(p => p.tabId === tab.id)}
+      {@const isActive = tab.id === currentTabId}
+      {@const rectsForTab = isActive ? paneRects : computePaneRects(splitTrees[tab.id] ?? null)}
+      <div class="tab-layer" class:active={isActive}>
+        {#each tabPanes as pane (pane.id)}
+          {@const rect = rectsForTab[pane.id]}
+          {#if rect}
+            <div
+              class="terminal-pane"
+              class:active={isActive && currentActivePaneId === pane.id}
+              style="top:{rect.top}%;left:{rect.left}%;width:{rect.width}%;height:{rect.height}%"
+              role="button"
+              tabindex="0"
+              onclick={() => focusPane(pane.id)}
+              onkeydown={(e) => e.key === 'Enter' && focusPane(pane.id)}
+            >
+              <div class="pane-body" data-pane-terminal={pane.id}></div>
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/each}
   </div>
 
   {#if contextMenu}
@@ -551,13 +726,13 @@
       <button class="ctx-item" onclick={() => ctxAction('bottom')}>
         <PanelBottom size={13} /> Split Bottom
       </button>
-      {#if panes.length > 1}
+      {#if contextMenu && panes.filter(p => p.tabId === contextMenu!.tabId).length > 1}
         <div class="ctx-divider"></div>
         <button class="ctx-item" onclick={() => ctxAction('close')}>
-          Close Terminal
+          Close Pane
         </button>
         <button class="ctx-item" onclick={() => ctxAction('collapse')}>
-          <SplitSquareVertical size={13} /> Collapse All
+          <SplitSquareVertical size={13} /> Collapse Panes
         </button>
       {/if}
     </div>
@@ -580,6 +755,20 @@
     position: relative;
     background: var(--border);
     overflow: hidden;
+  }
+
+  /* One absolutely-positioned layer per terminal tab. Only the active layer
+     is visible — inactive layers keep their xterm DOM mounted so PTYs stay
+     live and their scrollback isn't lost when switching. */
+  .tab-layer {
+    position: absolute;
+    inset: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  .tab-layer.active {
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .terminal-pane {

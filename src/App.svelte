@@ -16,7 +16,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalSessions, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from './lib/modules/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from './lib/modules/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -101,12 +101,22 @@
   }
 
   function toggleTerminal() {
-    const sessions = get(terminalSessions);
-    if (!$showTerminal || sessions.length === 0) {
+    const tabs = get(terminalTabs);
+    if (!$showTerminal || tabs.length === 0) {
+      // Show the terminal; if nothing exists yet, ensure (non-force) will
+      // create the first tab. If tabs exist but the panel is hidden, this
+      // just re-reveals and focuses the last active tab.
       $showTerminal = true;
-      createTerminalSignal.update(n => n + 1);
-    } else if (!isTerminalPath($activeFilePath)) {
-      activeFilePath.set(terminalPath());
+      createTerminalSignal.update(s => ({ count: s.count + 1, forceNew: false }));
+      return;
+    }
+    if (!isTerminalPath($activeFilePath)) {
+      // Route to the last-active terminal tab (or first if none recorded).
+      const tabId = get(activeTerminalTabId) ?? tabs[0].id;
+      activeFilePath.set(terminalPath(tabId));
+    } else {
+      // Already on a terminal tab — close the panel.
+      $showTerminal = false;
     }
   }
 

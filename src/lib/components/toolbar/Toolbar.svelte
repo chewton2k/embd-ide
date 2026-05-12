@@ -1,20 +1,20 @@
 <script lang="ts">
   import Tabs from '../tabs/Tabs.svelte';
   import { PanelLeft, SplitSquareVertical, Search, GitBranch, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
-  import { showTerminal, showSettings, showGit, gitBranch, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath, openFileSearchSignal } from '../../modules/stores';
+  import { showTerminal, showSettings, showGit, gitBranch, toggleGitPanel, activeFilePath, panesInActiveTab, activeTerminalTabId, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath, openFileSearchSignal } from '../../modules/stores';
 
   let splitMenuOpen = $state(false);
   let splitMenuPos = $state<{ top: number; left: number } | null>(null);
   let splitBtnEl: HTMLDivElement | undefined = $state();
 
   // Collapse is only available when there is more than one terminal pane open
-  // in the terminal view; otherwise the button acts as a "split" trigger.
-  let splitActive = $derived($showTerminal && $terminalSessions.length > 1);
+  // IN THE CURRENT TAB; otherwise the button acts as a "split" trigger.
+  let splitActive = $derived($showTerminal && $panesInActiveTab > 1);
 
   function handleSplitBtn() {
-    // Re-check the session count at click time — `splitActive` is derived and
-    // could briefly be stale during rapid pane open/close transitions.
-    const canCollapse = $showTerminal && $terminalSessions.length > 1;
+    // Re-check the pane count at click time — the derivation could briefly
+    // be stale during rapid pane open/close transitions.
+    const canCollapse = $showTerminal && $panesInActiveTab > 1;
     if (canCollapse) {
       collapseTerminalSplitsSignal.update(n => n + 1);
       splitMenuOpen = false;
@@ -29,7 +29,10 @@
 
   function activateSplit(dir: 'bottom' | 'right') {
     $showTerminal = true;
-    $activeFilePath = terminalPath();
+    const tabId = $activeTerminalTabId;
+    if (tabId != null) {
+      $activeFilePath = terminalPath(tabId);
+    }
     splitTerminalSignal.update(({ count }) => ({ count: count + 1, direction: dir === 'bottom' ? 'bottom' : 'right' }));
     splitMenuOpen = false;
   }

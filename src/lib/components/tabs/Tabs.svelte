@@ -1,7 +1,7 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
   import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw, GitBranch } from 'lucide-svelte';
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from '../../modules/stores';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalTabs, activeTerminalTabId, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, terminalTabIdFromPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath } from '../../modules/stores';
   import { triggerFileTreeRefresh } from '../../modules/stores';
   import { getFileIconName } from '../../modules/fileIcons';
 
@@ -82,9 +82,9 @@
   function openPreviewTab() { activeFilePath.set(PREVIEW_PATH); addMenuOpen = false; }
   function openDiagramTab() { openDiagramSearchSignal.update(n => n + 1); addMenuOpen = false; }
   function openTerminalTab() {
+    // Always open a NEW terminal tab (the + menu's explicit intent).
     $showTerminal = true;
-    if ($terminalSessions.length === 0) createTerminalSignal.update(n => n + 1);
-    else activeFilePath.set(terminalPath());
+    createTerminalSignal.update(s => ({ count: s.count + 1, forceNew: true }));
     addMenuOpen = false;
   }
 </script>
@@ -118,20 +118,23 @@
     </div>
   {/each}
 
-  {#if $showTerminal && $terminalSessions.length > 0}
-    <div
-      class="tab terminal-tab"
-      class:active={isTerminalPath($activeFilePath)}
-      role="tab"
-      tabindex="0"
-      title="Terminal"
-      onclick={() => activeFilePath.set(terminalPath())}
-      onkeydown={(e) => e.key === 'Enter' && activeFilePath.set(terminalPath())}
-    >
-      <TerminalSquare size={13} />
-      <span class="tab-name">Terminal</span>
-      <button class="tab-close" onclick={(e) => { e.stopPropagation(); killTerminalSignal.set('all'); }}>×</button>
-    </div>
+  {#if $showTerminal}
+    {#each $terminalTabs as termTab (termTab.id)}
+      {@const termPath = terminalPath(termTab.id)}
+      <div
+        class="tab terminal-tab"
+        class:active={isTerminalPath($activeFilePath) && terminalTabIdFromPath($activeFilePath) === termTab.id}
+        role="tab"
+        tabindex="0"
+        title={termTab.name}
+        onclick={() => { activeFilePath.set(termPath); activeTerminalTabId.set(termTab.id); }}
+        onkeydown={(e) => { if (e.key === 'Enter') { activeFilePath.set(termPath); activeTerminalTabId.set(termTab.id); } }}
+      >
+        <TerminalSquare size={13} />
+        <span class="tab-name">{termTab.name}</span>
+        <button class="tab-close" title="Close terminal" aria-label="Close {termTab.name}" onclick={(e) => { e.stopPropagation(); killTerminalSignal.set({ kind: 'tab', id: termTab.id }); }}>×</button>
+      </div>
+    {/each}
   {/if}
 
   {#each $openDiagrams as diagFile}
