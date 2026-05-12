@@ -7,7 +7,7 @@
   import { WebLinksAddon } from '@xterm/addon-web-links';
   import { open } from '@tauri-apps/plugin-shell';
   import {
-    projectRoot, terminalFontSize, currentThemeId, getTheme, showTerminal,
+    projectRoot, terminalFontSize, appearanceMode, showTerminal,
     activeFilePath, openFiles, terminalSessions, createTerminalSignal,
     killTerminalSignal, splitTerminalSignal, collapseTerminalSplitsSignal,
     isTerminalPath, terminalPath
@@ -31,31 +31,40 @@
   let panes = $state<TerminalPane[]>([]);
   let activePaneId = $state<number | null>(null);
   let splitDirection = $state<'right' | 'bottom'>('right');
+  let contextMenu = $state<{ x: number; y: number } | null>(null);
   let opChain = Promise.resolve();
 
+  function handleContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    contextMenu = { x: e.clientX, y: e.clientY };
+  }
+
+  function closeContextMenu() { contextMenu = null; }
+
+  function ctxAction(action: 'right' | 'bottom' | 'collapse') {
+    contextMenu = null;
+    if (action === 'collapse') enqueue(() => collapseToActivePane());
+    else enqueue(() => splitTerminal(action));
+  }
+
   function buildXtermTheme() {
-    const c = getTheme(get(currentThemeId)).colors;
+    const mode = get(appearanceMode);
+    const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    if (isDark) {
+      return {
+        background: '#111111', foreground: '#e0e0e0', cursor: '#7aa2f7', selectionBackground: '#2e2e2e',
+        black: '#3a3a3a', red: '#f7768e', green: '#73daca', yellow: '#e0af68',
+        blue: '#7aa2f7', magenta: '#bb9af7', cyan: '#7dcfff', white: '#c0c0c0',
+        brightBlack: '#555555', brightRed: '#f7768e', brightGreen: '#73daca', brightYellow: '#e0af68',
+        brightBlue: '#7aa2f7', brightMagenta: '#bb9af7', brightCyan: '#7dcfff', brightWhite: '#e0e0e0',
+      };
+    }
     return {
-      background: c.termBg,
-      foreground: c.termFg,
-      cursor: c.termCursor,
-      selectionBackground: c.termSelection,
-      black: c.termBlack,
-      red: c.termRed,
-      green: c.termGreen,
-      yellow: c.termYellow,
-      blue: c.termBlue,
-      magenta: c.termMagenta,
-      cyan: c.termCyan,
-      white: c.termWhite,
-      brightBlack: c.termBrightBlack,
-      brightRed: c.termRed,
-      brightGreen: c.termGreen,
-      brightYellow: c.termYellow,
-      brightBlue: c.termBlue,
-      brightMagenta: c.termMagenta,
-      brightCyan: c.termCyan,
-      brightWhite: c.termBrightWhite,
+      background: '#fafafa', foreground: '#24292e', cursor: '#0969da', selectionBackground: '#d8dee4',
+      black: '#8b949e', red: '#cf222e', green: '#1a7f37', yellow: '#9a6700',
+      blue: '#0969da', magenta: '#8250df', cyan: '#1b7c83', white: '#24292e',
+      brightBlack: '#6e7781', brightRed: '#cf222e', brightGreen: '#1a7f37', brightYellow: '#9a6700',
+      brightBlue: '#0969da', brightMagenta: '#8250df', brightCyan: '#1b7c83', brightWhite: '#24292e',
     };
   }
 
@@ -334,7 +343,7 @@
       }
     });
 
-    const unsubTheme = currentThemeId.subscribe(() => {
+    const unsubTheme = appearanceMode.subscribe(() => {
       const theme = buildXtermTheme();
       for (const pane of panes) {
         pane.xterm.options.theme = theme;
@@ -360,24 +369,7 @@
 </script>
 
 <div class="terminal-panel">
-  <div class="terminal-header">
-    <div class="terminal-title"><TerminalSquare size={13} /> <span>Terminal</span></div>
-    <div class="terminal-actions">
-      <button type="button" class="header-btn" onclick={() => enqueue(() => splitTerminal('right'))} title="Split right">
-        <Columns2 size={13} />
-      </button>
-      <button type="button" class="header-btn" onclick={() => enqueue(() => splitTerminal('bottom'))} title="Split below">
-        <PanelBottom size={13} />
-      </button>
-      {#if panes.length > 1}
-        <button type="button" class="header-btn" onclick={() => enqueue(() => collapseToActivePane())} title="Close split panes">
-          <SplitSquareVertical size={13} />
-        </button>
-      {/if}
-    </div>
-  </div>
-
-  <div class="terminal-content" class:split-right={splitDirection === 'right'} class:split-bottom={splitDirection === 'bottom'} bind:this={terminalRoot}>
+  <div class="terminal-content" class:split-right={splitDirection === 'right'} class:split-bottom={splitDirection === 'bottom'} bind:this={terminalRoot} oncontextmenu={handleContextMenu}>
     {#if panes.length === 0}
       <div class="terminal-placeholder">Open a terminal to start a session.</div>
     {:else}
@@ -390,25 +382,29 @@
           onclick={() => focusPane(pane.id)}
           onkeydown={(e) => e.key === 'Enter' && focusPane(pane.id)}
         >
-          <div class="pane-header">
-            <span class="pane-title">{pane.name}</span>
-            {#if panes.length > 1}
-              <button
-                type="button"
-                class="pane-close"
-                title="Close pane"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  enqueue(() => closePane(pane.id));
-                }}
-              >×</button>
-            {/if}
-          </div>
           <div class="pane-body" data-pane-terminal={pane.id}></div>
         </div>
       {/each}
     {/if}
   </div>
+
+  {#if contextMenu}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
+    <div class="ctx-menu" style="left:{contextMenu.x}px;top:{contextMenu.y}px">
+      <button class="ctx-item" onclick={() => ctxAction('right')}>
+        <Columns2 size={13} /> Split Right
+      </button>
+      <button class="ctx-item" onclick={() => ctxAction('bottom')}>
+        <PanelBottom size={13} /> Split Bottom
+      </button>
+      {#if panes.length > 1}
+        <button class="ctx-item" onclick={() => ctxAction('collapse')}>
+          <SplitSquareVertical size={13} /> Collapse Splits
+        </button>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -417,47 +413,7 @@
     flex-direction: column;
     height: 100%;
     background: var(--bg-tertiary);
-  }
-
-  .terminal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 6px 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
-    flex-shrink: 0;
-  }
-
-  .terminal-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
-
-  .terminal-actions {
-    display: flex;
-    gap: 4px;
-  }
-
-  .header-btn,
-  .pane-close {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border-radius: 4px;
-    color: var(--text-muted);
-  }
-
-  .header-btn:hover,
-  .pane-close:hover {
-    background: var(--bg-surface);
-    color: var(--text-primary);
+    position: relative;
   }
 
   .terminal-content {
@@ -465,17 +421,12 @@
     min-height: 0;
     min-width: 0;
     display: flex;
-    gap: 6px;
-    padding: 6px;
+    gap: 1px;
+    background: var(--border);
   }
 
-  .terminal-content.split-right {
-    flex-direction: row;
-  }
-
-  .terminal-content.split-bottom {
-    flex-direction: column;
-  }
+  .terminal-content.split-right { flex-direction: row; }
+  .terminal-content.split-bottom { flex-direction: column; }
 
   .terminal-pane {
     display: flex;
@@ -483,34 +434,16 @@
     min-width: 0;
     min-height: 0;
     flex: 1;
-    border: 1px solid var(--border);
-    border-radius: 8px;
     overflow: hidden;
-    background: var(--bg-primary);
+    background: var(--bg-tertiary);
   }
 
-  .terminal-pane.active {
-    border-color: var(--accent);
-  }
+  .terminal-pane.active { }
 
-  .pane-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-height: 28px;
-    padding: 0 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-secondary);
-    flex-shrink: 0;
-  }
-
-  .pane-title {
-    font-size: 11px;
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .pane-body {
+    flex: 1;
+    min-height: 0;
+    padding: 4px 8px;
   }
 
   .pane-body {
@@ -535,5 +468,39 @@
     height: 100%;
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  .ctx-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+  }
+
+  .ctx-menu {
+    position: fixed;
+    z-index: 1000;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  }
+
+  .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    border-radius: 5px;
+    font-size: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .ctx-item:hover {
+    background: var(--bg-surface);
   }
 </style>

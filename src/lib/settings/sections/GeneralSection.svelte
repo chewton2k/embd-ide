@@ -1,11 +1,13 @@
 <script lang="ts">
   import {
-    currentThemeId, THEMES, uiFontSize, uiDensity,
+    appearanceMode, editorTheme, uiFontSize, uiDensity,
     editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers,
     terminalFontSize,
     autosaveEnabled, autosaveDelay,
     maxRecentProjects, maxTabs,
     hiddenPatterns,
+    EDITOR_THEMES, EDITOR_THEME_LABELS,
+    type AppearanceMode, type EditorThemeId,
   } from '../../modules/stores';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
@@ -39,7 +41,7 @@
     'leo-autosave', 'leo-autosave-delay',
     'leo-editor-font-size', 'leo-editor-tab-size', 'leo-editor-word-wrap', 'leo-editor-line-numbers',
     'leo-terminal-font-size',
-    'leo-theme',
+    'leo-appearance', 'leo-editor-theme',
     'leo-ui-font-size', 'leo-ui-density',
     'leo-hidden-patterns',
     'leo-max-recent-projects', 'leo-max-tabs',
@@ -76,43 +78,46 @@
     description="Appearance, fonts, editor behavior, and app-wide preferences."
   />
 
-  <!-- Appearance / Theme -->
+  <!-- Appearance -->
   <div class="card">
     <div class="card-head">
-      <div class="card-title">Theme</div>
-      <div class="card-sub">Color scheme for the app. Applies instantly across all windows.</div>
+      <div class="card-title">Appearance</div>
+      <div class="card-sub">Controls the IDE chrome. Editor colors are set separately below.</div>
     </div>
-    <div class="theme-grid">
-      {#each THEMES as theme}
-        <button
-          class="theme-card"
-          class:active={$currentThemeId === theme.id}
-          onclick={() => currentThemeId.set(theme.id)}
-        >
-          <div class="theme-preview">
-            <div class="tp-bar" style="background: {theme.colors.bgSecondary}; border-bottom: 1px solid {theme.colors.border};">
-              <span class="tp-dot" style="background: {theme.colors.error}"></span>
-              <span class="tp-dot" style="background: {theme.colors.warning}"></span>
-              <span class="tp-dot" style="background: {theme.colors.success}"></span>
-            </div>
-            <div class="tp-body" style="background: {theme.colors.bgPrimary};">
-              <div class="tp-sidebar" style="background: {theme.colors.bgSecondary}; border-right: 1px solid {theme.colors.border};">
-                <div class="tp-line" style="background: {theme.colors.textMuted}; width: 60%;"></div>
-                <div class="tp-line" style="background: {theme.colors.accent}; width: 75%;"></div>
-                <div class="tp-line" style="background: {theme.colors.textMuted}; width: 50%;"></div>
-              </div>
-              <div class="tp-editor">
-                <div class="tp-line" style="background: {theme.colors.textMuted}; width: 80%;"></div>
-                <div class="tp-line" style="background: {theme.colors.accent}; width: 60%;"></div>
-                <div class="tp-line" style="background: {theme.colors.textSecondary}; width: 70%;"></div>
-                <div class="tp-line" style="background: {theme.colors.textMuted}; width: 45%;"></div>
-              </div>
-            </div>
-            <div class="tp-statusbar" style="background: {theme.colors.accent};"></div>
-          </div>
-          <span class="theme-name" class:active-name={$currentThemeId === theme.id}>{theme.name}</span>
-        </button>
-      {/each}
+    <div class="appearance-grid">
+      <button class="appearance-card" class:active={$appearanceMode === 'system'} onclick={() => appearanceMode.set('system')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+          <rect x="2" y="3" width="20" height="14" rx="2" /><path d="M8 21h8 M12 17v4" />
+        </svg>
+        <span>System</span>
+      </button>
+      <button class="appearance-card" class:active={$appearanceMode === 'light'} onclick={() => appearanceMode.set('light')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+          <circle cx="12" cy="12" r="5" /><path d="M12 1v2 M12 21v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M1 12h2 M21 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42" />
+        </svg>
+        <span>Light</span>
+      </button>
+      <button class="appearance-card" class:active={$appearanceMode === 'dark'} onclick={() => appearanceMode.set('dark')}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+        </svg>
+        <span>Dark</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Editor Theme -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Editor theme</div>
+      <div class="card-sub">Syntax highlighting and editor background.</div>
+    </div>
+    <div class="rows" style="margin-top: 8px;">
+      <select class="select" value={$editorTheme} onchange={(e) => editorTheme.set((e.currentTarget as HTMLSelectElement).value as EditorThemeId)}>
+        {#each EDITOR_THEMES as t}
+          <option value={t}>{EDITOR_THEME_LABELS[t]}</option>
+        {/each}
+      </select>
     </div>
   </div>
 
@@ -401,36 +406,51 @@
   .pill.active { color: var(--bg-tertiary); background: var(--accent); }
 
   /* Theme grid */
-  .theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .theme-card {
-    display: flex; flex-direction: column; align-items: center; gap: 8px;
-    padding: 10px 8px;
-    border-radius: 8px;
+  .appearance-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .appearance-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px 12px;
+    border-radius: 10px;
     border: 1px solid var(--border);
     background: var(--bg-secondary);
+    color: var(--text-secondary);
     cursor: pointer;
-    transition: border-color 0.15s, background 0.15s;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
   }
-  .theme-card:hover { background: var(--bg-surface); }
-  .theme-card.active {
+
+  .appearance-card:hover {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+  }
+
+  .appearance-card.active {
     border-color: var(--accent);
     background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+    color: var(--accent);
   }
-  .theme-preview {
-    width: 100%; aspect-ratio: 16 / 10;
-    border-radius: 5px; overflow: hidden;
-    display: flex; flex-direction: column;
-    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+
+  .appearance-card span {
+    font-size: 12px;
+    font-weight: 500;
   }
-  .tp-bar { height: 12%; display: flex; align-items: center; gap: 2px; padding: 0 4px; }
-  .tp-dot { width: 3px; height: 3px; border-radius: 50%; }
-  .tp-body { flex: 1; display: flex; overflow: hidden; }
-  .tp-sidebar { width: 30%; padding: 4px 3px; display: flex; flex-direction: column; gap: 2px; }
-  .tp-editor { flex: 1; padding: 4px 5px; display: flex; flex-direction: column; gap: 2px; }
-  .tp-line { height: 2px; border-radius: 1px; opacity: 0.8; }
-  .tp-statusbar { height: 6%; min-height: 2px; }
-  .theme-name { font-size: 11.5px; color: var(--text-secondary); font-weight: 500; }
-  .active-name { color: var(--accent); font-weight: 600; }
+
+  .select {
+    width: 100%; padding: 8px 12px; border-radius: 6px;
+    background: var(--bg-secondary); color: var(--text-primary);
+    border: 1px solid var(--border); font-size: 13px;
+    cursor: pointer; appearance: auto;
+  }
+  .select:focus { border-color: var(--accent); outline: none; }
 
   /* File visibility patterns */
   .pattern-list {

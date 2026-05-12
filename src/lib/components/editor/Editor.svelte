@@ -27,12 +27,96 @@
   import { StreamLanguage } from '@codemirror/language';
   import { oCaml } from '@codemirror/legacy-modes/mode/mllike';
   import { oneDark } from '@codemirror/theme-one-dark';
-  import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+  import { tags } from '@lezer/highlight';
+  import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+
+  function buildEditorTheme(id: EditorThemeId): import('@codemirror/state').Extension {
+    const themes: Record<EditorThemeId, () => import('@codemirror/state').Extension> = {
+      'one-dark': () => oneDark,
+      'dracula': () => buildThemeExt(
+        { bg: '#282a36', fg: '#f8f8f2', sel: '#44475a', cursor: '#f8f8f2', gutter: '#21222c', gutterFg: '#6272a4', line: '#44475a33' },
+        { keyword: '#ff79c6', string: '#f1fa8c', comment: '#6272a4', function: '#50fa7b', variable: '#f8f8f2', number: '#bd93f9', type: '#8be9fd', operator: '#ff79c6' }
+      ),
+      'github-dark': () => buildThemeExt(
+        { bg: '#0d1117', fg: '#e6edf3', sel: '#264f78', cursor: '#e6edf3', gutter: '#010409', gutterFg: '#6e7681', line: '#161b2233' },
+        { keyword: '#ff7b72', string: '#a5d6ff', comment: '#8b949e', function: '#d2a8ff', variable: '#e6edf3', number: '#79c0ff', type: '#79c0ff', operator: '#ff7b72' }
+      ),
+      'tokyo-night': () => buildThemeExt(
+        { bg: '#1a1b26', fg: '#c0caf5', sel: '#33467c', cursor: '#c0caf5', gutter: '#16161e', gutterFg: '#565f89', line: '#292e4233' },
+        { keyword: '#bb9af7', string: '#9ece6a', comment: '#565f89', function: '#7aa2f7', variable: '#c0caf5', number: '#ff9e64', type: '#2ac3de', operator: '#89ddff' }
+      ),
+      'nord': () => buildThemeExt(
+        { bg: '#2e3440', fg: '#d8dee9', sel: '#434c5e', cursor: '#d8dee9', gutter: '#2b303b', gutterFg: '#616e88', line: '#3b425233' },
+        { keyword: '#81a1c1', string: '#a3be8c', comment: '#616e88', function: '#88c0d0', variable: '#d8dee9', number: '#b48ead', type: '#8fbcbb', operator: '#81a1c1' }
+      ),
+      'catppuccin-mocha': () => buildThemeExt(
+        { bg: '#1e1e2e', fg: '#cdd6f4', sel: '#45475a', cursor: '#cdd6f4', gutter: '#181825', gutterFg: '#6c7086', line: '#31324433' },
+        { keyword: '#cba6f7', string: '#a6e3a1', comment: '#6c7086', function: '#89b4fa', variable: '#cdd6f4', number: '#fab387', type: '#94e2d5', operator: '#89dceb' }
+      ),
+      'rose-pine': () => buildThemeExt(
+        { bg: '#191724', fg: '#e0def4', sel: '#403d52', cursor: '#e0def4', gutter: '#1f1d2e', gutterFg: '#6e6a86', line: '#26233a33' },
+        { keyword: '#c4a7e7', string: '#f6c177', comment: '#6e6a86', function: '#9ccfd8', variable: '#e0def4', number: '#ebbcba', type: '#9ccfd8', operator: '#31748f' }
+      ),
+      'github-light': () => buildThemeExt(
+        { bg: '#ffffff', fg: '#24292e', sel: '#c8c8fa', cursor: '#24292e', gutter: '#f6f8fa', gutterFg: '#8b949e', line: '#f6f8fa' },
+        { keyword: '#cf222e', string: '#0a3069', comment: '#6e7781', function: '#8250df', variable: '#24292e', number: '#0550ae', type: '#0550ae', operator: '#cf222e' }
+      ),
+      'catppuccin-latte': () => buildThemeExt(
+        { bg: '#eff1f5', fg: '#4c4f69', sel: '#bcc0cc', cursor: '#4c4f69', gutter: '#e6e9ef', gutterFg: '#8c8fa1', line: '#ccd0da33' },
+        { keyword: '#8839ef', string: '#40a02b', comment: '#8c8fa1', function: '#1e66f5', variable: '#4c4f69', number: '#fe640b', type: '#179299', operator: '#04a5e5' }
+      ),
+      'solarized-light': () => buildThemeExt(
+        { bg: '#fdf6e3', fg: '#657b83', sel: '#eee8d5', cursor: '#657b83', gutter: '#eee8d5', gutterFg: '#93a1a1', line: '#eee8d533' },
+        { keyword: '#859900', string: '#2aa198', comment: '#93a1a1', function: '#268bd2', variable: '#657b83', number: '#d33682', type: '#b58900', operator: '#859900' }
+      ),
+    };
+    return themes[id]();
+  }
+
+  type ThemeSpec = { bg: string; fg: string; sel: string; cursor: string; gutter: string; gutterFg: string; line: string };
+  type SyntaxSpec = { keyword: string; string: string; comment: string; function: string; variable: string; number: string; type: string; operator: string };
+
+  function buildThemeExt(t: ThemeSpec, s: SyntaxSpec): import('@codemirror/state').Extension {
+    const theme = EditorView.theme({
+      '&': { backgroundColor: t.bg, color: t.fg },
+      '.cm-content': { caretColor: t.cursor },
+      '.cm-cursor, .cm-dropCursor': { borderLeftColor: t.cursor },
+      '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection': { backgroundColor: t.sel },
+      '.cm-gutters': { backgroundColor: t.gutter, color: t.gutterFg, borderRight: 'none' },
+      '.cm-activeLineGutter': { backgroundColor: t.line },
+      '.cm-activeLine': { backgroundColor: t.line },
+    }, { dark: t.bg < '#808080' });
+    const highlight = syntaxHighlighting(HighlightStyle.define([
+      { tag: tags.keyword, color: s.keyword },
+      { tag: tags.controlKeyword, color: s.keyword },
+      { tag: tags.string, color: s.string },
+      { tag: tags.comment, color: s.comment },
+      { tag: tags.lineComment, color: s.comment },
+      { tag: tags.blockComment, color: s.comment },
+      { tag: tags.function(tags.variableName), color: s.function },
+      { tag: tags.definition(tags.variableName), color: s.function },
+      { tag: tags.variableName, color: s.variable },
+      { tag: tags.number, color: s.number },
+      { tag: tags.integer, color: s.number },
+      { tag: tags.float, color: s.number },
+      { tag: tags.typeName, color: s.type },
+      { tag: tags.className, color: s.type },
+      { tag: tags.operator, color: s.operator },
+      { tag: tags.punctuation, color: s.variable },
+      { tag: tags.propertyName, color: s.function },
+      { tag: tags.bool, color: s.number },
+      { tag: tags.null, color: s.number },
+      { tag: tags.atom, color: s.number },
+    ]));
+    return [theme, highlight];
+  }
   import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree, ensureSyntaxTree } from '@codemirror/language';
+  import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
   import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules/stores';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules/stores';
+  import type { EditorThemeId } from '../../modules/themes';
 
   let { filePath }: { filePath: string } = $props();
 
@@ -113,6 +197,7 @@
   const wordWrapComp = new Compartment();
   const lineNumbersComp = new Compartment();
   const errorLensComp = new Compartment();
+  const themeComp = new Compartment();
 
   async function updateGitGutter(path: string) {
     if (!view) return;
@@ -736,7 +821,7 @@
         highlightSelectionMatches(),
         search({ createPanel: createCustomSearchPanel, top: true }),
         ...(lang ? [lang] : []),
-        oneDark,
+        themeComp.of(buildEditorTheme(get(editorTheme))),
         fontSizeComp.of(EditorView.theme({
           '&': { fontSize: get(editorFontSize) + 'px' },
           '.cm-gutters': { fontSize: get(editorFontSize) + 'px' },
@@ -915,6 +1000,13 @@
     const show = $editorLineNumbers;
     if (view) {
       view.dispatch({ effects: lineNumbersComp.reconfigure(show ? lineNumbers() : []) });
+    }
+  });
+
+  $effect(() => {
+    const theme = $editorTheme;
+    if (view) {
+      view.dispatch({ effects: themeComp.reconfigure(buildEditorTheme(theme)) });
     }
   });
 

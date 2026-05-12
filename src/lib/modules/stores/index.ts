@@ -4,13 +4,14 @@ export * from './git';
 export * from './settings';
 export * from './shell';
 export * from './ui';
-export { THEMES, getTheme, type ThemeColors, type ThemePreset } from '../themes';
+export { EDITOR_THEMES, EDITOR_THEME_LABELS, isLightEditorTheme, type AppearanceMode, type EditorThemeId } from '../themes';
 
 // ── Cross-window settings sync ───────────────────────────────────
 import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, terminalFontSize, hiddenPatterns } from './settings';
-import { currentThemeId, uiFontSize, uiDensity } from './ui';
+import { appearanceMode, editorTheme, uiFontSize, uiDensity } from './ui';
 import { maxRecentProjects, maxTabs } from './files';
-import { apiKey, openaiApiKey, anthropicApiKey, aiProvider, aiModel, type AiProvider } from './ai';
+import { aiProvider, aiModel, type AiProvider } from './ai';
+import type { AppearanceMode, EditorThemeId } from '../themes';
 
 const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
   'leo-autosave':            { set: v => autosaveEnabled.set(v !== 'false') },
@@ -20,7 +21,8 @@ const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
   'leo-editor-word-wrap':    { set: v => editorWordWrap.set(v === 'true') },
   'leo-editor-line-numbers': { set: v => editorLineNumbers.set(v !== 'false') },
   'leo-terminal-font-size':  { set: v => terminalFontSize.set(parseInt(v || '13', 10)) },
-  'leo-theme':               { set: v => currentThemeId.set(v || 'catppuccin-mocha') },
+  'leo-appearance':          { set: v => appearanceMode.set((v as AppearanceMode) || 'system') },
+  'leo-editor-theme':        { set: v => editorTheme.set((v as EditorThemeId) || 'one-dark') },
   'leo-ui-font-size':        { set: v => uiFontSize.set(parseInt(v || '13', 10)) },
   'leo-ui-density':          { set: v => uiDensity.set((v as 'compact' | 'comfortable') || 'comfortable') },
   'leo-hidden-patterns':     { set: v => { try { hiddenPatterns.set(JSON.parse(v || '[]')); } catch { /* ignore */ } } },

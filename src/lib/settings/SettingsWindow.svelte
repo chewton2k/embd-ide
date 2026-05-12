@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { currentThemeId, getTheme, uiFontSize, uiDensity } from '../modules/stores';
+  import { appearanceMode, uiFontSize, uiDensity } from '../modules/stores';
   import GeneralSection   from './sections/GeneralSection.svelte';
   import ShortcutsSection from './sections/ShortcutsSection.svelte';
   import ModelsSection    from './sections/ModelsSection.svelte';
@@ -8,12 +8,12 @@
 
   type TabId = 'general' | 'shortcuts' | 'models' | 'agents' | 'about';
 
-  const TABS: { id: TabId; label: string; icon: string }[] = [
-    { id: 'general',   label: 'General',   icon: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z M19.4 13a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V19a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1A2 2 0 1 1 4.3 15l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 2.3l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1A2 2 0 1 1 19.7 5l-.1.1a1.7 1.7 0 0 0-.3 1.8V7a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z' },
-    { id: 'shortcuts', label: 'Shortcuts', icon: 'M2 8h20v8H2z M6 12h.01 M10 12h.01 M14 12h.01 M18 12h.01' },
-    { id: 'models',    label: 'Models',    icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z' },
-    { id: 'agents',    label: 'Agents',    icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M3 21v-1a6 6 0 0 1 6-6 6 6 0 0 1 6 6v1 M17 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M14 14a4 4 0 0 1 8 0' },
-    { id: 'about',     label: 'About',     icon: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 8v4 M12 16h.01' },
+  const TABS: { id: TabId; label: string; icon: string; keywords: string }[] = [
+    { id: 'general',   label: 'General',   keywords: 'appearance theme editor font tab autosave density hidden patterns terminal', icon: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z M19.4 13a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V19a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1A2 2 0 1 1 4.3 15l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 2.3l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1A2 2 0 1 1 19.7 5l-.1.1a1.7 1.7 0 0 0-.3 1.8V7a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z' },
+    { id: 'shortcuts', label: 'Shortcuts', keywords: 'keyboard keybindings hotkeys', icon: 'M2 8h20v8H2z M6 12h.01 M10 12h.01 M14 12h.01 M18 12h.01' },
+    { id: 'models',    label: 'Models',    keywords: 'ai api key openrouter openai anthropic provider', icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z' },
+    { id: 'agents',    label: 'Agents',    keywords: 'assistant chat', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M3 21v-1a6 6 0 0 1 6-6 6 6 0 0 1 6 6v1 M17 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M14 14a4 4 0 0 1 8 0' },
+    { id: 'about',     label: 'About',     keywords: 'version info', icon: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 8v4 M12 16h.01' },
   ];
 
   function parseInitialTab(): TabId {
@@ -23,26 +23,35 @@
   }
 
   let activeTab = $state<TabId>(parseInitialTab());
+  let searchQuery = $state('');
 
-  // Apply current theme as CSS variables on the document so this window
-  // looks identical to the main editor.
+  const filteredTabs = $derived(
+    searchQuery.trim()
+      ? TABS.filter(t => {
+          const q = searchQuery.toLowerCase();
+          return t.label.toLowerCase().includes(q) || t.keywords.includes(q);
+        })
+      : TABS
+  );
+
+  // Auto-select first matching tab when search narrows results
   $effect(() => {
-    const theme = getTheme($currentThemeId);
+    if (searchQuery.trim() && filteredTabs.length > 0 && !filteredTabs.find(t => t.id === activeTab)) {
+      activeTab = filteredTabs[0].id;
+    }
+  });
+
+  // Apply appearance mode to this window
+  $effect(() => {
+    const mode = $appearanceMode;
     const root = document.documentElement;
-    root.style.setProperty('--bg-primary',      theme.colors.bgPrimary);
-    root.style.setProperty('--bg-secondary',    theme.colors.bgSecondary);
-    root.style.setProperty('--bg-tertiary',     theme.colors.bgTertiary);
-    root.style.setProperty('--bg-surface',      theme.colors.bgSurface);
-    root.style.setProperty('--border',          theme.colors.border);
-    root.style.setProperty('--text-primary',    theme.colors.textPrimary);
-    root.style.setProperty('--text-secondary',  theme.colors.textSecondary);
-    root.style.setProperty('--text-muted',      theme.colors.textMuted);
-    root.style.setProperty('--accent',          theme.colors.accent);
-    root.style.setProperty('--success',         theme.colors.success);
-    root.style.setProperty('--warning',         theme.colors.warning);
-    root.style.setProperty('--error',           theme.colors.error);
-    document.body.style.background = theme.colors.bgPrimary;
-    document.body.style.color = theme.colors.textPrimary;
+    root.classList.remove('light', 'dark');
+    if (mode === 'light') root.classList.add('light');
+    else if (mode === 'dark') root.classList.add('dark');
+    else {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.classList.add(prefersDark ? 'dark' : 'light');
+    }
   });
 
   $effect(() => {
@@ -58,8 +67,14 @@
 <div class="root" class:compact={$uiDensity === 'compact'}>
   <aside class="sidebar">
     <div class="sidebar-title">Settings</div>
+    <div class="search-box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+        <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+      </svg>
+      <input type="text" placeholder="Search settings..." bind:value={searchQuery} />
+    </div>
     <nav>
-      {#each TABS as tab}
+      {#each filteredTabs as tab}
         <button
           class="nav-btn"
           class:active={activeTab === tab.id}
@@ -130,6 +145,27 @@
     padding: 0 10px;
   }
   nav { display: flex; flex-direction: column; gap: 2px; }
+
+  .search-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text-muted);
+  }
+  .search-box input {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 12px;
+    color: var(--text-primary);
+    outline: none;
+  }
+  .search-box input::placeholder { color: var(--text-muted); }
   .nav-btn {
     display: flex; align-items: center; gap: 10px;
     padding: 8px 12px;

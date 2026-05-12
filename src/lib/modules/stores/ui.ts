@@ -1,5 +1,6 @@
 import { writable, get } from 'svelte/store';
 import { persistedString, persistedNumber } from '../persisted';
+import type { AppearanceMode, EditorThemeId } from '../themes';
 
 export const showSettings = writable<boolean>(false);
 export const showChat = writable<boolean>(false);
@@ -21,7 +22,12 @@ export function toggleGitPanel() {
   if (next) showChat.set(false);
 }
 
-// Theme
-export const currentThemeId = persistedString('leo-theme', 'catppuccin-mocha');
+// Appearance: system | light | dark
+export const appearanceMode = persistedString('leo-appearance', 'system') as import('svelte/store').Writable<AppearanceMode>;
+
+// Editor theme (CodeMirror)
+export const editorTheme = persistedString('leo-editor-theme', 'one-dark') as import('svelte/store').Writable<EditorThemeId>;
+
+// UI
 export const uiFontSize = persistedNumber('leo-ui-font-size', 13);
 export const uiDensity = persistedString('leo-ui-density', 'comfortable') as import('svelte/store').Writable<'compact' | 'comfortable'>;

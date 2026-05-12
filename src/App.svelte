@@ -13,7 +13,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, currentThemeId, getTheme, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/modules/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, isTerminalPath, terminalSessions, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal } from './lib/modules/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
@@ -207,30 +207,18 @@
     });
   });
 
-  // Apply theme colors to CSS custom properties
+  // Apply appearance mode (system/light/dark)
   $effect(() => {
-    const theme = getTheme($currentThemeId);
-    const c = theme.colors;
+    const mode = $appearanceMode;
     const root = document.documentElement;
-    root.style.setProperty('--bg-primary', c.bgPrimary);
-    root.style.setProperty('--bg-secondary', c.bgSecondary);
-    root.style.setProperty('--bg-tertiary', c.bgTertiary);
-    root.style.setProperty('--bg-surface', c.bgSurface);
-    root.style.setProperty('--text-primary', c.textPrimary);
-    root.style.setProperty('--text-secondary', c.textSecondary);
-    root.style.setProperty('--text-muted', c.textMuted);
-    root.style.setProperty('--accent', c.accent);
-    root.style.setProperty('--accent-hover', c.accentHover);
-    root.style.setProperty('--border', c.border);
-    root.style.setProperty('--success', c.success);
-    root.style.setProperty('--warning', c.warning);
-    root.style.setProperty('--error', c.error);
-    root.style.setProperty('--git-graph-accent', c.gitGraphAccent || c.accent);
-    root.style.setProperty('--diff-add', c.diffAdd || c.success);
-    root.style.setProperty('--diff-del', c.diffDel || c.error);
-    root.style.setProperty('--git-notification', c.gitNotification || c.success);
-    root.style.setProperty('--tab-active', c.bgPrimary);
-    root.style.setProperty('--tab-inactive', c.bgSecondary);
+    root.classList.remove('light', 'dark');
+    if (mode === 'light') root.classList.add('light');
+    else if (mode === 'dark') root.classList.add('dark');
+    else {
+      // system: use OS preference
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.classList.add(prefersDark ? 'dark' : 'light');
+    }
   });
 
   // Apply UI font size

@@ -1,5 +1,4 @@
 :root {
-  /* Font stacks — mirror VSCode's defaults so leo matches the OS feel. */
   --font-ui:
     -apple-system, BlinkMacSystemFont,
     "Segoe UI Variable", "Segoe UI",
@@ -14,25 +13,54 @@
     "Consolas", "DejaVu Sans Mono",
     "Liberation Mono", "Courier New",
     monospace;
-
-  --bg-primary: #1e1e2e;
-  --bg-secondary: #181825;
-  --bg-tertiary: #11111b;
-  --bg-surface: #313244;
-  --bg-elevated: #202231;
-  --text-primary: #cdd6f4;
-  --text-secondary: #a6adc8;
-  --text-muted: #6c7086;
-  --accent: #89b4fa;
-  --accent-hover: #74c7ec;
-  --border: #45475a;
   --radius: 8px;
-  --success: #a6e3a1;
-  --warning: #f9e2af;
-  --error: #f38ba8;
-  --tab-active: #1e1e2e;
-  --tab-inactive: #181825;
   --sidebar-width: 240px;
+}
+
+/* ── Dark mode (default) ──────────────────────────────────────── */
+:root.dark {
+  --bg-primary: #1c1c1c;
+  --bg-secondary: #161616;
+  --bg-tertiary: #111111;
+  --bg-surface: #2a2a2a;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #666666;
+  --accent: #7aa2f7;
+  --accent-hover: #89b4fa;
+  --border: #2e2e2e;
+  --success: #73daca;
+  --warning: #e0af68;
+  --error: #f7768e;
+  --tab-active: #1c1c1c;
+  --tab-inactive: #161616;
+  --diff-add: #73daca;
+  --diff-del: #f7768e;
+  --git-graph-accent: #7aa2f7;
+  --git-notification: #73daca;
+}
+
+/* ── Light mode ───────────────────────────────────────────────── */
+:root.light {
+  --bg-primary: #fafafa;
+  --bg-secondary: #f2f2f2;
+  --bg-tertiary: #eaeaea;
+  --bg-surface: #e4e4e4;
+  --text-primary: #24292e;
+  --text-secondary: #57606a;
+  --text-muted: #8b949e;
+  --accent: #0969da;
+  --accent-hover: #0550ae;
+  --border: #d8dee4;
+  --success: #1a7f37;
+  --warning: #9a6700;
+  --error: #cf222e;
+  --tab-active: #fafafa;
+  --tab-inactive: #f2f2f2;
+  --diff-add: #1a7f37;
+  --diff-del: #cf222e;
+  --git-graph-accent: #0969da;
+  --git-notification: #1a7f37;
 }
 
 * {
@@ -55,23 +83,10 @@ html, body, #app {
   font-feature-settings: "kern", "liga", "calt", "ss01";
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--bg-surface);
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--border);
-}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-surface); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border); }
 
 button {
   font-family: inherit;
@@ -97,13 +112,9 @@ input, textarea {
   outline: none;
 }
 
-input:focus, textarea:focus {
-  border-color: var(--accent);
-}
+input:focus, textarea:focus { border-color: var(--accent); }
 
-.ui-button {
-  border-radius: var(--radius);
-}
+.ui-button { border-radius: var(--radius); }
 
 /* Density modes */
 :root[data-density="compact"] {
@@ -122,7 +133,7 @@ input:focus, textarea:focus {
   --density-statusbar-height: 24px;
 }
 
-/* CodeMirror search panel — larger and more readable */
+/* CodeMirror search panel */
 .cm-panel.cm-search {
   padding: 8px 12px;
   gap: 6px;
@@ -131,10 +142,7 @@ input:focus, textarea:focus {
   border-bottom: 1px solid var(--border) !important;
 }
 
-.cm-panel.cm-search input,
-.cm-panel.cm-search button {
-  font-size: 13px;
-}
+.cm-panel.cm-search input, .cm-panel.cm-search button { font-size: 13px; }
 
 .cm-panel.cm-search input[type="text"],
 .cm-panel.cm-search input[name="search"],
@@ -149,10 +157,7 @@ input:focus, textarea:focus {
   min-width: 200px;
 }
 
-.cm-panel.cm-search input:focus {
-  border-color: var(--accent);
-  outline: none;
-}
+.cm-panel.cm-search input:focus { border-color: var(--accent); outline: none; }
 
 .cm-panel.cm-search button {
   padding: 4px 10px;
@@ -169,26 +174,8 @@ input:focus, textarea:focus {
   border-color: var(--accent);
 }
 
-.cm-panel.cm-search label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  gap: 4px;
-}
+.cm-panel.cm-search label { font-size: 12px; color: var(--text-secondary); gap: 4px; }
 
-.cm-panel.cm-search .cm-button {
-  font-size: 13px;
-}
-
-/* Search match highlighting */
-.cm-selectionMatch {
-  background: color-mix(in srgb, var(--accent) 25%, transparent) !important;
-}
-
-.cm-searchMatch {
-  background: color-mix(in srgb, var(--warning) 30%, transparent) !important;
-  border-radius: 2px;
-}
-
-.cm-searchMatch-selected {
-  background: color-mix(in srgb, var(--warning) 50%, transparent) !important;
-}
+.cm-selectionMatch { background: color-mix(in srgb, var(--accent) 25%, transparent) !important; }
+.cm-searchMatch { background: color-mix(in srgb, var(--warning) 30%, transparent) !important; border-radius: 2px; }
+.cm-searchMatch-selected { background: color-mix(in srgb, var(--warning) 50%, transparent) !important; }
