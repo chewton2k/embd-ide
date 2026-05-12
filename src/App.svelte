@@ -191,6 +191,17 @@
     // Reload keys when window regains focus (e.g. after closing settings)
     const onFocus = () => { loadKeys(); };
     window.addEventListener('focus', onFocus);
+
+    // Initialize knowledge store when project root is set
+    const unsubRoot = projectRoot.subscribe((root) => {
+      if (root) {
+        invoke('knowledge_init', { projectRoot: root }).then(() => {
+          invoke('knowledge_index', { projectRoot: root }).catch(() => {});
+        }).catch(() => {});
+        // Also persist for settings window
+        localStorage.setItem('leo-project-root', root);
+      }
+    });
     // Load recent projects
     try {
       recentProjects = await getRecentProjects();
@@ -204,6 +215,10 @@
       const root = get(projectRoot);
       if (root) {
         try {
+          // Save AI conversation
+          const { saveConversationNow } = await import('./lib/modules/stores/ai');
+          await saveConversationNow();
+          // Save session
           await Promise.race([
             saveSessionNow(root),
             new Promise((_, reject) =>
@@ -738,17 +753,17 @@
     border-radius: 4px;
     color: #000;
     cursor: pointer;
-    transition: all 0.15s;
+    transition: background 0.15s;
     margin-left: 8px;
   }
 
   .statusbar-ai-btn:hover {
     background: var(--bg-surface);
-    color: var(--text-primary);
+    color: #000;
   }
 
   .statusbar-ai-btn.active {
-    color: var(--accent);
+    color: #000;
     background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 

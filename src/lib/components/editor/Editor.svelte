@@ -118,7 +118,7 @@
   import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules/stores';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules/stores';
   import type { EditorThemeId } from '../../modules/themes';
 
   let { filePath }: { filePath: string } = $props();
@@ -158,10 +158,21 @@
       const span = document.createElement('span');
       span.className = 'cm-error-lens';
       span.textContent = `  \u26A0 ${this.message}`;
+      span.title = this.message;
       return span;
     }
     eq(other: ErrorWidget) { return this.message === other.message; }
     ignoreEvent() { return true; }
+  }
+
+  /** Format a snippet from an error node into a short, readable message. */
+  function formatErrorSnippet(raw: string): string {
+    // Take only the first non-empty line
+    const firstLine = raw.split(/\r?\n/).find(l => l.trim()) ?? '';
+    const trimmed = firstLine.trim();
+    if (!trimmed) return '';
+    const MAX = 48;
+    return trimmed.length > MAX ? trimmed.slice(0, MAX - 1) + '\u2026' : trimmed;
   }
 
   interface DiffRange {
@@ -565,15 +576,20 @@
   }
 
   function hasErrorLens(path: string): boolean {
-    return /\.(js|jsx|ts|tsx|c|h|cpp|cxx|cc|hpp|hxx|hh|ino|java|kt|kts)$/i.test(path);
+    // Languages whose Lezer parsers produce reliable error-recovery nodes.
+    // JSX/TSX are included but heavily filtered below to avoid parser noise.
+    return /\.(m?js|c?js|jsx|m?ts|c?ts|tsx|c|h|cpp|cxx|cc|hpp|hxx|hh|ino|java|kt|kts)$/i.test(path);
   }
 
   function buildErrorLensPlugin() {
+    // Delay before a freshly-detected error is shown, to avoid flicker while typing.
+    const SCAN_DELAY_MS = 450;
+
     function scanErrors(state: EditorState): DecorationSet {
       const builder = new RangeSetBuilder<Decoration>();
-      // Use ensureSyntaxTree to wait for a fully-parsed tree (up to 500ms).
-      // syntaxTree() can return an incomplete tree which produces false error nodes.
-      const tree = ensureSyntaxTree(state, state.doc.length, 500);
+      // Wait for a fully-parsed tree (up to 300ms). syntaxTree() can return an
+      // incomplete tree that produces false error nodes.
+      const tree = ensureSyntaxTree(state, state.doc.length, 300);
       if (!tree) return Decoration.none;
 
       const seenLines = new Set<number>();
@@ -581,39 +597,48 @@
 
       tree.iterate({
         enter(node) {
-          if (node.type.isError) {
-            // Skip zero-length error nodes — these are parser recovery artifacts,
-            // not actual syntax errors in the source text.
-            if (node.from === node.to) return;
+          if (!node.type.isError) return;
+          // Zero-length error nodes are recovery artifacts, not real errors.
+          if (node.from === node.to) return;
 
-            const raw = state.doc.sliceString(node.from, node.to).trim();
-            if (!raw) return;
+          const raw = state.doc.sliceString(node.from, node.to);
+          const formatted = formatErrorSnippet(raw);
+          if (!formatted) return;
 
-            // Skip false positives from JSX parsing: property access (.foo),
-            // closing braces/parens/brackets, and other common JSX artifacts.
-            if (/^[.}\])]/.test(raw) || /^[</>]+$/.test(raw)) return;
+          // Skip tokens that are almost always parser recovery artifacts:
+          // closing punctuation, lone JSX angle-brackets, leading dots, etc.
+          if (/^[.}\])>;,]/.test(formatted) || /^[</>]+$/.test(formatted)) return;
 
-            // Check parent context — errors inside JSX elements/attributes
-            // are almost always parser recovery false positives.
-            let parent = node.node.parent;
-            while (parent) {
-              const name = parent.type.name;
-              if (name === 'JSXElement' || name === 'JSXOpenTag' || name === 'JSXAttribute'
-                  || name === 'JSXEscape' || name === 'JSXFragmentTag'
-                  || name === 'JSXSelfClosingTag' || name === 'JSXSpreadAttribute') return;
-              parent = parent.parent;
-            }
-
-            const line = state.doc.lineAt(node.from);
-            if (!seenLines.has(line.number)) {
-              seenLines.add(line.number);
-              const msg = `Unexpected: '${raw}'`;
-              widgets.push({
-                pos: line.to,
-                widget: Decoration.widget({ widget: new ErrorWidget(msg), side: 1 }),
-              });
-            }
+          // Skip errors inside JSX scaffolding — these are almost always parser
+          // recovery false positives rather than real user errors. Keep errors
+          // inside JSXExpression (curly-brace embedded JS) since those are real.
+          let parent = node.node.parent;
+          while (parent) {
+            const name = parent.type.name;
+            if (
+              name === 'JSXElement' ||
+              name === 'JSXOpenTag' ||
+              name === 'JSXAttribute' ||
+              name === 'JSXEscape' ||
+              name === 'JSXFragmentTag' ||
+              name === 'JSXSelfClosingTag' ||
+              name === 'JSXSpreadAttribute' ||
+              name === 'JSXText'
+            ) return;
+            // Stop at script-level boundary.
+            if (name === 'Script' || name === 'Program') break;
+            parent = parent.parent;
           }
+
+          const line = state.doc.lineAt(node.from);
+          if (seenLines.has(line.number)) return;
+          seenLines.add(line.number);
+
+          const msg = `Unexpected: '${formatted}'`;
+          widgets.push({
+            pos: line.to,
+            widget: Decoration.widget({ widget: new ErrorWidget(msg), side: 1 }),
+          });
         },
       });
 
@@ -626,29 +651,61 @@
       class {
         decorations: DecorationSet;
         private timer: ReturnType<typeof setTimeout> | null = null;
+        private idle: number | null = null;
 
         constructor(view: EditorView) {
           this.decorations = Decoration.none;
-          // Delay initial scan to let the parser finish
+          // Schedule the initial scan without blocking the first render.
+          this.schedule(view, SCAN_DELAY_MS);
+        }
+
+        private schedule(view: EditorView, delay: number) {
+          this.cancel();
           this.timer = setTimeout(() => {
-            this.decorations = scanErrors(view.state);
-            view.requestMeasure();
-          }, 500);
+            this.timer = null;
+            // Prefer requestIdleCallback so heavy tree walks don't compete
+            // with user input. Fallback to rAF when not supported.
+            const run = () => {
+              this.idle = null;
+              try {
+                this.decorations = scanErrors(view.state);
+              } catch {
+                this.decorations = Decoration.none;
+              }
+              view.requestMeasure();
+            };
+            const w = window as Window & {
+              requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+            };
+            if (typeof w.requestIdleCallback === 'function') {
+              this.idle = w.requestIdleCallback(run, { timeout: 500 });
+            } else {
+              this.idle = requestAnimationFrame(run);
+            }
+          }, delay);
+        }
+
+        private cancel() {
+          if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+          if (this.idle !== null) {
+            const w = window as Window & { cancelIdleCallback?: (h: number) => void };
+            if (typeof w.cancelIdleCallback === 'function') w.cancelIdleCallback(this.idle);
+            else cancelAnimationFrame(this.idle);
+            this.idle = null;
+          }
         }
 
         update(update: ViewUpdate) {
           if (update.docChanged) {
-            this.decorations = this.decorations.map(update.changes);
-            if (this.timer) clearTimeout(this.timer);
-            this.timer = setTimeout(() => {
-              this.decorations = scanErrors(update.view.state);
-              update.view.requestMeasure();
-            }, 400);
+            // Clear stale decorations immediately so they don't render on the
+            // wrong lines during typing; the re-scan will restore any that remain.
+            this.decorations = Decoration.none;
+            this.schedule(update.view, SCAN_DELAY_MS);
           }
         }
 
         destroy() {
-          if (this.timer) clearTimeout(this.timer);
+          this.cancel();
         }
       },
       { decorations: (v) => v.decorations }
@@ -759,6 +816,16 @@
         view = new EditorView({ state: cached, parent: editorContainer });
       }
       currentFilePath = path;
+      // The cached state captured the error-lens compartment at creation time,
+      // which may now be stale (user toggled the setting, or different language).
+      // Re-apply based on the current setting + file type.
+      if (view) {
+        view.dispatch({
+          effects: errorLensComp.reconfigure(
+            get(editorShowErrorLens) && hasErrorLens(path) ? buildErrorLensPlugin() : []
+          ),
+        });
+      }
       updatePreview(cached.doc.toString());
       updateGitGutter(path);
       startWatching(path);
@@ -832,7 +899,7 @@
         tabSizeComp.of(EditorState.tabSize.of(get(editorTabSize))),
         wordWrapComp.of(get(editorWordWrap) ? EditorView.lineWrapping : []),
         gitGutterComp.of([]),
-        errorLensComp.of(hasErrorLens(path) ? buildErrorLensPlugin() : []),
+        errorLensComp.of(hasErrorLens(path) && get(editorShowErrorLens) ? buildErrorLensPlugin() : []),
         keymap.of([
           ...closeBracketsKeymap,
           ...defaultKeymap,
@@ -1006,6 +1073,18 @@
     const show = $editorLineNumbers;
     if (view) {
       view.dispatch({ effects: lineNumbersComp.reconfigure(show ? lineNumbers() : []) });
+    }
+  });
+
+  $effect(() => {
+    const show = $editorShowErrorLens;
+    const path = currentFilePath;
+    if (view && path) {
+      view.dispatch({
+        effects: errorLensComp.reconfigure(
+          show && hasErrorLens(path) ? buildErrorLensPlugin() : []
+        ),
+      });
     }
   });
 

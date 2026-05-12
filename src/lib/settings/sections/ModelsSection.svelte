@@ -145,7 +145,7 @@
   />
 
   <!-- Default model -->
-  <div class="block">
+  <div class="block" data-setting="default-model">
     <div class="block-head"><span class="block-label">Default model</span></div>
     <div class="dropdown" bind:this={dropdownEl}>
       <button class="dropdown-trigger" onclick={toggleDropdown} class:open={dropdownOpen}>
@@ -201,16 +201,18 @@
     </div>
     <div class="key-grid">
       {#each PROVIDERS as p}
-        <ProviderKeyCard
-          provider={p.id}
-          label={p.label}
-          placeholder={p.placeholder}
-          keyPrefix={p.keyPrefix}
-          docsUrl={p.docsUrl}
-          currentKey={p.id === 'openrouter' ? $apiKey : p.id === 'openai' ? $openaiApiKey : $anthropicApiKey}
-          onSave={(v) => saveKey(p, v)}
-          onClear={() => clearKey(p)}
-        />
+        <div data-setting={`${p.id}-api-key`}>
+          <ProviderKeyCard
+            provider={p.id}
+            label={p.label}
+            placeholder={p.placeholder}
+            keyPrefix={p.keyPrefix}
+            docsUrl={p.docsUrl}
+            currentKey={p.id === 'openrouter' ? $apiKey : p.id === 'openai' ? $openaiApiKey : $anthropicApiKey}
+            onSave={(v) => saveKey(p, v)}
+            onClear={() => clearKey(p)}
+          />
+        </div>
       {/each}
     </div>
   </div>

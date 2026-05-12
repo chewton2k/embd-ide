@@ -15,13 +15,13 @@
       <div class="card-title">Inline Completions (Ghost Text)</div>
     </div>
     <div class="card-body">
-      <label class="toggle-row">
+      <label class="toggle-row" data-setting="inline-completions">
         <span>Enable inline suggestions</span>
         <button class="toggle" class:on={$ghostTextEnabled} onclick={() => ghostTextEnabled.update(v => !v)} aria-label="Toggle inline suggestions">
           <span class="toggle-knob"></span>
         </button>
       </label>
-      <label class="slider-row">
+      <label class="slider-row" data-setting="inline-completion-delay">
         <span>Trigger delay</span>
         <div class="slider-group">
           <input type="range" min="200" max="1500" step="50" bind:value={$ghostTextDelay} />
@@ -37,14 +37,14 @@
       <div class="card-title">Agent Mode</div>
     </div>
     <div class="card-body">
-      <label class="slider-row">
+      <label class="slider-row" data-setting="agent-max-steps">
         <span>Max steps per run</span>
         <div class="slider-group">
           <input type="range" min="3" max="25" step="1" bind:value={$agentMaxStepsConfig} />
           <span class="slider-value">{$agentMaxStepsConfig}</span>
         </div>
       </label>
-      <label class="toggle-row">
+      <label class="toggle-row" data-setting="agent-auto-approve">
         <span>Auto-approve edits</span>
         <button class="toggle" class:on={$agentAutoApproveConfig} onclick={() => agentAutoApproveConfig.update(v => !v)} aria-label="Toggle auto-approve">
           <span class="toggle-knob"></span>

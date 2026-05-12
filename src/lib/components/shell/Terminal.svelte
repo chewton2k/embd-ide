@@ -446,9 +446,15 @@
     const sig = $collapseTerminalSplitsSignal;
     if (sig > collapseCount) {
       collapseCount = sig;
-      enqueue(async () => {
-        await collapseToActivePane();
-      });
+      // Defensive guard: collapse is only meaningful when >1 pane exists. The
+      // toolbar already gates this, but a stale derivation or race could still
+      // fire the signal. `collapseToActivePane` also checks, so this is a
+      // second line of defense that avoids needlessly queueing work.
+      if (panes.length > 1) {
+        enqueue(async () => {
+          await collapseToActivePane();
+        });
+      }
     }
   });
 
@@ -550,8 +556,6 @@
         <button class="ctx-item" onclick={() => ctxAction('close')}>
           Close Terminal
         </button>
-      {/if}
-      {#if panes.length >= 2}
         <button class="ctx-item" onclick={() => ctxAction('collapse')}>
           <SplitSquareVertical size={13} /> Collapse All
         </button>

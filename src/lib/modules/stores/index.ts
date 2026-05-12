@@ -9,7 +9,7 @@ export * from './aiHistory';
 export { EDITOR_THEMES, EDITOR_THEME_LABELS, isLightEditorTheme, type AppearanceMode, type EditorThemeId } from '../themes';
 
 // ── Cross-window settings sync ───────────────────────────────────
-import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, terminalFontSize, hiddenPatterns } from './settings';
+import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, terminalFontSize, hiddenPatterns } from './settings';
 import { appearanceMode, editorTheme, uiFontSize, uiDensity } from './ui';
 import { maxRecentProjects, maxTabs } from './files';
 import { aiProvider, aiModel, type AiProvider } from './ai';
@@ -22,6 +22,7 @@ const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
   'leo-editor-tab-size':     { set: v => editorTabSize.set(parseInt(v || '2', 10)) },
   'leo-editor-word-wrap':    { set: v => editorWordWrap.set(v === 'true') },
   'leo-editor-line-numbers': { set: v => editorLineNumbers.set(v !== 'false') },
+  'leo-editor-show-error-lens': { set: v => editorShowErrorLens.set(v !== 'false') },
   'leo-terminal-font-size':  { set: v => terminalFontSize.set(parseInt(v || '13', 10)) },
   'leo-appearance':          { set: v => appearanceMode.set((v as AppearanceMode) || 'system') },
   'leo-editor-theme':        { set: v => editorTheme.set((v as EditorThemeId) || 'one-dark') },

@@ -100,8 +100,8 @@
     <div class="section">
       <div class="section-title">Actions</div>
       <div class="actions">
-        <button class="btn" onclick={reindexProject}>Re-index Project</button>
-        <button class="btn btn-danger" onclick={clearConversations}>Clear All Conversations</button>
+        <button class="btn" onclick={reindexProject} data-setting="knowledge-index">Re-index Project</button>
+        <button class="btn btn-danger" onclick={clearConversations} data-setting="knowledge-conversations">Clear All Conversations</button>
       </div>
       {#if message}
         <div class="message">{message}</div>

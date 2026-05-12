@@ -162,22 +162,25 @@ export const conversationId = writable<string>(currentConversationId);
 /** Auto-save conversation after messages change (debounced). */
 export function scheduleSaveConversation() {
   if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(async () => {
-    const msgs = get(chatMessages);
-    if (msgs.length < 2) return;
-    const { projectRoot: pr } = await import('./git');
-    const root = get(pr);
-    if (!root) return;
-    const title = msgs.find(m => m.role === 'user')?.content.slice(0, 60) || 'Untitled';
-    try {
-      await invoke('knowledge_save_conversation', {
-        projectRoot: root,
-        id: currentConversationId,
-        title,
-        messages: JSON.stringify(msgs),
-      });
-    } catch { /* optional feature */ }
-  }, 2000);
+  saveTimeout = setTimeout(() => saveConversationNow(), 2000);
+}
+
+/** Immediately save the current conversation to SQLite. */
+export async function saveConversationNow(): Promise<void> {
+  if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
+  const msgs = get(chatMessages);
+  if (msgs.length < 2) return;
+  const root = get(projectRoot);
+  if (!root) return;
+  const title = msgs.find(m => m.role === 'user')?.content.slice(0, 60) || 'Untitled';
+  try {
+    await invoke('knowledge_save_conversation', {
+      projectRoot: root,
+      id: currentConversationId,
+      title,
+      messages: JSON.stringify(msgs),
+    });
+  } catch { /* optional feature */ }
 }
 
 export async function loadConversation(id: string): Promise<void> {

@@ -2,6 +2,7 @@
   import {
     appearanceMode, editorTheme, uiFontSize, uiDensity,
     editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers,
+    editorShowErrorLens,
     terminalFontSize, previewUrl,
     autosaveEnabled, autosaveDelay,
     maxRecentProjects, maxTabs,
@@ -40,6 +41,7 @@
   const EXPORT_KEYS = [
     'leo-autosave', 'leo-autosave-delay',
     'leo-editor-font-size', 'leo-editor-tab-size', 'leo-editor-word-wrap', 'leo-editor-line-numbers',
+    'leo-editor-show-error-lens',
     'leo-terminal-font-size',
     'leo-appearance', 'leo-editor-theme',
     'leo-ui-font-size', 'leo-ui-density',
@@ -79,7 +81,7 @@
   />
 
   <!-- Appearance -->
-  <div class="card">
+  <div class="card" data-setting="appearance">
     <div class="card-head">
       <div class="card-title">Appearance</div>
       <div class="card-sub">Controls the IDE chrome. Editor colors are set separately below.</div>
@@ -107,7 +109,7 @@
   </div>
 
   <!-- Editor Theme -->
-  <div class="card">
+  <div class="card" data-setting="editor-theme">
     <div class="card-head">
       <div class="card-title">Editor theme</div>
       <div class="card-sub">Syntax highlighting and editor background.</div>
@@ -127,7 +129,7 @@
       <div class="card-title">Interface</div>
     </div>
     <div class="rows">
-      <div class="row">
+      <div class="row" data-setting="ui-font-size">
         <div class="row-info">
           <div class="row-label">UI font size</div>
           <div class="row-help">Size of all in-app text.</div>
@@ -138,7 +140,7 @@
           <button class="step-btn" onclick={() => uiFontSize.update(v => Math.min(18, v + 1))}>+</button>
         </div>
       </div>
-      <div class="row">
+      <div class="row" data-setting="ui-density">
         <div class="row-info">
           <div class="row-label">Density</div>
           <div class="row-help">Vertical padding throughout the UI.</div>
@@ -155,7 +157,7 @@
   <div class="card">
     <div class="card-head"><div class="card-title">Editor</div></div>
     <div class="rows">
-      <div class="row">
+      <div class="row" data-setting="editor-font-size">
         <div class="row-info"><div class="row-label">Font size</div></div>
         <div class="stepper">
           <button class="step-btn" onclick={() => editorFontSize.update(v => Math.max(10, v - 1))}>−</button>
@@ -163,7 +165,7 @@
           <button class="step-btn" onclick={() => editorFontSize.update(v => Math.min(24, v + 1))}>+</button>
         </div>
       </div>
-      <div class="row">
+      <div class="row" data-setting="editor-tab-size">
         <div class="row-info"><div class="row-label">Tab size</div></div>
         <div class="pills">
           {#each [2, 4] as s}
@@ -171,15 +173,24 @@
           {/each}
         </div>
       </div>
-      <div class="row">
+      <div class="row" data-setting="editor-word-wrap">
         <div class="row-info"><div class="row-label">Word wrap</div></div>
         <button class="toggle" class:active={$editorWordWrap} onclick={() => editorWordWrap.update(v => !v)} aria-label="Toggle word wrap">
           <span class="track"><span class="thumb"></span></span>
         </button>
       </div>
-      <div class="row">
+      <div class="row" data-setting="editor-line-numbers">
         <div class="row-info"><div class="row-label">Line numbers</div></div>
         <button class="toggle" class:active={$editorLineNumbers} onclick={() => editorLineNumbers.update(v => !v)} aria-label="Toggle line numbers">
+          <span class="track"><span class="thumb"></span></span>
+        </button>
+      </div>
+      <div class="row" data-setting="editor-error-lens">
+        <div class="row-info">
+          <div class="row-label">Error lens</div>
+          <div class="row-help">Inline syntax-error hints next to lines (JS, TS, C-family).</div>
+        </div>
+        <button class="toggle" class:active={$editorShowErrorLens} onclick={() => editorShowErrorLens.update(v => !v)} aria-label="Toggle error lens">
           <span class="track"><span class="thumb"></span></span>
         </button>
       </div>
@@ -191,7 +202,7 @@
   <div class="card">
     <div class="card-head"><div class="card-title">Terminal</div></div>
     <div class="rows">
-      <div class="row">
+      <div class="row" data-setting="terminal-font-size">
         <div class="row-info"><div class="row-label">Font size</div></div>
         <div class="stepper">
           <button class="step-btn" onclick={() => terminalFontSize.update(v => Math.max(10, v - 1))}>−</button>
@@ -206,7 +217,7 @@
   <div class="card">
     <div class="card-head"><div class="card-title">Preview</div></div>
     <div class="rows">
-      <div class="row">
+      <div class="row" data-setting="preview-default-url">
         <div class="row-info">
           <div class="row-label">Default URL</div>
           <div class="row-help">The URL loaded when you open a new Preview tab.</div>
@@ -220,7 +231,7 @@
   <div class="card">
     <div class="card-head"><div class="card-title">Autosave</div></div>
     <div class="rows">
-      <div class="row">
+      <div class="row" data-setting="autosave-enabled">
         <div class="row-info">
           <div class="row-label">Enabled</div>
           <div class="row-help">Save modified files automatically after a short delay.</div>
@@ -229,7 +240,7 @@
           <span class="track"><span class="thumb"></span></span>
         </button>
       </div>
-      <div class="row">
+      <div class="row" data-setting="autosave-delay">
         <div class="row-info"><div class="row-label">Delay</div></div>
         <div class="pills">
           {#each AUTOSAVE_DELAYS as opt}
@@ -244,7 +255,7 @@
   <div class="card">
     <div class="card-head"><div class="card-title">Session</div></div>
     <div class="rows">
-      <div class="row">
+      <div class="row" data-setting="max-recent-projects">
         <div class="row-info"><div class="row-label">Max recent projects</div></div>
         <div class="stepper">
           <button class="step-btn" onclick={() => maxRecentProjects.update(v => Math.max(0, v - 1))}>−</button>
@@ -252,7 +263,7 @@
           <button class="step-btn" onclick={() => maxRecentProjects.update(v => Math.min(30, v + 1))}>+</button>
         </div>
       </div>
-      <div class="row">
+      <div class="row" data-setting="max-tabs">
         <div class="row-info"><div class="row-label">Max open tabs</div></div>
         <div class="stepper">
           <button class="step-btn" onclick={() => maxTabs.update(v => Math.max(1, v - 1))}>−</button>
@@ -264,7 +275,7 @@
   </div>
 
   <!-- File visibility -->
-  <div class="card">
+  <div class="card" data-setting="hidden-patterns">
     <div class="card-head">
       <div class="card-title">File visibility</div>
       <div class="card-sub">Hide files and folders from the explorer. Supports exact names and <code>*.ext</code> globs.</div>
@@ -291,7 +302,7 @@
   </div>
 
   <!-- Backup -->
-  <div class="card">
+  <div class="card" data-setting="export-import-settings">
     <div class="card-head">
       <div class="card-title">Backup</div>
       <div class="card-sub">Export your settings to a file or import from a previous export. API keys are never exported.</div>

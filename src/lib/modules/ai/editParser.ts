@@ -40,7 +40,7 @@ export function parseAiEdits(response: string): { edits: EditProposal[]; display
       status: 'pending',
     });
 
-    displayText = displayText.replace(fullMatch, `📝 *Edit proposed for \`${filePath.trim()}\` (lines ${startStr}-${endStr})*`);
+    displayText = displayText.replace(fullMatch, `\`\`\`proposed-edit\n${filePath.trim()} · lines ${startStr}-${endStr}\n\`\`\``);
   }
 
   return { edits, displayText };

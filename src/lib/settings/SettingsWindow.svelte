@@ -6,44 +6,100 @@
   import AgentsSection    from './sections/AgentsSection.svelte';
   import KnowledgeSection from './sections/KnowledgeSection.svelte';
   import AboutSection     from './sections/AboutSection.svelte';
+  import {
+    SETTINGS_TABS,
+    matchesQuery,
+    searchSettings,
+    type SettingsTabId,
+    type SettingsSearchResult,
+  } from './searchIndex';
 
-  type TabId = 'general' | 'shortcuts' | 'models' | 'agents' | 'knowledge' | 'about';
+  // ── State ─────────────────────────────────────────────────────────
 
-  const TABS: { id: TabId; label: string; icon: string; keywords: string }[] = [
-    { id: 'general',   label: 'General',   keywords: 'appearance theme editor font tab autosave density hidden patterns terminal', icon: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6' },
-    { id: 'shortcuts', label: 'Shortcuts', keywords: 'keyboard keybindings hotkeys', icon: 'M2 8h20v8H2z M6 12h.01 M10 12h.01 M14 12h.01 M18 12h.01' },
-    { id: 'models',    label: 'Models',    keywords: 'ai api key openrouter openai anthropic provider', icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z' },
-    { id: 'agents',    label: 'Agents',    keywords: 'assistant chat', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M3 21v-1a6 6 0 0 1 6-6 6 6 0 0 1 6 6v1 M17 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M14 14a4 4 0 0 1 8 0' },
-    { id: 'knowledge', label: 'Knowledge', keywords: 'database sqlite storage index brain memory', icon: 'M12 2L2 7l10 5 10-5-10-5Z M2 17l10 5 10-5 M2 12l10 5 10-5' },
-    { id: 'about',     label: 'About',     keywords: 'version info', icon: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 8v4 M12 16h.01' },
-  ];
-
-  function parseInitialTab(): TabId {
+  function parseInitialTab(): SettingsTabId {
     const hash = window.location.hash.replace(/^#\/?settings\/?/, '').replace(/^#/, '');
-    const found = TABS.find(t => t.id === hash);
+    const found = SETTINGS_TABS.find(t => t.id === hash);
     return found ? found.id : 'general';
   }
 
-  let activeTab = $state<TabId>(parseInitialTab());
+  let activeTab = $state<SettingsTabId>(parseInitialTab());
   let searchQuery = $state('');
+  let contentEl = $state<HTMLElement | undefined>();
 
+  // Tabs matching the query (used when the user types a tab name like "General").
   const filteredTabs = $derived(
     searchQuery.trim()
-      ? TABS.filter(t => {
-          const q = searchQuery.toLowerCase();
-          return t.label.toLowerCase().includes(q) || t.keywords.includes(q);
-        })
-      : TABS
+      ? SETTINGS_TABS.filter(t => matchesQuery(`${t.label} ${t.keywords}`, searchQuery))
+      : SETTINGS_TABS
   );
 
-  // Auto-select first matching tab when search narrows results
+  // Individual settings matching the query (the main search results).
+  const settingResults = $derived<SettingsSearchResult[]>(searchSettings(searchQuery));
+
+  // ── Navigation + highlight ───────────────────────────────────────
+
+  const HIGHLIGHT_CLASS = 'setting-flash';
+  const HIGHLIGHT_DURATION_MS = 1400;
+
+  /** Wait for the next animation frame (after the tab's DOM has mounted). */
+  function nextFrame(): Promise<void> {
+    return new Promise(r => requestAnimationFrame(() => r()));
+  }
+
+  /**
+   * Scroll the given setting into view inside the content pane and briefly
+   * highlight it. Safe to call even if the anchor hasn't mounted yet — this
+   * retries a couple of frames before giving up.
+   */
+  async function flashSetting(anchor: string) {
+    if (!contentEl) return;
+    let el: HTMLElement | null = null;
+    // Retry across a few frames — the target section may not be mounted yet
+    // immediately after switching tabs.
+    for (let attempt = 0; attempt < 6 && !el; attempt++) {
+      el = contentEl.querySelector<HTMLElement>(`[data-setting="${CSS.escape(anchor)}"]`);
+      if (el) break;
+      await nextFrame();
+    }
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.remove(HIGHLIGHT_CLASS);
+    // Force reflow so the class re-addition restarts the animation.
+    void el.offsetWidth;
+    el.classList.add(HIGHLIGHT_CLASS);
+    window.setTimeout(() => el?.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_DURATION_MS);
+  }
+
+  function selectTab(id: SettingsTabId) {
+    activeTab = id;
+    history.replaceState(null, '', `#settings/${id}`);
+  }
+
+  async function jumpToResult(result: SettingsSearchResult) {
+    if (activeTab !== result.tab.id) selectTab(result.tab.id);
+    searchQuery = ''; // Close the results list — the user navigated.
+    await flashSetting(result.entry.anchor);
+  }
+
+  function handleSearchKey(e: KeyboardEvent) {
+    if (e.key === 'Enter' && settingResults.length > 0) {
+      e.preventDefault();
+      jumpToResult(settingResults[0]);
+    } else if (e.key === 'Escape') {
+      searchQuery = '';
+    }
+  }
+
+  // Auto-select the first matching tab when search narrows results and the
+  // user's active tab no longer appears in the list.
   $effect(() => {
     if (searchQuery.trim() && filteredTabs.length > 0 && !filteredTabs.find(t => t.id === activeTab)) {
       activeTab = filteredTabs[0].id;
     }
   });
 
-  // Apply appearance mode to this window
+  // ── Window theming / sizing ──────────────────────────────────────
+
   $effect(() => {
     const mode = $appearanceMode;
     const root = document.documentElement;
@@ -59,11 +115,6 @@
   $effect(() => {
     document.documentElement.style.fontSize = `${$uiFontSize}px`;
   });
-
-  function selectTab(id: TabId) {
-    activeTab = id;
-    history.replaceState(null, '', `#settings/${id}`);
-  }
 </script>
 
 <div class="root" class:compact={$uiDensity === 'compact'}>
@@ -73,25 +124,76 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
         <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
       </svg>
-      <input type="text" placeholder="Search settings..." bind:value={searchQuery} />
+      <input
+        type="text"
+        placeholder="Search settings..."
+        bind:value={searchQuery}
+        onkeydown={handleSearchKey}
+        autocapitalize="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
     </div>
-    <nav>
-      {#each filteredTabs as tab}
-        <button
-          class="nav-btn"
-          class:active={activeTab === tab.id}
-          onclick={() => selectTab(tab.id)}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
-            <path d={tab.icon} />
-          </svg>
-          <span>{tab.label}</span>
-        </button>
-      {/each}
-    </nav>
+
+    {#if searchQuery.trim()}
+      <!-- Fine-grained search results: individual settings that match. -->
+      {#if settingResults.length === 0}
+        <div class="no-results">No settings match "{searchQuery}"</div>
+      {:else}
+        <div class="result-list" role="listbox" aria-label="Matching settings">
+          {#each settingResults as r (r.entry.anchor)}
+            <button
+              class="result"
+              role="option"
+              aria-selected={activeTab === r.tab.id}
+              onclick={() => jumpToResult(r)}
+              title={`${r.tab.label}${r.entry.group ? ' · ' + r.entry.group : ''} · ${r.entry.label}`}
+            >
+              <span class="result-label">{r.entry.label}</span>
+              <span class="result-path">
+                {r.tab.label}{#if r.entry.group && r.entry.group !== r.tab.label} · {r.entry.group}{/if}
+              </span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+
+      {#if filteredTabs.length > 0}
+        <div class="result-divider">Sections</div>
+        <nav>
+          {#each filteredTabs as tab (tab.id)}
+            <button
+              class="nav-btn"
+              class:active={activeTab === tab.id}
+              onclick={() => { selectTab(tab.id); searchQuery = ''; }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+                <path d={tab.icon} />
+              </svg>
+              <span>{tab.label}</span>
+            </button>
+          {/each}
+        </nav>
+      {/if}
+    {:else}
+      <nav>
+        {#each SETTINGS_TABS as tab (tab.id)}
+          <button
+            class="nav-btn"
+            class:active={activeTab === tab.id}
+            onclick={() => selectTab(tab.id)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+              <path d={tab.icon} />
+            </svg>
+            <span>{tab.label}</span>
+          </button>
+        {/each}
+      </nav>
+    {/if}
   </aside>
 
-  <main class="content">
+  <main class="content" bind:this={contentEl}>
     <div class="content-inner">
       {#if activeTab === 'general'}
         <GeneralSection />
@@ -123,6 +225,19 @@
   :global(#app) { height: 100%; }
   :global(*) { box-sizing: border-box; }
   :global(button) { font-family: inherit; }
+
+  /* Highlight flash applied to the searched-for setting row. Scoped globally
+     because individual section components render the [data-setting] targets
+     in their own scopes. */
+  :global(.setting-flash) {
+    animation: settingFlashKeyframes 1.4s ease-out;
+    border-radius: 8px;
+  }
+  @keyframes settingFlashKeyframes {
+    0%   { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 50%, transparent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+    70%  { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+  }
 
   .root {
     display: grid;
@@ -170,6 +285,64 @@
     outline: none;
   }
   .search-box input::placeholder { color: var(--text-muted); }
+
+  .no-results {
+    padding: 10px 12px;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  .result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .result {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+    text-align: left;
+    padding: 7px 10px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .result:hover {
+    background: var(--bg-surface);
+    border-color: var(--border);
+  }
+  .result:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    outline-offset: 1px;
+  }
+  .result-label {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.2;
+  }
+  .result-path {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    line-height: 1.2;
+  }
+
+  .result-divider {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text-muted);
+    padding: 6px 10px 2px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+  }
+
   .nav-btn {
     display: flex; align-items: center; gap: 10px;
     padding: 8px 12px;

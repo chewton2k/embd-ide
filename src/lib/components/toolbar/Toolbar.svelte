@@ -7,19 +7,24 @@
   let splitMenuPos = $state<{ top: number; left: number } | null>(null);
   let splitBtnEl: HTMLDivElement | undefined = $state();
 
+  // Collapse is only available when there is more than one terminal pane open
+  // in the terminal view; otherwise the button acts as a "split" trigger.
   let splitActive = $derived($showTerminal && $terminalSessions.length > 1);
 
   function handleSplitBtn() {
-    if (splitActive) {
+    // Re-check the session count at click time — `splitActive` is derived and
+    // could briefly be stale during rapid pane open/close transitions.
+    const canCollapse = $showTerminal && $terminalSessions.length > 1;
+    if (canCollapse) {
       collapseTerminalSplitsSignal.update(n => n + 1);
       splitMenuOpen = false;
-    } else {
-      if (!splitMenuOpen) {
-        const rect = splitBtnEl?.getBoundingClientRect();
-        if (rect) splitMenuPos = { top: rect.bottom + 2, left: rect.left };
-      }
-      splitMenuOpen = !splitMenuOpen;
+      return;
     }
+    if (!splitMenuOpen) {
+      const rect = splitBtnEl?.getBoundingClientRect();
+      if (rect) splitMenuPos = { top: rect.bottom + 2, left: rect.left };
+    }
+    splitMenuOpen = !splitMenuOpen;
   }
 
   function activateSplit(dir: 'bottom' | 'right') {

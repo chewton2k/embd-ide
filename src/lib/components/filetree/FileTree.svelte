@@ -7,7 +7,7 @@
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import Icon from '@iconify/svelte';
   import { Search, FilePlus2, FolderPlus, FolderOpen, Folder, ChevronRight, FolderSymlink } from 'lucide-svelte';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath } from '../../modules/stores';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview } from '../../modules/stores';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
   import { exists } from '@tauri-apps/plugin-fs';
   import Button from '../ui/button/Button.svelte';
@@ -396,6 +396,8 @@
     projectRoot.set(rootPath);
     await invoke('set_project_root', { path: rootPath });
     closeAllUnpinned();
+    openDiagrams.set([]);
+    showPreview.set(false);
     expandedDirs = new Set();
     await loadDirectory(rootPath);
     await fetchGitStatus();

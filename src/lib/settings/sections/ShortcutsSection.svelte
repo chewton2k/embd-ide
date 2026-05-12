@@ -41,7 +41,7 @@
   ];
 </script>
 
-<div class="root">
+<div class="root" data-setting="shortcuts">
   <SectionHeader
     title="Shortcuts"
     description="Built-in keyboard shortcuts. A configurable recorder is on the roadmap."

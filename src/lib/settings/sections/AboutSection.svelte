@@ -24,7 +24,7 @@
   }
 </script>
 
-<div class="hero">
+<div class="hero" data-setting="about">
   <img src="/leo.png" alt="leo" class="logo" />
   <div class="title">leo</div>
   <div class="subtitle">A minimal Tauri-based code IDE.</div>

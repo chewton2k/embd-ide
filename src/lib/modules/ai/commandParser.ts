@@ -46,8 +46,8 @@ export function parseCommands(response: string): { commands: CommandProposal[]; 
       dangerous,
     });
 
-    const icon = dangerous ? '⚠️' : '▶';
-    displayText = displayText.replace(fullMatch, `${icon} \`${command}\``);
+    const marker = dangerous ? 'dangerous-command' : 'command';
+    displayText = displayText.replace(fullMatch, `\`\`\`${marker}\n${command}\n\`\`\``);
   }
 
   return { commands, displayText };
