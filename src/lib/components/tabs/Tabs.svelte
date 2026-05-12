@@ -10,6 +10,21 @@
   let addMenuPos = $state<{ top: number; right: number } | null>(null);
   let addBtnEl: HTMLButtonElement | undefined = $state();
   let ctxMenu = $state<{ x: number; y: number; path: string; pinned: boolean } | null>(null);
+  let ctxMenuEl = $state<HTMLDivElement | undefined>();
+
+  $effect(() => {
+    if (ctxMenuEl && ctxMenu) {
+      const rect = ctxMenuEl.getBoundingClientRect();
+      const viewH = window.innerHeight;
+      const viewW = window.innerWidth;
+      if (rect.bottom > viewH) {
+        ctxMenu.y = Math.max(4, ctxMenu.y - (rect.bottom - viewH) - 8);
+      }
+      if (rect.right > viewW) {
+        ctxMenu.x = Math.max(4, ctxMenu.x - (rect.right - viewW) - 8);
+      }
+    }
+  });
 
   function switchTab(path: string) { activeFilePath.set(path); }
 
@@ -161,7 +176,7 @@
 {#if ctxMenu}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="ctx-backdrop" role="presentation" onclick={closeCtx} onkeydown={(e) => e.key === 'Escape' && closeCtx()}></div>
-  <div class="ctx-menu" role="menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
+  <div class="ctx-menu" role="menu" bind:this={ctxMenuEl} style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
     <button class="ctx-item" role="menuitem" onclick={ctxPin}>
       {ctxMenu.pinned ? 'Unpin tab' : 'Pin tab'}
     </button>

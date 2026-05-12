@@ -26,7 +26,7 @@ export function toggleGitPanel() {
 export const appearanceMode = persistedString('leo-appearance', 'system') as import('svelte/store').Writable<AppearanceMode>;
 
 // Editor theme (CodeMirror)
-export const editorTheme = persistedString('leo-editor-theme', 'one-dark') as import('svelte/store').Writable<EditorThemeId>;
+export const editorTheme = persistedString('leo-editor-theme', 'nord') as import('svelte/store').Writable<EditorThemeId>;
 
 // UI
 export const uiFontSize = persistedNumber('leo-ui-font-size', 13);

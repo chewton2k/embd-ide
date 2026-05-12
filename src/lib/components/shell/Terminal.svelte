@@ -25,26 +25,110 @@
     unlisten: UnlistenFn;
     unlistenExit: UnlistenFn;
     resizeObserver: ResizeObserver | null;
+    mounted: boolean;
   }
+
+  type Rect = { top: number; left: number; width: number; height: number };
 
   let terminalRoot: HTMLDivElement;
   let panes = $state<TerminalPane[]>([]);
   let activePaneId = $state<number | null>(null);
-  let splitDirection = $state<'right' | 'bottom'>('right');
-  let contextMenu = $state<{ x: number; y: number } | null>(null);
+  let contextMenu = $state<{ x: number; y: number; paneId: number | null } | null>(null);
+  let contextMenuEl = $state<HTMLDivElement | undefined>();
   let opChain = Promise.resolve();
+
+  // ── Split tree for nested tmux-style splits ──
+  type SplitNode =
+    | { type: 'leaf'; paneId: number }
+    | { type: 'split'; direction: 'horizontal' | 'vertical'; children: [SplitNode, SplitNode] };
+  let splitTree = $state<SplitNode | null>(null);
+
+  function findLeaf(node: SplitNode | null, paneId: number): boolean {
+    if (!node) return false;
+    if (node.type === 'leaf') return node.paneId === paneId;
+    return findLeaf(node.children[0], paneId) || findLeaf(node.children[1], paneId);
+  }
+
+  function replaceLeaf(node: SplitNode, targetId: number, replacement: SplitNode): SplitNode {
+    if (node.type === 'leaf') return node.paneId === targetId ? replacement : node;
+    return {
+      type: 'split',
+      direction: node.direction,
+      children: [
+        replaceLeaf(node.children[0], targetId, replacement),
+        replaceLeaf(node.children[1], targetId, replacement),
+      ],
+    };
+  }
+
+  function removeLeaf(node: SplitNode | null, paneId: number): SplitNode | null {
+    if (!node) return null;
+    if (node.type === 'leaf') return node.paneId === paneId ? null : node;
+    const left = removeLeaf(node.children[0], paneId);
+    const right = removeLeaf(node.children[1], paneId);
+    if (!left && !right) return null;
+    if (!left) return right;
+    if (!right) return left;
+    return { type: 'split', direction: node.direction, children: [left, right] };
+  }
+
+  /** Compute percentage-based rects for each leaf pane from the split tree. */
+  function computePaneRects(tree: SplitNode | null): Record<number, Rect> {
+    const rects: Record<number, Rect> = {};
+    function walk(node: SplitNode, top: number, left: number, width: number, height: number) {
+      if (node.type === 'leaf') {
+        rects[node.paneId] = { top, left, width, height };
+        return;
+      }
+      if (node.direction === 'horizontal') {
+        const w = width / 2;
+        walk(node.children[0], top, left, w, height);
+        walk(node.children[1], top, left + w, w, height);
+      } else {
+        const h = height / 2;
+        walk(node.children[0], top, left, width, h);
+        walk(node.children[1], top + h, left, width, h);
+      }
+    }
+    if (tree) walk(tree, 0, 0, 100, 100);
+    return rects;
+  }
+
+  let paneRects = $derived(computePaneRects(splitTree));
+
+  $effect(() => {
+    if (contextMenuEl && contextMenu) {
+      const rect = contextMenuEl.getBoundingClientRect();
+      const viewH = window.innerHeight;
+      const viewW = window.innerWidth;
+      if (rect.bottom > viewH) {
+        contextMenu.y = Math.max(4, contextMenu.y - (rect.bottom - viewH) - 8);
+      }
+      if (rect.right > viewW) {
+        contextMenu.x = Math.max(4, contextMenu.x - (rect.right - viewW) - 8);
+      }
+    }
+  });
 
   function handleContextMenu(e: MouseEvent) {
     e.preventDefault();
-    contextMenu = { x: e.clientX, y: e.clientY };
+    const target = e.target as HTMLElement;
+    const paneEl = target.closest('[data-pane-terminal]');
+    const paneId = paneEl ? Number(paneEl.getAttribute('data-pane-terminal')) : activePaneId;
+    contextMenu = { x: e.clientX, y: e.clientY, paneId };
   }
 
   function closeContextMenu() { contextMenu = null; }
 
-  function ctxAction(action: 'right' | 'bottom' | 'collapse') {
+  function ctxAction(action: 'right' | 'bottom' | 'collapse' | 'close') {
+    const paneId = contextMenu?.paneId;
     contextMenu = null;
     if (action === 'collapse') enqueue(() => collapseToActivePane());
-    else enqueue(() => splitTerminal(action));
+    else if (action === 'close' && paneId != null) enqueue(() => closePane(paneId));
+    else if (action === 'right' || action === 'bottom') {
+      if (paneId != null) activePaneId = paneId;
+      enqueue(() => splitTerminal(action));
+    }
   }
 
   function buildXtermTheme() {
@@ -73,9 +157,10 @@
   }
 
   function fitPane(pane: TerminalPane) {
+    if (!pane.mounted) return;
     const mount = getPaneMount(pane.id);
     if (!mount || mount.clientWidth === 0 || mount.clientHeight === 0) return;
-    pane.fitAddon.fit();
+    try { pane.fitAddon.fit(); } catch { /* ignore */ }
   }
 
   function focusPane(id: number) {
@@ -84,7 +169,9 @@
     if (!pane) return;
     requestAnimationFrame(() => {
       fitPane(pane);
-      pane.xterm.focus();
+      if (pane.mounted) {
+        try { pane.xterm.focus(); } catch { /* ignore */ }
+      }
     });
   }
 
@@ -94,7 +181,11 @@
     return next;
   }
 
-  async function createPane() {
+  /**
+   * Create a pane: spawn backend, build xterm, update tree, mount into DOM.
+   * If `target` is provided, splits from that pane; otherwise creates standalone.
+   */
+  async function createPane(target?: { splitFrom: number; direction: 'horizontal' | 'vertical' }): Promise<TerminalPane | null> {
     const cwd = get(projectRoot);
 
     const xterm = new XTerm({
@@ -148,7 +239,7 @@
       xterm.writeln(`\r\nFailed to start terminal: ${e}`);
       xterm.writeln('Terminal requires Tauri runtime.');
       xterm.dispose();
-      return;
+      return null;
     }
 
     const pane: TerminalPane = {
@@ -160,30 +251,53 @@
       unlisten,
       unlistenExit,
       resizeObserver: null,
+      mounted: false,
     };
 
+    // Update panes + split tree atomically so Svelte renders the mount div.
     panes = [...panes, pane];
-    activePaneId = sessionId;
+
+    if (target && splitTree && findLeaf(splitTree, target.splitFrom)) {
+      splitTree = replaceLeaf(splitTree, target.splitFrom, {
+        type: 'split',
+        direction: target.direction,
+        children: [
+          { type: 'leaf', paneId: target.splitFrom },
+          { type: 'leaf', paneId: sessionId },
+        ],
+      });
+    } else if (!splitTree) {
+      splitTree = { type: 'leaf', paneId: sessionId };
+    }
+
     showTerminal.set(true);
     activeFilePath.set(terminalPath());
 
+    // Wait for Svelte to render the mount div.
     await tick();
+    await new Promise((r) => requestAnimationFrame(r));
 
-    const mount = getPaneMount(pane.id);
-    if (!mount) return;
-
-    xterm.open(mount);
-    fitPane(pane);
-    await new Promise((resolve) => requestAnimationFrame(resolve));
-    fitPane(pane);
-
-    const resizeObserver = new ResizeObserver(() => {
+    const mount = getPaneMount(sessionId);
+    if (mount) {
+      xterm.open(mount);
+      pane.mounted = true;
       fitPane(pane);
-    });
-    resizeObserver.observe(mount);
-    pane.resizeObserver = resizeObserver;
+      await new Promise((r) => requestAnimationFrame(r));
+      fitPane(pane);
 
-    requestAnimationFrame(() => xterm.focus());
+      const resizeObserver = new ResizeObserver(() => fitPane(pane));
+      resizeObserver.observe(mount);
+      pane.resizeObserver = resizeObserver;
+    }
+
+    activePaneId = sessionId;
+    requestAnimationFrame(() => {
+      if (pane.mounted) {
+        try { pane.xterm.focus(); } catch { /* ignore */ }
+      }
+    });
+
+    return pane;
   }
 
   async function closePane(paneId: number, killBackend = true) {
@@ -202,6 +316,7 @@
 
     const remaining = panes.filter((entry) => entry.id !== paneId);
     panes = remaining;
+    splitTree = removeLeaf(splitTree, paneId);
 
     if (activePaneId === paneId) {
       activePaneId = remaining[idx]?.id ?? remaining[idx - 1]?.id ?? remaining[0]?.id ?? null;
@@ -220,9 +335,12 @@
       activePaneId = remaining[0].id;
     }
 
-    if (activePaneId !== null) {
-      focusPane(activePaneId);
-    }
+    // Refit remaining panes after layout change.
+    await tick();
+    await new Promise((r) => requestAnimationFrame(r));
+    for (const p of remaining) fitPane(p);
+
+    if (activePaneId !== null) focusPane(activePaneId);
   }
 
   async function closeAllPanes() {
@@ -255,12 +373,30 @@
   }
 
   async function splitTerminal(direction: 'right' | 'bottom') {
-    splitDirection = direction;
     if (panes.length === 0) {
       await createPane();
+      return;
     }
-    await createPane();
+    const targetId = activePaneId ?? panes[0]?.id;
+    if (targetId == null) return;
+
+    const dir = direction === 'right' ? 'horizontal' : 'vertical';
+    await createPane({ splitFrom: targetId, direction: dir });
+
+    // Refit all panes since existing ones shrank.
+    await tick();
+    await new Promise((r) => requestAnimationFrame(r));
+    for (const p of panes) fitPane(p);
   }
+
+  // Refit all panes when rects change (e.g. container resize).
+  $effect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    paneRects;
+    requestAnimationFrame(() => {
+      for (const p of panes) fitPane(p);
+    });
+  });
 
   $effect(() => {
     terminalSessions.set(panes.map((pane) => ({
@@ -336,6 +472,11 @@
   });
 
   onMount(() => {
+    // Auto-create a terminal pane when the component first mounts with none.
+    if (panes.length === 0) {
+      enqueue(() => createPane());
+    }
+
     const unsubFont = terminalFontSize.subscribe((size) => {
       for (const pane of panes) {
         pane.xterm.options.fontSize = size;
@@ -370,21 +511,25 @@
 
 <div class="terminal-panel">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="terminal-content" role="application" class:split-right={splitDirection === 'right'} class:split-bottom={splitDirection === 'bottom'} bind:this={terminalRoot} oncontextmenu={handleContextMenu}>
+  <div class="terminal-content" role="application" bind:this={terminalRoot} oncontextmenu={handleContextMenu}>
     {#if panes.length === 0}
       <div class="terminal-placeholder">Open a terminal to start a session.</div>
     {:else}
       {#each panes as pane (pane.id)}
-        <div
-          class="terminal-pane"
-          class:active={activePaneId === pane.id}
-          role="button"
-          tabindex="0"
-          onclick={() => focusPane(pane.id)}
-          onkeydown={(e) => e.key === 'Enter' && focusPane(pane.id)}
-        >
-          <div class="pane-body" data-pane-terminal={pane.id}></div>
-        </div>
+        {@const rect = paneRects[pane.id]}
+        {#if rect}
+          <div
+            class="terminal-pane"
+            class:active={activePaneId === pane.id}
+            style="top:{rect.top}%;left:{rect.left}%;width:{rect.width}%;height:{rect.height}%"
+            role="button"
+            tabindex="0"
+            onclick={() => focusPane(pane.id)}
+            onkeydown={(e) => e.key === 'Enter' && focusPane(pane.id)}
+          >
+            <div class="pane-body" data-pane-terminal={pane.id}></div>
+          </div>
+        {/if}
       {/each}
     {/if}
   </div>
@@ -392,7 +537,7 @@
   {#if contextMenu}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="ctx-backdrop" role="presentation" onclick={closeContextMenu} onkeydown={(e) => e.key === 'Escape' && closeContextMenu()} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
-    <div class="ctx-menu" style="left:{contextMenu.x}px;top:{contextMenu.y}px">
+    <div class="ctx-menu" bind:this={contextMenuEl} style="left:{contextMenu.x}px;top:{contextMenu.y}px">
       <button class="ctx-item" onclick={() => ctxAction('right')}>
         <Columns2 size={13} /> Split Right
       </button>
@@ -400,8 +545,14 @@
         <PanelBottom size={13} /> Split Bottom
       </button>
       {#if panes.length > 1}
+        <div class="ctx-divider"></div>
+        <button class="ctx-item" onclick={() => ctxAction('close')}>
+          Close Terminal
+        </button>
+      {/if}
+      {#if panes.length >= 2}
         <button class="ctx-item" onclick={() => ctxAction('collapse')}>
-          <SplitSquareVertical size={13} /> Collapse Splits
+          <SplitSquareVertical size={13} /> Collapse All
         </button>
       {/if}
     </div>
@@ -421,28 +572,19 @@
     flex: 1;
     min-height: 0;
     min-width: 0;
-    display: flex;
-    gap: 1px;
+    position: relative;
     background: var(--border);
+    overflow: hidden;
   }
-
-  .terminal-content.split-right { flex-direction: row; }
-  .terminal-content.split-bottom { flex-direction: column; }
 
   .terminal-pane {
+    position: absolute;
     display: flex;
     flex-direction: column;
-    min-width: 0;
-    min-height: 0;
-    flex: 1;
     overflow: hidden;
     background: var(--bg-tertiary);
-  }
-
-  .pane-body {
-    flex: 1;
-    min-height: 0;
-    padding: 4px 8px;
+    box-sizing: border-box;
+    border: 0.5px solid var(--border);
   }
 
   .pane-body {
@@ -501,5 +643,11 @@
 
   .ctx-item:hover {
     background: var(--bg-surface);
+  }
+
+  .ctx-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 3px 6px;
   }
 </style>
