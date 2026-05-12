@@ -1,63 +1,66 @@
 <script lang="ts">
-  import { TerminalSquare, Plus, FolderOpen, Eye, Pin, PinOff } from 'lucide-svelte';
+  import Icon from '@iconify/svelte';
+  import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw } from 'lucide-svelte';
   import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal, openPreviewSignal } from '../../modules/stores';
+  import { triggerFileTreeRefresh } from '../../modules/stores';
+  import { getFileIconName } from '../../modules/fileIcons';
 
   let tabsBar: HTMLDivElement | undefined = $state();
   let addMenuOpen = $state(false);
   let addMenuPos = $state<{ top: number; right: number } | null>(null);
   let addBtnEl: HTMLButtonElement | undefined = $state();
+  let ctxMenu = $state<{ x: number; y: number; path: string; pinned: boolean } | null>(null);
 
-  function switchTab(path: string) {
-    activeFilePath.set(path);
-  }
+  function switchTab(path: string) { activeFilePath.set(path); }
 
   function handleClose(e: MouseEvent, path: string) {
     e.stopPropagation();
     closeFile(path);
   }
 
-  function handlePin(e: MouseEvent, path: string) {
+  function handleTabContext(e: MouseEvent, path: string, pinned: boolean) {
+    e.preventDefault();
     e.stopPropagation();
-    togglePin(path);
+    ctxMenu = { x: e.clientX, y: e.clientY, path, pinned };
   }
 
-  // Scroll active tab into view when it changes
+  function closeCtx() { ctxMenu = null; }
+
+  function ctxPin() {
+    if (ctxMenu) togglePin(ctxMenu.path);
+    ctxMenu = null;
+  }
+
+  function ctxClose() {
+    if (ctxMenu) closeFile(ctxMenu.path);
+    ctxMenu = null;
+  }
+
   $effect(() => {
     const activePath = $activeFilePath;
     if (!tabsBar || !activePath) return;
     requestAnimationFrame(() => {
       const activeEl = tabsBar?.querySelector('.tab.active');
-      if (activeEl) {
-        activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
-      }
+      if (activeEl) activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     });
   });
 
   function handleWheel(e: WheelEvent) {
-    if (tabsBar) {
-      e.preventDefault();
-      tabsBar.scrollLeft += e.deltaY;
-    }
+    if (tabsBar) { e.preventDefault(); tabsBar.scrollLeft += e.deltaY; }
   }
 
   function openAddMenu() {
     const rect = addBtnEl?.getBoundingClientRect();
-    if (rect) {
-      addMenuPos = {
-        top: rect.bottom + 2,
-        right: Math.max(8, window.innerWidth - rect.right)
-      };
-    }
+    if (rect) addMenuPos = { top: rect.bottom + 2, right: Math.max(8, window.innerWidth - rect.right) };
     addMenuOpen = !addMenuOpen;
   }
 
   function handleDocumentClick(e: MouseEvent) {
     if (addMenuOpen && addBtnEl && !addBtnEl.contains(e.target as Node)) {
       const menu = document.querySelector('.tab-add-menu');
-      if (!menu?.contains(e.target as Node)) {
-        addMenuOpen = false;
-      }
+      if (!menu?.contains(e.target as Node)) addMenuOpen = false;
     }
+    if (ctxMenu) closeCtx();
   }
 
   const markdownExts = /\.(md|mdx|markdown)$/i;
@@ -66,24 +69,12 @@
     return !!path && !isTerminalPath(path) && markdownExts.test(path);
   });
 
-  function openExistingFileTab() {
-    openFileSearchSignal.update((n) => n + 1);
-    addMenuOpen = false;
-  }
-
-  function openPreviewTab() {
-    if (!previewEnabled) return;
-    openPreviewSignal.update((n) => n + 1);
-    addMenuOpen = false;
-  }
-
+  function openExistingFileTab() { openFileSearchSignal.update(n => n + 1); addMenuOpen = false; }
+  function openPreviewTab() { if (!previewEnabled) return; openPreviewSignal.update(n => n + 1); addMenuOpen = false; }
   function openTerminalTab() {
     $showTerminal = true;
-    if ($terminalSessions.length === 0) {
-      createTerminalSignal.update((n) => n + 1);
-    } else {
-      activeFilePath.set(terminalPath());
-    }
+    if ($terminalSessions.length === 0) createTerminalSignal.update(n => n + 1);
+    else activeFilePath.set(terminalPath());
     addMenuOpen = false;
   }
 </script>
@@ -102,19 +93,16 @@
       title={file.path}
       onclick={() => switchTab(file.path)}
       onkeydown={(e) => e.key === 'Enter' && switchTab(file.path)}
+      oncontextmenu={(e) => handleTabContext(e, file.path, file.pinned)}
     >
-      <button class="tab-pin" class:pinned={file.pinned} title={file.pinned ? 'Unpin tab' : 'Pin tab'} onclick={(e) => handlePin(e, file.path)}>
-        {#if file.pinned}
-          <Pin size={11} strokeWidth={2.2} fill="currentColor" />
-        {:else}
-          <Pin size={11} strokeWidth={2} />
-        {/if}
-      </button>
+      <Icon class="tab-icon" icon={getFileIconName(file.name)} width={14} height={14} />
       <span class="tab-name">
         {#if file.modified}<span class="modified-dot"></span>{/if}
         {file.name}
       </span>
-      {#if !file.pinned}
+      {#if file.pinned}
+        <span class="pin-dot" title="Pinned"></span>
+      {:else}
         <button class="tab-close" onclick={(e) => handleClose(e, file.path)}>×</button>
       {/if}
     </div>
@@ -126,7 +114,7 @@
       class:active={isTerminalPath($activeFilePath)}
       role="tab"
       tabindex="0"
-      title={`Terminal (${ $terminalSessions.length } pane${$terminalSessions.length === 1 ? '' : 's'})`}
+      title="Terminal"
       onclick={() => activeFilePath.set(terminalPath())}
       onkeydown={(e) => e.key === 'Enter' && activeFilePath.set(terminalPath())}
     >
@@ -136,16 +124,11 @@
     </div>
   {/if}
 
-  <div class="tab-add-anchor">
-    <button
-      type="button"
-      class="tab tab-add-btn"
-      bind:this={addBtnEl}
-      onclick={openAddMenu}
-      title="Open new tab menu"
-      aria-label="Open new tab menu"
-      aria-expanded={addMenuOpen}
-    >
+  <div class="tab-actions">
+    <button type="button" class="tab-action-btn" onclick={() => triggerFileTreeRefresh()} title="Reload file tree" aria-label="Reload file tree">
+      <RefreshCw size={12} />
+    </button>
+    <button type="button" class="tab-action-btn" bind:this={addBtnEl} onclick={openAddMenu} title="New tab" aria-label="New tab" aria-expanded={addMenuOpen}>
       <Plus size={13} />
     </button>
   </div>
@@ -154,17 +137,27 @@
 {#if addMenuOpen && addMenuPos}
   <div class="tab-add-menu" role="menu" style="top: {addMenuPos.top}px; right: {addMenuPos.right}px;">
     <button class="tab-add-menu-item" role="menuitem" onclick={openExistingFileTab}>
-      <FolderOpen size={12} />
-      <span>Open File</span>
+      <FolderOpen size={12} /> <span>Open File</span>
     </button>
     <button class="tab-add-menu-item" class:disabled={!previewEnabled} role="menuitem" onclick={openPreviewTab} disabled={!previewEnabled}>
-      <Eye size={12} />
-      <span>Preview</span>
+      <Eye size={12} /> <span>Preview</span>
     </button>
     <button class="tab-add-menu-item" role="menuitem" onclick={openTerminalTab}>
-      <TerminalSquare size={12} />
-      <span>Terminal</span>
+      <TerminalSquare size={12} /> <span>Terminal</span>
     </button>
+  </div>
+{/if}
+
+{#if ctxMenu}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="ctx-backdrop" role="presentation" onclick={closeCtx} onkeydown={(e) => e.key === 'Escape' && closeCtx()}></div>
+  <div class="ctx-menu" role="menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
+    <button class="ctx-item" role="menuitem" onclick={ctxPin}>
+      {ctxMenu.pinned ? 'Unpin tab' : 'Pin tab'}
+    </button>
+    {#if !ctxMenu.pinned}
+      <button class="ctx-item" role="menuitem" onclick={ctxClose}>Close tab</button>
+    {/if}
   </div>
 {/if}
 
@@ -180,27 +173,12 @@
     max-width: 100%;
     scrollbar-width: none;
   }
-
-  .tab-add-anchor {
-    position: sticky;
-    right: 0;
-    margin-left: auto;
-    display: flex;
-    flex-shrink: 0;
-    background: linear-gradient(90deg, transparent 0%, var(--bg-secondary) 18px);
-    padding-left: 18px;
-    z-index: 2;
-  }
-
-  .tabs-bar::-webkit-scrollbar {
-    height: 0;
-    display: none;
-  }
+  .tabs-bar::-webkit-scrollbar { height: 0; display: none; }
 
   .tab {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 6px;
     padding: 0 10px;
     font-size: 12px;
     font-weight: 500;
@@ -209,40 +187,28 @@
     background: color-mix(in srgb, var(--tab-inactive) 82%, transparent);
     flex-shrink: 0;
     min-width: 0;
-    max-width: 148px;
+    max-width: 160px;
     cursor: pointer;
     height: calc(100% - 8px);
-    margin: 4px 4px 4px 0;
+    margin: 4px 3px 4px 0;
     border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-    border-radius: 999px;
+    border-radius: 6px;
   }
-
   .tab:hover {
     background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
     border-color: color-mix(in srgb, var(--border) 95%, transparent);
     color: var(--text-primary);
   }
-
-  .tab-add-btn {
-    max-width: none;
-    justify-content: center;
-    width: 34px;
-    padding: 0;
-  }
-
   .tab.active {
     background: var(--tab-active);
     color: var(--text-primary);
     font-weight: 600;
-    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
-    box-shadow:
-      inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent),
-      0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+    border-color: var(--border);
   }
+  .tab.pinned { opacity: 0.9; }
+  .tab.conflict { border-color: color-mix(in srgb, var(--error) 40%, var(--border)); }
 
-  .tab.conflict {
-    border-color: color-mix(in srgb, var(--error) 40%, var(--border));
-  }
+  :global(.tab-icon) { flex-shrink: 0; }
 
   .tab-name {
     display: flex;
@@ -251,44 +217,44 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-
-  .tab-pin {
-    color: var(--text-muted);
-    flex-shrink: 0;
-    padding: 2px;
-    border-radius: 3px;
-  }
-
-  .tab-pin.pinned {
-    color: var(--accent);
-  }
-
-  .tab-pin:hover {
-    background: var(--bg-surface);
-  }
-
   .modified-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--warning);
-    display: inline-block;
-    flex-shrink: 0;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--warning); display: inline-block; flex-shrink: 0;
   }
-
   .tab-close {
-    font-size: 14px;
-    line-height: 1;
-    color: var(--text-muted);
-    border-radius: 3px;
-    padding: 0 2px;
-    flex-shrink: 0;
+    font-size: 14px; line-height: 1; color: var(--text-muted);
+    border-radius: 3px; padding: 0 2px; flex-shrink: 0;
+  }
+  .tab-close:hover { background: var(--bg-surface); color: var(--error); }
+
+  .pin-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-muted); flex-shrink: 0;
   }
 
-  .tab-close:hover {
-    background: var(--bg-surface);
-    color: var(--error);
+  .tab-actions {
+    position: sticky;
+    right: 0;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    background: linear-gradient(90deg, transparent 0%, var(--bg-secondary) 12px);
+    padding-left: 14px;
+    padding-right: 6px;
+    z-index: 2;
   }
+  .tab-action-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px; height: 26px;
+    border-radius: 5px;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .tab-action-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
 
   .tab-add-menu {
     position: fixed;
@@ -303,27 +269,26 @@
     min-width: 140px;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
   }
-
   .tab-add-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 9px;
-    border-radius: 5px;
-    font-size: 11px;
-    color: var(--text-secondary);
-    text-align: left;
-    white-space: nowrap;
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 9px; border-radius: 5px;
+    font-size: 11px; color: var(--text-secondary);
+    text-align: left; white-space: nowrap;
   }
+  .tab-add-menu-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+  .tab-add-menu-item.disabled { opacity: 0.45; cursor: default; }
 
-  .tab-add-menu-item:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
+  .ctx-backdrop { position: fixed; inset: 0; z-index: 999; }
+  .ctx-menu {
+    position: fixed; z-index: 1000;
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 8px; padding: 4px; min-width: 120px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
   }
-
-  .tab-add-menu-item.disabled {
-    opacity: 0.45;
-    cursor: default;
+  .ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 7px 10px; border-radius: 5px;
+    font-size: 12px; color: var(--text-primary); cursor: pointer;
   }
-
+  .ctx-item:hover { background: var(--bg-surface); }
 </style>

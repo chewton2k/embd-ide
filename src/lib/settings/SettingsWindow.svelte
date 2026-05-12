@@ -9,7 +9,7 @@
   type TabId = 'general' | 'shortcuts' | 'models' | 'agents' | 'about';
 
   const TABS: { id: TabId; label: string; icon: string; keywords: string }[] = [
-    { id: 'general',   label: 'General',   keywords: 'appearance theme editor font tab autosave density hidden patterns terminal', icon: 'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z M19.4 13a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V19a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1A2 2 0 1 1 4.3 15l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1A2 2 0 1 1 7 2.3l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V1a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1A2 2 0 1 1 19.7 5l-.1.1a1.7 1.7 0 0 0-.3 1.8V7a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z' },
+    { id: 'general',   label: 'General',   keywords: 'appearance theme editor font tab autosave density hidden patterns terminal', icon: 'M4 21v-7 M4 10V3 M12 21v-9 M12 8V3 M20 21v-5 M20 12V3 M1 14h6 M9 8h6 M17 16h6' },
     { id: 'shortcuts', label: 'Shortcuts', keywords: 'keyboard keybindings hotkeys', icon: 'M2 8h20v8H2z M6 12h.01 M10 12h.01 M14 12h.01 M18 12h.01' },
     { id: 'models',    label: 'Models',    keywords: 'ai api key openrouter openai anthropic provider', icon: 'M12 2v4 M12 18v4 M4.93 4.93l2.83 2.83 M16.24 16.24l2.83 2.83 M2 12h4 M18 12h4 M4.93 19.07l2.83-2.83 M16.24 7.76l2.83-2.83 M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z' },
     { id: 'agents',    label: 'Agents',    keywords: 'assistant chat', icon: 'M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M3 21v-1a6 6 0 0 1 6-6 6 6 0 0 1 6 6v1 M17 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M14 14a4 4 0 0 1 8 0' },
@@ -180,9 +180,10 @@
   }
   .nav-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
   .nav-btn.active {
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
-    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+    color: var(--text-primary);
+    font-weight: 600;
   }
   .nav-btn svg { flex-shrink: 0; }
 

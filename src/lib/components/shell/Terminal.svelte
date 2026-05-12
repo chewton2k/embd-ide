@@ -369,7 +369,8 @@
 </script>
 
 <div class="terminal-panel">
-  <div class="terminal-content" class:split-right={splitDirection === 'right'} class:split-bottom={splitDirection === 'bottom'} bind:this={terminalRoot} oncontextmenu={handleContextMenu}>
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="terminal-content" role="application" class:split-right={splitDirection === 'right'} class:split-bottom={splitDirection === 'bottom'} bind:this={terminalRoot} oncontextmenu={handleContextMenu}>
     {#if panes.length === 0}
       <div class="terminal-placeholder">Open a terminal to start a session.</div>
     {:else}
@@ -390,7 +391,7 @@
 
   {#if contextMenu}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
+    <div class="ctx-backdrop" role="presentation" onclick={closeContextMenu} onkeydown={(e) => e.key === 'Escape' && closeContextMenu()} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu(); }}></div>
     <div class="ctx-menu" style="left:{contextMenu.x}px;top:{contextMenu.y}px">
       <button class="ctx-item" onclick={() => ctxAction('right')}>
         <Columns2 size={13} /> Split Right

@@ -1,7 +1,7 @@
 <script lang="ts">
   import Tabs from '../tabs/Tabs.svelte';
-  import { PanelLeft, SplitSquareVertical, Search, MessageSquareText, GitBranch, CheckSquare, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
-  import { showTerminal, showSettings, autosaveEnabled, showChat, showGit, gitBranch, triggerSearchInFile, toggleChatPanel, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath } from '../../modules/stores';
+  import { PanelLeft, SplitSquareVertical, Search, MessageSquareText, GitBranch, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
+  import { showTerminal, showSettings, showChat, showGit, gitBranch, toggleChatPanel, toggleGitPanel, activeFilePath, terminalSessions, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath, openFileSearchSignal } from '../../modules/stores';
 
   let splitMenuOpen = $state(false);
   let splitMenuPos = $state<{ top: number; left: number } | null>(null);
@@ -40,17 +40,9 @@
     onToggleSidebar: () => void;
   } = $props();
 
-  function triggerSearch() {
-    triggerSearchInFile.update(n => n + 1);
+  function openFileSearch() {
+    openFileSearchSignal.update(n => n + 1);
   }
-
-  const viewerExts = new Set(['png','jpg','jpeg','gif','webp','bmp','ico','svg','pdf','mp4','webm','mov','mp3','wav','ogg','flac']);
-  let searchEnabled = $derived.by(() => {
-    const path = $activeFilePath;
-    if (!path) return false;
-    const ext = path.split('.').pop()?.toLowerCase() ?? '';
-    return !viewerExts.has(ext);
-  });
 </script>
 
 <svelte:document onclick={handleDocumentClick} />
@@ -61,7 +53,7 @@
     class="toolbar-btn sidebar-toggle"
     class:active={sidebarVisible}
     onclick={onToggleSidebar}
-    title="Toggle sidebar"
+    title="Toggle Sidebar (Cmd+B)"
     aria-label="Toggle sidebar"
     aria-pressed={sidebarVisible}
   >
@@ -78,8 +70,8 @@
       class="toolbar-btn split-btn"
       class:active={splitActive}
       onclick={handleSplitBtn}
-      title={splitActive ? 'Close split' : 'Split terminal'}
-      aria-label={splitActive ? 'Close split' : 'Split terminal'}
+      title={splitActive ? 'Collapse terminal splits' : 'Split terminal pane'}
+      aria-label={splitActive ? 'Collapse splits' : 'Split terminal'}
       aria-pressed={splitActive}
     >
       <SplitSquareVertical size={14} />
@@ -104,16 +96,18 @@
   </div>
 
   <div class="toolbar-right">
-    <button type="button" class="toolbar-search-btn" class:disabled={!searchEnabled} onclick={triggerSearch} disabled={!searchEnabled} title="Search in file (Cmd/Ctrl+F)" aria-label="Search in file">
-      <Search size={13} />
-      <span>Search in file</span>
-    </button>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="toolbar-search" onclick={openFileSearch} onkeydown={(e) => e.key === 'Enter' && openFileSearch()} title="Quick open file (Cmd+O)">
+      <Search size={12} />
+      <span>Search files...</span>
+      <kbd>⌘O</kbd>
+    </div>
     <button
       type="button"
       class="toolbar-btn"
       class:active={$showChat}
       onclick={toggleChatPanel}
-      title="Toggle AI chat (Ctrl+L)"
+      title="AI Chat (Ctrl+L)"
       aria-label="Toggle AI chat"
       aria-pressed={$showChat}
     >
@@ -125,7 +119,7 @@
       class="toolbar-btn"
       class:active={$showGit}
       onclick={toggleGitPanel}
-      title="Toggle source control (Ctrl+G)"
+      title="Source Control (Cmd+G)"
       aria-label="Toggle source control"
       aria-pressed={$showGit}
     >
@@ -133,18 +127,6 @@
       {#if $gitBranch}
         <span class="branch-label">{$gitBranch}</span>
       {/if}
-    </button>
-
-    <button
-      type="button"
-      class="toolbar-btn autosave-btn"
-      class:active={$autosaveEnabled}
-      onclick={() => autosaveEnabled.update(v => !v)}
-      title="Toggle autosave"
-      aria-label="Toggle autosave"
-      aria-pressed={$autosaveEnabled}
-    >
-      <CheckSquare size={14} />
     </button>
 
     <button
@@ -179,7 +161,6 @@
     overflow: hidden;
   }
 
-  /* Remove the tabs-bar's own bottom border — the toolbar provides it */
   .tabs-wrapper :global(.tabs-bar) {
     border-bottom: none;
   }
@@ -187,8 +168,8 @@
   .toolbar-right {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 0 8px;
+    gap: 4px;
+    padding: 0 10px;
     flex-shrink: 0;
     height: 100%;
   }
@@ -197,7 +178,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 6px;
+    padding: 5px 8px;
     border-radius: 4px;
     color: var(--text-muted);
     font-size: 11px;
@@ -211,27 +192,29 @@
   }
 
   .toolbar-btn.active {
-    color: var(--accent);
+    color: var(--text-primary);
   }
 
   .sidebar-toggle {
-    padding: 4px 8px;
-    margin-left: 4px;
+    padding: 0 10px;
+    margin: 0;
     border-radius: 0;
     height: 100%;
+    border-right: 1px solid var(--border);
   }
 
   .split-btn-container {
     position: relative;
     display: flex;
     align-items: center;
-    padding: 0 2px;
-    border-right: 1px solid var(--border);
     height: 100%;
+    border-right: 1px solid var(--border);
   }
 
   .split-btn {
-    padding: 4px 6px;
+    padding: 0 10px;
+    border-radius: 0;
+    height: 100%;
   }
 
   .split-menu {
@@ -266,30 +249,34 @@
     color: var(--text-primary);
   }
 
-  .toolbar-search-btn {
+  .toolbar-search {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 10px;
+    padding: 4px 10px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 5px;
     color: var(--text-muted);
     font-size: 11px;
     cursor: pointer;
     white-space: nowrap;
     transition: border-color 0.1s, color 0.1s;
-    margin-right: 6px;
+    margin-right: 8px;
+    min-width: 140px;
   }
-
-  .toolbar-search-btn:hover {
-    border-color: var(--accent);
-    color: var(--text-primary);
+  .toolbar-search:hover {
+    border-color: var(--text-muted);
+    color: var(--text-secondary);
   }
-
-  .toolbar-search-btn.disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+  .toolbar-search kbd {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: var(--bg-surface);
+    color: var(--text-muted);
+    margin-left: auto;
+  }
     pointer-events: none;
   }
 

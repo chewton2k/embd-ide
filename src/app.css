@@ -26,8 +26,8 @@
   --text-primary: #e0e0e0;
   --text-secondary: #a0a0a0;
   --text-muted: #666666;
-  --accent: #7aa2f7;
-  --accent-hover: #89b4fa;
+  --accent: #a0a0a0;
+  --accent-hover: #c0c0c0;
   --border: #2e2e2e;
   --success: #73daca;
   --warning: #e0af68;
@@ -36,7 +36,7 @@
   --tab-inactive: #161616;
   --diff-add: #73daca;
   --diff-del: #f7768e;
-  --git-graph-accent: #7aa2f7;
+  --git-graph-accent: #a0a0a0;
   --git-notification: #73daca;
 }
 
@@ -45,13 +45,13 @@
   --bg-primary: #fafafa;
   --bg-secondary: #f2f2f2;
   --bg-tertiary: #eaeaea;
-  --bg-surface: #e4e4e4;
-  --text-primary: #24292e;
-  --text-secondary: #57606a;
-  --text-muted: #8b949e;
-  --accent: #0969da;
-  --accent-hover: #0550ae;
-  --border: #d8dee4;
+  --bg-surface: #e0e0e0;
+  --text-primary: #1a1a1a;
+  --text-secondary: #4a4a4a;
+  --text-muted: #7a7a7a;
+  --accent: #4a4a4a;
+  --accent-hover: #333333;
+  --border: #d4d4d4;
   --success: #1a7f37;
   --warning: #9a6700;
   --error: #cf222e;
@@ -59,7 +59,7 @@
   --tab-inactive: #f2f2f2;
   --diff-add: #1a7f37;
   --diff-del: #cf222e;
-  --git-graph-accent: #0969da;
+  --git-graph-accent: #4a4a4a;
   --git-notification: #1a7f37;
 }
 
@@ -67,6 +67,11 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+/* Fix white-on-white file icons in light mode */
+:root.light .file-icon-svg {
+  filter: brightness(0.7) saturate(1.2);
 }
 
 html, body, #app {

@@ -1408,7 +1408,7 @@
   }
 
   :global(.dir-icon) {
-    color: #d8deef;
+    color: var(--text-secondary);
     opacity: 0.84;
   }
 

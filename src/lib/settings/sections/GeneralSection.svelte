@@ -346,7 +346,7 @@
     position: relative;
     transition: background 0.15s, border-color 0.15s;
   }
-  .toggle.active .track { background: var(--accent); border-color: var(--accent); }
+  .toggle.active .track { background: var(--success); border-color: var(--success); }
   .thumb {
     display: block;
     width: 14px; height: 14px;
@@ -356,7 +356,7 @@
     top: 2px; left: 2px;
     transition: transform 0.15s, background 0.15s;
   }
-  .toggle.active .thumb { transform: translateX(14px); background: var(--bg-tertiary); }
+  .toggle.active .thumb { transform: translateX(14px); background: #fff; }
 
   /* Stepper */
   .stepper {
@@ -403,7 +403,7 @@
   }
   .pill:last-child { border-right: none; }
   .pill:hover { color: var(--text-primary); background: var(--bg-surface); }
-  .pill.active { color: var(--bg-tertiary); background: var(--accent); }
+  .pill.active { color: var(--text-primary); background: var(--bg-surface); border-color: var(--text-muted); font-weight: 600; }
 
   /* Theme grid */
   .appearance-grid {
