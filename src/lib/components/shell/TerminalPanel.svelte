@@ -31,9 +31,14 @@
   // ── Resize: drag handle ──────────────────────────────────────────
 
   const MIN_HEIGHT = 120;
-  /** Keep at least this many pixels for the editor above the panel so users
-   *  can't trap themselves in a full-viewport terminal. */
-  const EDITOR_MIN = 140;
+  /**
+   * Minimum vertical breathing room for the editor above the panel.
+   * The actual chrome rows (title bar + tab bar + status bar ≈ 92px)
+   * also live in the viewport, so on tight windows we add a buffer
+   * for editable content. Tuned so even on a 600px-tall window the
+   * editor still gets a usable row.
+   */
+  const EDITOR_MIN = 220;
 
   function maxHeight(): number {
     // Clamp to 80vh as a safety net; additionally leave editor headroom.

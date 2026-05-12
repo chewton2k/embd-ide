@@ -125,6 +125,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
 :root[data-density="compact"] {
   --density-padding: 1px;
   --density-gap: 1px;
+  --density-titlebar-height: 28px;
   --density-tabs-height: 30px;
   --density-tree-padding: 1px 8px;
   --density-statusbar-height: 22px;
@@ -133,6 +134,7 @@ input:focus, textarea:focus { border-color: var(--accent); }
 :root[data-density="comfortable"] {
   --density-padding: 4px;
   --density-gap: 4px;
+  --density-titlebar-height: 32px;
   --density-tabs-height: 36px;
   --density-tree-padding: 3px 8px;
   --density-statusbar-height: 24px;

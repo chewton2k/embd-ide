@@ -1,19 +1,34 @@
 <script lang="ts">
+  /**
+   * Tab bar — sits below the TitleBar. Hosts the open-file / terminal /
+   * preview / diagram tabs (delegated to <Tabs />), plus a contextual
+   * split / collapse control for the active terminal tab.
+   *
+   * This bar is intentionally NOT draggable — the user moves the window
+   * from the title bar above. Global chrome (sidebar / git / settings /
+   * search) lives there too.
+   */
   import Tabs from '../tabs/Tabs.svelte';
-  import { PanelLeft, SplitSquareVertical, Search, GitBranch, Settings2, SidebarOpen, SidebarClose } from 'lucide-svelte';
-  import { showTerminal, showSettings, showGit, gitBranch, toggleGitPanel, activeFilePath, panesInActiveTab, activeTerminalTabId, splitTerminalSignal, collapseTerminalSplitsSignal, terminalPath, openFileSearchSignal } from '../../modules/stores';
+  import { SplitSquareVertical, PanelLeft } from 'lucide-svelte';
+  import {
+    showTerminal, activeFilePath, panesInActiveTab,
+    activeTerminalTabId, splitTerminalSignal, collapseTerminalSplitsSignal,
+    terminalPath,
+  } from '../../modules/stores';
 
   let splitMenuOpen = $state(false);
   let splitMenuPos = $state<{ top: number; left: number } | null>(null);
   let splitBtnEl: HTMLDivElement | undefined = $state();
 
-  // Collapse is only available when there is more than one terminal pane open
-  // IN THE CURRENT TAB; otherwise the button acts as a "split" trigger.
+  /**
+   * The split button toggles between two intents:
+   *  - When the active terminal tab has multiple panes, clicking
+   *    collapses them down to the active one ("collapse splits").
+   *  - Otherwise it opens a small menu offering Split-Right / Split-Down.
+   */
   let splitActive = $derived($showTerminal && $panesInActiveTab > 1);
 
   function handleSplitBtn() {
-    // Re-check the pane count at click time — the derivation could briefly
-    // be stale during rapid pane open/close transitions.
     const canCollapse = $showTerminal && $panesInActiveTab > 1;
     if (canCollapse) {
       collapseTerminalSplitsSignal.update(n => n + 1);
@@ -33,7 +48,10 @@
     if (tabId != null) {
       $activeFilePath = terminalPath(tabId);
     }
-    splitTerminalSignal.update(({ count }) => ({ count: count + 1, direction: dir === 'bottom' ? 'bottom' : 'right' }));
+    splitTerminalSignal.update(({ count }) => ({
+      count: count + 1,
+      direction: dir === 'bottom' ? 'bottom' : 'right',
+    }));
     splitMenuOpen = false;
   }
 
@@ -42,36 +60,11 @@
       splitMenuOpen = false;
     }
   }
-
-  let { sidebarVisible, onToggleSidebar }: {
-    sidebarVisible: boolean;
-    onToggleSidebar: () => void;
-  } = $props();
-
-  function openFileSearch() {
-    openFileSearchSignal.update(n => n + 1);
-  }
 </script>
 
 <svelte:document onclick={handleDocumentClick} />
 
 <div class="toolbar">
-  <button
-    type="button"
-    class="toolbar-btn sidebar-toggle"
-    class:active={sidebarVisible}
-    onclick={onToggleSidebar}
-    title="Toggle Sidebar (Cmd+B)"
-    aria-label="Toggle sidebar"
-    aria-pressed={sidebarVisible}
-  >
-    {#if sidebarVisible}
-      <SidebarOpen size={14} />
-    {:else}
-      <SidebarClose size={14} />
-    {/if}
-  </button>
-
   <div class="split-btn-container" bind:this={splitBtnEl}>
     <button
       type="button"
@@ -86,7 +79,11 @@
     </button>
 
     {#if splitMenuOpen && splitMenuPos}
-      <div class="split-menu" role="menu" style="top: {splitMenuPos.top}px; left: {splitMenuPos.left}px;">
+      <div
+        class="split-menu"
+        role="menu"
+        style="top: {splitMenuPos.top}px; left: {splitMenuPos.left}px;"
+      >
         <button class="split-menu-item" role="menuitem" onclick={() => activateSplit('right')}>
           <SplitSquareVertical size={12} />
           Split Right
@@ -101,42 +98,6 @@
 
   <div class="tabs-wrapper">
     <Tabs />
-  </div>
-
-  <div class="toolbar-right">
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="toolbar-search" onclick={openFileSearch} onkeydown={(e) => e.key === 'Enter' && openFileSearch()} title="Quick open file (Cmd+O)">
-      <Search size={12} />
-      <span>Search files...</span>
-      <kbd>⌘O</kbd>
-    </div>
-
-    <button
-      type="button"
-      class="toolbar-btn"
-      class:active={$showGit}
-      onclick={toggleGitPanel}
-      title="Source Control (Cmd+G)"
-      aria-label="Toggle source control"
-      aria-pressed={$showGit}
-    >
-      <GitBranch size={15} />
-      {#if $gitBranch}
-        <span class="branch-label">{$gitBranch}</span>
-      {/if}
-    </button>
-
-    <button
-      type="button"
-      class="toolbar-btn gear-btn"
-      class:active={$showSettings}
-      onclick={() => showSettings.update(v => !v)}
-      title="Settings"
-      aria-label="Settings"
-      aria-pressed={$showSettings}
-    >
-      <Settings2 size={15} />
-    </button>
   </div>
 </div>
 
@@ -162,15 +123,6 @@
     border-bottom: none;
   }
 
-  .toolbar-right {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 0 12px;
-    flex-shrink: 0;
-    height: 100%;
-  }
-
   .toolbar-btn {
     display: flex;
     align-items: center;
@@ -183,22 +135,12 @@
     flex-shrink: 0;
     transition: color 0.1s, background 0.1s;
   }
-
   .toolbar-btn:hover {
     background: var(--bg-surface);
     color: var(--text-primary);
   }
-
   .toolbar-btn.active {
     color: var(--text-primary);
-  }
-
-  .sidebar-toggle {
-    padding: 0 10px;
-    margin: 0;
-    border-radius: 0;
-    height: 100%;
-    border-right: 1px solid var(--border);
   }
 
   .split-btn-container {
@@ -208,7 +150,6 @@
     height: 100%;
     border-right: 1px solid var(--border);
   }
-
   .split-btn {
     padding: 0 10px;
     border-radius: 0;
@@ -228,7 +169,6 @@
     min-width: 130px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
-
   .split-menu-item {
     display: flex;
     align-items: center;
@@ -241,50 +181,8 @@
     text-align: left;
     white-space: nowrap;
   }
-
   .split-menu-item:hover {
     background: var(--bg-tertiary);
     color: var(--text-primary);
   }
-
-  .toolbar-search {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 12px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    color: var(--text-muted);
-    font-size: 11px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: border-color 0.1s, color 0.1s;
-    margin-right: 10px;
-    min-width: 150px;
-  }
-  .toolbar-search:hover {
-    border-color: var(--text-muted);
-    color: var(--text-secondary);
-  }
-  .toolbar-search kbd {
-    font-size: 11px;
-    padding: 3px 7px;
-    border-radius: 5px;
-    background: var(--bg-surface);
-    color: var(--text-primary);
-    margin-left: auto;
-    font-family: var(--font-ui);
-    font-weight: 700;
-    letter-spacing: 0.5px;
-  }
-
-  .branch-label {
-    font-size: 11px;
-    max-width: 80px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
 </style>

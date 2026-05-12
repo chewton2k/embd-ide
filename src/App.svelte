@@ -6,6 +6,7 @@
   import JSONViewer from './lib/components/file-viewer/JSONViewer.svelte';
   import MergeEditor from './lib/components/merge/MergeEditor.svelte';
   import Toolbar from './lib/components/toolbar/Toolbar.svelte';
+  import TitleBar from './lib/components/toolbar/TitleBar.svelte';
   import Terminal from './lib/components/shell/Terminal.svelte';
   import TerminalPanel from './lib/components/shell/TerminalPanel.svelte';
   import FloatingChat from './lib/components/ai/FloatingChat.svelte';
@@ -17,8 +18,10 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, killTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode } from './lib/modules/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode } from './lib/modules/stores';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
+  import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/windowChrome';
+  import { toggleTerminal } from './lib/modules/terminalActions';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
 
@@ -101,43 +104,10 @@
     window.removeEventListener('mouseup', stopDrag);
   }
 
-  function toggleTerminal() {
-    const tabs = get(terminalTabs);
-    const mode = get(terminalMode);
-
-    // ── Bottom-panel mode ───────────────────────────────────────
-    // The editor always stays visible; the panel simply hides/shows.
-    // Ctrl+` ⇒ open the panel (creating the first tab if needed) or
-    // close it when already open.
-    if (mode === 'panel') {
-      if (!$showTerminal) {
-        $showTerminal = true;
-        // Create the first tab if none exists.
-        createTerminalSignal.update(s => ({ count: s.count + 1, forceNew: false }));
-      } else {
-        $showTerminal = false;
-      }
-      return;
-    }
-
-    // ── Legacy tab mode ─────────────────────────────────────────
-    if (!$showTerminal || tabs.length === 0) {
-      // Show the terminal; if nothing exists yet, ensure (non-force) will
-      // create the first tab. If tabs exist but the panel is hidden, this
-      // just re-reveals and focuses the last active tab.
-      $showTerminal = true;
-      createTerminalSignal.update(s => ({ count: s.count + 1, forceNew: false }));
-      return;
-    }
-    if (!isTerminalPath($activeFilePath)) {
-      // Route to the last-active terminal tab (or first if none recorded).
-      const tabId = get(activeTerminalTabId) ?? tabs[0].id;
-      activeFilePath.set(terminalPath(tabId));
-    } else {
-      // Already on a terminal tab — close the panel.
-      $showTerminal = false;
-    }
-  }
+  // toggleTerminal() lives in `./lib/modules/terminalActions` so it's
+  // shared between App.svelte (Cmd+`), TitleBar.svelte's terminal
+  // button, and the status-bar terminal button. See that module for
+  // the mode-aware behavior.
 
   let isClosing = false;
 
@@ -204,6 +174,12 @@
   }
 
   onMount(async () => {
+    // Install the fullscreen / platform-chrome watchers as early as
+    // possible so the toolbar can render with the right padding from
+    // the very first frame. The teardown isn't captured because this
+    // component lives for the entire app lifetime.
+    void installWindowChromeWatchers().catch(() => {});
+
     // Load API keys from OS keychain into stores
     const providers = ['openrouter', 'openai', 'anthropic'] as const;
     const storeMap = { openrouter: apiKey, openai: openaiApiKey, anthropic: anthropicApiKey } as const;
@@ -298,18 +274,23 @@
   // ── Terminal mode transitions ──────────────────────────────────
   //
   // When the user flips between 'tab' ↔ 'panel' we wipe the slate:
-  // kill every PTY, hide the terminal surface, and redirect the editor
-  // off any terminal sentinel. We deliberately do NOT auto-spawn a new
-  // terminal in the new container — doing so in tab mode would steal
-  // `activeFilePath` (Terminal.svelte routes it to the new terminal on
-  // create) and cover whatever file the user was editing. The user
-  // opens a terminal themselves via the status-bar button / Ctrl+` /
-  // the "+" menu when they actually want one.
+  // hide the terminal surface and redirect the editor off any
+  // terminal sentinel. PTY processes are killed by Terminal.svelte's
+  // own `onDestroy` when its container unmounts as a result of the
+  // mode change — we deliberately do NOT dispatch a kill signal here
+  // because that would queue async work into the about-to-be-destroyed
+  // component, which can then race against (and stomp on) a freshly
+  // mounted Terminal instance the user opens immediately afterwards.
+  //
+  // We also do NOT auto-spawn a new terminal in the new container —
+  // doing so in tab mode would steal `activeFilePath` (Terminal.svelte
+  // routes it to the new terminal on create) and cover whatever file
+  // the user was editing. The user opens a terminal themselves via
+  // the status-bar button / Ctrl+` / the "+" menu when they want one.
   let prevTerminalMode: 'tab' | 'panel' | null = null;
   $effect(() => {
     const mode = $terminalMode;
     if (prevTerminalMode !== null && prevTerminalMode !== mode) {
-      killTerminalSignal.set({ kind: 'all' });
       showTerminal.set(false);
       if (isTerminalPath(get(activeFilePath))) {
         activeFilePath.set(get(openFiles).at(-1)?.path ?? null);
@@ -389,8 +370,9 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="ide-layout">
-  <Toolbar {sidebarVisible} onToggleSidebar={toggleSidebar} />
+<div class="ide-layout" class:mac-traffic-lights={isMac && !$isFullscreen}>
+  <TitleBar {sidebarVisible} onToggleSidebar={toggleSidebar} />
+  <Toolbar />
   <div class="ide-top">
     <div class="sidebar" class:hidden={!sidebarVisible} style="width: {sidebarWidth}px">
       <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} onOpenFolder={handleOpenFolder} />
@@ -608,10 +590,11 @@
      * appearing "pushed up" off the bottom.
      */
     grid-template-rows:
-      [toolbar] var(--density-tabs-height, 36px)
-      [main]    minmax(0, 1fr)
-      [panel]   auto
-      [status]  var(--density-statusbar-height, 24px);
+      [titlebar] var(--density-titlebar-height, 32px)
+      [toolbar]  var(--density-tabs-height, 36px)
+      [main]     minmax(0, 1fr)
+      [panel]    auto
+      [status]   var(--density-statusbar-height, 24px);
     height: 100vh;
     width: 100vw;
     overflow: hidden;
@@ -623,10 +606,37 @@
    * component hiding itself via `display: none`. The named lines above
    * in `grid-template-rows` are what these selectors reference.
    */
+  .ide-layout > :global(.title-bar)      { grid-row: titlebar; }
   .ide-layout > :global(.toolbar)        { grid-row: toolbar; }
   .ide-layout > .ide-top                 { grid-row: main; }
   .ide-layout > :global(.terminal-panel) { grid-row: panel; }
   .ide-layout > .statusbar               { grid-row: status; }
+
+  /*
+   * macOS title-bar integration.
+   *
+   * With `titleBarStyle: "Overlay"` set in tauri.conf.json, the system
+   * traffic-light buttons (close / minimize / maximize) float over the
+   * top-left of our content. Reserve horizontal space at the start of
+   * the title bar so they don't collide with our first button.
+   *
+   * 78px = ~70px for the three traffic-light buttons plus an 8px gap.
+   * Matches VSCode and Zed's macOS layouts.
+   *
+   * In fullscreen the system hides the traffic lights, so we drop the
+   * padding to reclaim the full title-bar width — the
+   * `.mac-traffic-lights` class is removed by App.svelte when
+   * `$isFullscreen` flips true.
+   *
+   * The drag region itself lives entirely on .title-bar (set inside the
+   * TitleBar component). We do NOT mark .toolbar (the tab bar below) as
+   * draggable — tabs occupy almost all of its width, so the user
+   * effectively wouldn't have any empty area to grab anyway, and
+   * accidental drags from in-between-tabs gaps would be confusing.
+   */
+  .ide-layout.mac-traffic-lights > :global(.title-bar) {
+    padding-left: 78px;
+  }
 
   .ide-top {
     display: flex;

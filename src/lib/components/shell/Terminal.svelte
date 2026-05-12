@@ -688,16 +688,25 @@
   });
 
   onDestroy(() => {
-    terminalSessions.set([]);
-    terminalTabs.set([]);
-    activeTerminalTabId.set(null);
-    createTerminalSignal.set({ count: 0, forceNew: false });
+    // Kill backend PTY processes immediately. Doing this here (rather
+    // than via the async killTerminalSignal flow) avoids a race where
+    // deferred close operations from this component fire AFTER a
+    // fresh Terminal instance has been mounted and stomp on its
+    // shared-store state (e.g. flipping showTerminal back to false
+    // and hiding the user's new terminal).
     for (const pane of panes) {
+      // Fire-and-forget: onDestroy can't await, but the backend kill
+      // is independent of this component's lifecycle.
+      invoke('kill_terminal', { id: pane.sessionId }).catch(() => { /* PTY may already be dead */ });
       pane.unlisten();
       pane.unlistenExit();
       pane.resizeObserver?.disconnect();
       pane.xterm.dispose();
     }
+    terminalSessions.set([]);
+    terminalTabs.set([]);
+    activeTerminalTabId.set(null);
+    createTerminalSignal.set({ count: 0, forceNew: false });
   });
 </script>
 
