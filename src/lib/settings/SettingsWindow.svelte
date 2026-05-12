@@ -107,7 +107,7 @@
 
   .root {
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: 240px 1fr;
     height: 100vh;
     background: var(--bg-primary);
     color: var(--text-primary);
@@ -116,32 +116,38 @@
   .sidebar {
     background: var(--bg-secondary);
     border-right: 1px solid var(--border);
-    padding: 18px 12px;
+    padding: 22px 14px;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
   }
   .sidebar-title {
-    font-size: 11px;
+    font-size: 16px;
     font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    padding: 0 10px 12px;
+    letter-spacing: -0.2px;
+    color: var(--text-primary);
+    padding: 0 10px;
   }
   nav { display: flex; flex-direction: column; gap: 2px; }
   .nav-btn {
     display: flex; align-items: center; gap: 10px;
-    padding: 8px 10px;
+    padding: 8px 12px;
     background: none;
-    border: none;
-    border-radius: 6px;
+    border: 1px solid transparent;
+    border-radius: 7px;
     color: var(--text-secondary);
     font-size: 13px;
     text-align: left;
     cursor: pointer;
-    transition: background 0.1s, color 0.1s;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
   }
   .nav-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
-  .nav-btn.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .nav-btn.active {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: var(--accent);
+  }
   .nav-btn svg { flex-shrink: 0; }
 
   .content {
@@ -149,10 +155,10 @@
     background: var(--bg-primary);
   }
   .content-inner {
-    max-width: 640px;
-    padding: 32px 36px 56px;
+    max-width: 720px;
+    padding: 40px 44px 64px;
   }
 
-  .compact .content-inner { padding: 22px 28px 40px; }
+  .compact .content-inner { padding: 28px 32px 44px; }
   .compact .nav-btn { padding: 6px 10px; font-size: 12px; }
 </style>

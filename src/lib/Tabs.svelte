@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { TerminalSquare, Plus, FolderOpen, Eye } from 'lucide-svelte';
+  import { TerminalSquare, Plus, FolderOpen, Eye, Pin, PinOff } from 'lucide-svelte';
   import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalSessions, killTerminalSignal, isTerminalPath, showTerminal, terminalPath, createTerminalSignal, openFileSearchSignal, openPreviewSignal } from './stores';
 
   let tabsBar: HTMLDivElement | undefined = $state();
@@ -104,7 +104,11 @@
       onkeydown={(e) => e.key === 'Enter' && switchTab(file.path)}
     >
       <button class="tab-pin" class:pinned={file.pinned} title={file.pinned ? 'Unpin tab' : 'Pin tab'} onclick={(e) => handlePin(e, file.path)}>
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1-.707.707l-.71-.71-3.18 3.18a3.5 3.5 0 0 1-1.272.91l.012.012a.5.5 0 0 1 0 .707l-1.06 1.06a.5.5 0 0 1-.708 0L5.57 8.838a.5.5 0 0 1 0-.707l1.06-1.06a.5.5 0 0 1 .708 0l.012.012a3.5 3.5 0 0 1 .91-1.273l3.18-3.18-.71-.71a.5.5 0 0 1 .354-.854z"/><path d="M1.5 14.5a.5.5 0 0 1 0-.707l3.793-3.793a.5.5 0 0 1 .707.707L2.207 14.5a.5.5 0 0 1-.707 0z"/></svg>
+        {#if file.pinned}
+          <Pin size={11} strokeWidth={2.2} fill="currentColor" />
+        {:else}
+          <Pin size={11} strokeWidth={2} />
+        {/if}
       </button>
       <span class="tab-name">
         {#if file.modified}<span class="modified-dot"></span>{/if}
@@ -198,8 +202,9 @@
     align-items: center;
     gap: 7px;
     padding: 0 10px;
-    font-size: 11.5px;
-    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
     white-space: nowrap;
     background: color-mix(in srgb, var(--tab-inactive) 82%, transparent);
     flex-shrink: 0;
@@ -228,6 +233,7 @@
   .tab.active {
     background: var(--tab-active);
     color: var(--text-primary);
+    font-weight: 600;
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
     box-shadow:
       inset 0 1px 0 color-mix(in srgb, var(--accent) 22%, transparent),

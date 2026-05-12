@@ -35,7 +35,7 @@
   <div class="cell"><span class="k">Platform</span><span class="v">{osPlatform} ({osArch})</span></div>
   <div class="cell"><span class="k">Tauri</span><span class="v">{tauriVersion}</span></div>
   <div class="cell"><span class="k">Bundle ID</span><span class="v">com.embd.ide</span></div>
-  <div class="cell"><span class="k">License</span><span class="v">MIT</span></div>
+  <div class="cell"><span class="k">License</span><span class="v">Apache 2.0</span></div>
 </div>
 
 <div class="links">

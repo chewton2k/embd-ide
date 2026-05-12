@@ -13,6 +13,7 @@
     "tauri:build": "bash scripts/build-dmg.sh"
   },
   "devDependencies": {
+    "@iconify-json/simple-icons": "^1.2.81",
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/cli": "^2.10.0",

@@ -703,18 +703,18 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: 11.5px;
     min-width: 0;
     overflow: hidden;
   }
 
   .breadcrumb-seg {
-    background: color-mix(in srgb, currentColor 15%, transparent);
-    padding: 1px 7px;
+    background: color-mix(in srgb, currentColor 18%, transparent);
+    padding: 1px 8px;
     border-radius: 10px;
     white-space: nowrap;
-    font-size: 11px;
-    font-weight: 500;
+    font-size: 11.5px;
+    font-weight: 600;
     max-width: 130px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -724,12 +724,13 @@
   }
 
   .breadcrumb-seg:hover {
-    background: color-mix(in srgb, currentColor 30%, transparent);
+    background: color-mix(in srgb, currentColor 32%, transparent);
   }
 
   .breadcrumb-sep {
-    opacity: 0.55;
-    font-size: 10px;
+    opacity: 0.75;
+    font-size: 11px;
+    font-weight: 600;
     flex-shrink: 0;
     color: inherit;
   }

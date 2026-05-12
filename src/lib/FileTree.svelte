@@ -1359,7 +1359,8 @@
     padding: var(--density-tree-padding, 2px 8px);
     width: 100%;
     text-align: left;
-    font-size: 11.5px;
+    font-size: 12px;
+    font-weight: 500;
     color: var(--text-secondary);
     border-radius: 3px;
     margin: 0 3px;
@@ -1367,6 +1368,10 @@
     transition: all 0.1s;
     cursor: default;
     user-select: none;
+  }
+
+  .tree-item.selected {
+    font-weight: 600;
   }
 
   .tree-item:hover {

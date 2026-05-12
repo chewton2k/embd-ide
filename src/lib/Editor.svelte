@@ -1128,6 +1128,17 @@
   .editor-wrapper :global(.cm-gutters) {
     background: var(--bg-secondary);
     border-right: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .editor-wrapper :global(.cm-lineNumbers .cm-gutterElement) {
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .editor-wrapper :global(.cm-activeLineGutter) {
+    background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+    color: var(--text-primary) !important;
+    font-weight: 600 !important;
   }
 
   .editor-wrapper :global(.cm-git-gutter) {

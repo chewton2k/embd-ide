@@ -1,69 +1,71 @@
 <script lang="ts">
   import { apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, type AiProvider } from '../../stores';
   import { invoke } from '@tauri-apps/api/core';
-  import { get } from 'svelte/store';
+  import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
+  import SectionHeader from '../components/SectionHeader.svelte';
+  import ProviderIcon from '../components/ProviderIcon.svelte';
+  import ProviderKeyCard from '../components/ProviderKeyCard.svelte';
 
+  type Model = { id: string; label: string; hint: string };
   type Provider = {
     id: AiProvider;
     label: string;
-    blurb: string;
     placeholder: string;
+    keyPrefix: string;
     docsUrl: string;
     store: Writable<string>;
-    models: { id: string; label: string }[];
+    models: Model[];
   };
 
   const PROVIDERS: Provider[] = [
     {
-      id: 'openrouter',
-      label: 'OpenRouter',
-      blurb: 'Single key, hundreds of models across providers. Includes free tier.',
-      placeholder: 'sk-or-...',
-      docsUrl: 'https://openrouter.ai/keys',
-      store: apiKey,
+      id: 'anthropic',
+      label: 'Anthropic',
+      placeholder: 'sk-ant-...',
+      keyPrefix: 'sk-ant-',
+      docsUrl: 'https://console.anthropic.com/settings/keys',
+      store: anthropicApiKey,
       models: [
-        { id: 'openrouter/auto',                   label: 'Auto (best for prompt)' },
-        { id: 'anthropic/claude-sonnet-4',         label: 'Claude Sonnet 4' },
-        { id: 'anthropic/claude-haiku-4',          label: 'Claude Haiku 4' },
-        { id: 'openai/gpt-4o',                     label: 'GPT-4o' },
-        { id: 'openai/gpt-4o-mini',                label: 'GPT-4o mini' },
-        { id: 'google/gemini-2.5-pro-preview',     label: 'Gemini 2.5 Pro' },
-        { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+        { id: 'claude-opus-4-7',          label: 'Claude Opus 4.7',    hint: 'Most capable' },
+        { id: 'claude-sonnet-4-6',        label: 'Claude Sonnet 4.6',  hint: 'Best for coding' },
+        { id: 'claude-haiku-4-5',         label: 'Claude Haiku 4.5',   hint: 'Fast & cheap' },
       ],
     },
     {
       id: 'openai',
       label: 'OpenAI',
-      blurb: 'Direct access to OpenAI’s GPT models.',
       placeholder: 'sk-...',
+      keyPrefix: 'sk-',
       docsUrl: 'https://platform.openai.com/api-keys',
       store: openaiApiKey,
       models: [
-        { id: 'gpt-4o',          label: 'GPT-4o' },
-        { id: 'gpt-4o-mini',     label: 'GPT-4o mini' },
-        { id: 'gpt-4-turbo',     label: 'GPT-4 Turbo' },
-        { id: 'o1-mini',         label: 'o1-mini' },
+        { id: 'gpt-5',         label: 'GPT-5',         hint: 'Flagship multimodal' },
+        { id: 'gpt-5-mini',    label: 'GPT-5 mini',    hint: 'Fast & cheap' },
+        { id: 'o3',            label: 'o3',            hint: 'Deep reasoning' },
+        { id: 'o4-mini',       label: 'o4-mini',       hint: 'Fast reasoning' },
       ],
     },
     {
-      id: 'anthropic',
-      label: 'Anthropic',
-      blurb: 'Direct access to Claude models. Recommended for coding.',
-      placeholder: 'sk-ant-...',
-      docsUrl: 'https://console.anthropic.com/settings/keys',
-      store: anthropicApiKey,
+      id: 'openrouter',
+      label: 'OpenRouter',
+      placeholder: 'sk-or-...',
+      keyPrefix: 'sk-or-',
+      docsUrl: 'https://openrouter.ai/keys',
+      store: apiKey,
       models: [
-        { id: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
-        { id: 'claude-3-5-haiku-latest',  label: 'Claude 3.5 Haiku' },
-        { id: 'claude-3-opus-latest',     label: 'Claude 3 Opus' },
+        { id: 'openrouter/auto',                    label: 'Auto',                 hint: 'Pick per prompt' },
+        { id: 'anthropic/claude-opus-4.7',          label: 'Claude Opus 4.7',      hint: 'Most capable' },
+        { id: 'anthropic/claude-sonnet-4.6',        label: 'Claude Sonnet 4.6',    hint: 'Best for coding' },
+        { id: 'openai/gpt-5',                       label: 'GPT-5',                hint: 'Routed via OR' },
+        { id: 'openai/o3',                          label: 'o3',                   hint: 'Deep reasoning' },
+        { id: 'google/gemini-2.5-pro',              label: 'Gemini 2.5 Pro',       hint: 'Long context' },
+        { id: 'x-ai/grok-4',                        label: 'Grok 4',               hint: 'Realtime + reasoning' },
+        { id: 'deepseek/deepseek-v3.1',             label: 'DeepSeek V3.1',        hint: 'Strong + cheap' },
+        { id: 'meta-llama/llama-4-maverick',        label: 'Llama 4 Maverick',     hint: 'Open weights' },
       ],
     },
   ];
-
-  function providerOf(id: AiProvider): Provider {
-    return PROVIDERS.find(p => p.id === id) ?? PROVIDERS[0];
-  }
 
   const configured = $derived<Record<AiProvider, boolean>>({
     openrouter: $apiKey.trim().length > 0,
@@ -74,218 +76,246 @@
     (configured.openrouter ? 1 : 0) + (configured.openai ? 1 : 0) + (configured.anthropic ? 1 : 0)
   );
 
-  // Local UI state for each provider card.
-  type CardState = { input: string; show: boolean; status: string };
-  let cards = $state<Record<AiProvider, CardState>>({
-    openrouter: { input: get(apiKey),           show: false, status: '' },
-    openai:     { input: get(openaiApiKey),     show: false, status: '' },
-    anthropic:  { input: get(anthropicApiKey),  show: false, status: '' },
+  function providerOf(modelId: string): Provider | null {
+    for (const p of PROVIDERS) if (p.models.some(m => m.id === modelId)) return p;
+    return null;
+  }
+  function modelOf(modelId: string): Model | null {
+    for (const p of PROVIDERS) {
+      const m = p.models.find(m => m.id === modelId);
+      if (m) return m;
+    }
+    return null;
+  }
+
+  const currentProvider = $derived(providerOf($aiModel) ?? PROVIDERS[0]);
+  const currentModel    = $derived(modelOf($aiModel) ?? currentProvider.models[0]);
+
+  let dropdownOpen = $state(false);
+  let dropdownEl: HTMLDivElement;
+
+  function toggleDropdown() { dropdownOpen = !dropdownOpen; }
+
+  function selectModel(p: Provider, m: Model) {
+    aiProvider.set(p.id);
+    aiModel.set(m.id);
+    dropdownOpen = false;
+  }
+
+  function handleDocClick(e: MouseEvent) {
+    if (!dropdownOpen) return;
+    if (dropdownEl && !dropdownEl.contains(e.target as Node)) dropdownOpen = false;
+  }
+  onMount(() => {
+    document.addEventListener('mousedown', handleDocClick);
+    return () => document.removeEventListener('mousedown', handleDocClick);
   });
 
-  async function saveKey(p: Provider) {
-    const next = cards[p.id].input.trim();
-    p.store.set(next);
-    try { await invoke('set_provider_key', { provider: p.id, key: next }); } catch {}
-    cards[p.id].status = next ? 'API key saved' : 'API key cleared';
-    setTimeout(() => cards[p.id].status = '', 2500);
+  async function saveKey(p: Provider, value: string) {
+    p.store.set(value);
+    try { await invoke('set_provider_key', { provider: p.id, key: value }); } catch {}
   }
-
   async function clearKey(p: Provider) {
-    cards[p.id].input = '';
     p.store.set('');
     try { await invoke('set_provider_key', { provider: p.id, key: '' }); } catch {}
-    cards[p.id].status = 'API key cleared';
-    setTimeout(() => cards[p.id].status = '', 2500);
-  }
-
-  function selectDefault(provider: AiProvider, model: string) {
-    aiProvider.set(provider);
-    aiModel.set(model);
+    // If the cleared provider owned the default model, pick another configured one.
+    if (currentProvider.id === p.id) {
+      const next = PROVIDERS.find(x => configured[x.id]) ?? PROVIDERS[0];
+      aiProvider.set(next.id);
+      aiModel.set(next.models[0].id);
+    }
   }
 </script>
 
-<div class="section">
-  <h3>Default model</h3>
-  <p class="desc">The chat panel uses this by default. You can still switch per-message.</p>
-  <div class="row">
-    <span class="label">Provider</span>
-    <div class="pills">
-      {#each PROVIDERS as p}
-        <button
-          class="pill"
-          class:active={$aiProvider === p.id}
-          onclick={() => {
-            aiProvider.set(p.id);
-            aiModel.set(p.models[0].id);
-          }}
-        >{p.label}</button>
-      {/each}
+<div class="root">
+  <SectionHeader
+    title="Models"
+    description="Bring your own keys. They live in your local app data and are sent only to the matching provider."
+  />
+
+  <!-- Default model -->
+  <div class="block">
+    <div class="block-head"><span class="block-label">Default model</span></div>
+    <div class="dropdown" bind:this={dropdownEl}>
+      <button class="dropdown-trigger" onclick={toggleDropdown} class:open={dropdownOpen}>
+        <span class="trigger-left">
+          <ProviderIcon provider={currentProvider.id} size={14} />
+          <span class="trigger-model">{currentModel.label}</span>
+          <span class="trigger-hint">· {currentModel.hint}</span>
+        </span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" class="chevron" class:flipped={dropdownOpen}>
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {#if dropdownOpen}
+        <div class="dropdown-menu" role="menu">
+          {#each PROVIDERS as p}
+            {@const hasKey = configured[p.id]}
+            <div class="menu-group">
+              <div class="menu-group-head">
+                <ProviderIcon provider={p.id} size={11} />
+                <span>{p.label}</span>
+                {#if !hasKey}<span class="no-key">no key</span>{/if}
+              </div>
+              {#each p.models as m}
+                {@const active = m.id === $aiModel}
+                <button
+                  class="menu-item"
+                  class:active
+                  disabled={!hasKey}
+                  onclick={() => hasKey && selectModel(p, m)}
+                >
+                  <span class="mi-label">{m.label}</span>
+                  <span class="mi-hint">{m.hint}</span>
+                  {#if active}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="11" height="11" class="check">
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
-  <div class="row">
-    <span class="label">Model</span>
-    <select
-      class="select"
-      value={$aiModel}
-      onchange={(e) => selectDefault($aiProvider, (e.currentTarget as HTMLSelectElement).value)}
-    >
-      {#each providerOf($aiProvider).models as m}
-        <option value={m.id}>{m.label}</option>
+
+  <!-- API keys -->
+  <div class="block">
+    <div class="block-head">
+      <span class="block-label">API keys</span>
+      <span class="block-meta">{configuredCount} of {PROVIDERS.length} configured</span>
+    </div>
+    <div class="key-grid">
+      {#each PROVIDERS as p}
+        <ProviderKeyCard
+          provider={p.id}
+          label={p.label}
+          placeholder={p.placeholder}
+          keyPrefix={p.keyPrefix}
+          docsUrl={p.docsUrl}
+          currentKey={p.id === 'openrouter' ? $apiKey : p.id === 'openai' ? $openaiApiKey : $anthropicApiKey}
+          onSave={(v) => saveKey(p, v)}
+          onClear={() => clearKey(p)}
+        />
       {/each}
-    </select>
-  </div>
-</div>
-
-<div class="section">
-  <h3>Providers</h3>
-  <p class="desc">{configuredCount} of {PROVIDERS.length} configured. Keys are stored locally and only sent to the matching provider.</p>
-
-  <div class="provider-list">
-    {#each PROVIDERS as p}
-      {@const isConfigured = configured[p.id]}
-      <div class="provider-card">
-        <div class="provider-head">
-          <div>
-            <div class="provider-name">{p.label}</div>
-            <div class="provider-blurb">{p.blurb}</div>
-          </div>
-          <div class="provider-status" class:on={isConfigured}>
-            <span class="dot"></span>{isConfigured ? 'Configured' : 'Not configured'}
-          </div>
-        </div>
-        <div class="key-row">
-          <input
-            class="key-input"
-            type={cards[p.id].show ? 'text' : 'password'}
-            bind:value={cards[p.id].input}
-            placeholder={p.placeholder}
-            spellcheck="false"
-            autocomplete="off"
-          />
-          <button class="ghost-btn" onclick={() => cards[p.id].show = !cards[p.id].show}>
-            {cards[p.id].show ? 'Hide' : 'Show'}
-          </button>
-        </div>
-        <div class="actions">
-          <button class="primary-btn" onclick={() => saveKey(p)} disabled={!cards[p.id].input.trim()}>Save</button>
-          <button class="secondary-btn" onclick={() => clearKey(p)} disabled={!isConfigured}>Clear</button>
-          <a class="link" href={p.docsUrl} target="_blank" rel="noopener">Get key →</a>
-          {#if cards[p.id].status}<span class="status">{cards[p.id].status}</span>{/if}
-        </div>
-      </div>
-    {/each}
+    </div>
   </div>
 </div>
 
 <style>
-  .section { margin-bottom: 28px; }
-  .section h3 {
-    font-size: 11px; font-weight: 600;
-    color: var(--text-secondary);
-    margin: 0 0 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
-  }
-  .desc { font-size: 11px; color: var(--text-muted); margin: -4px 0 12px; line-height: 1.5; }
-  .row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
-  .label { font-size: 13px; color: var(--text-primary); }
+  .root { display: flex; flex-direction: column; gap: 24px; }
 
-  .pills { display: flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
-  .pill {
-    padding: 5px 14px;
-    font-size: 12px; font-weight: 500;
+  .block { display: flex; flex-direction: column; gap: 8px; }
+  .block-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 8px;
+  }
+  .block-label {
+    font-size: 11px; font-weight: 500;
     color: var(--text-muted);
-    background: var(--bg-tertiary);
-    border: none; border-right: 1px solid var(--border);
-    cursor: pointer;
+    letter-spacing: 0.2px;
   }
-  .pill:last-child { border-right: none; }
-  .pill:hover { color: var(--text-primary); background: var(--bg-surface); }
-  .pill.active { color: var(--bg-tertiary); background: var(--accent); }
-
-  .select {
-    font-size: 12px;
-    padding: 6px 10px;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    min-width: 240px;
+  .block-meta {
+    font-size: 10.5px;
+    color: var(--text-muted);
   }
 
-  .provider-list { display: flex; flex-direction: column; gap: 12px; }
-  .provider-card {
+  /* Dropdown */
+  .dropdown { position: relative; }
+  .dropdown-trigger {
+    width: 100%;
+    height: 36px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 14px 16px;
-  }
-  .provider-head {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    margin-bottom: 10px;
-    gap: 12px;
-  }
-  .provider-name { font-size: 13px; font-weight: 600; color: var(--text-primary); }
-  .provider-blurb { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
-  .provider-status {
-    font-size: 11px;
-    color: var(--text-muted);
-    display: flex; align-items: center; gap: 6px;
-    flex-shrink: 0;
-  }
-  .provider-status.on { color: var(--success); }
-  .dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--text-muted);
-  }
-  .provider-status.on .dot { background: var(--success); }
-
-  .key-row { display: flex; gap: 8px; margin-bottom: 12px; }
-  .key-input {
-    flex: 1;
-    font-family: var(--font-mono, monospace);
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    color: var(--text-primary);
     font-size: 12px;
-    padding: 7px 10px;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .dropdown-trigger:hover { background: var(--bg-surface); }
+  .dropdown-trigger.open { border-color: var(--accent); }
+  .trigger-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .trigger-model { font-weight: 500; }
+  .trigger-hint { color: var(--text-muted); font-size: 11.5px; }
+  .chevron { color: var(--text-muted); transition: transform 0.15s; }
+  .chevron.flipped { transform: rotate(180deg); }
+
+  .dropdown-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    color: var(--text-primary);
-    border-radius: 5px;
-    outline: none;
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    padding: 4px;
+    z-index: 20;
+    max-height: 360px;
+    overflow-y: auto;
   }
-  .key-input:focus { border-color: var(--accent); }
-  .ghost-btn {
-    background: var(--bg-surface);
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    padding: 0 12px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-  .ghost-btn:hover { color: var(--text-primary); background: var(--border); }
 
-  .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .primary-btn {
-    background: var(--accent); color: var(--bg-tertiary);
-    padding: 6px 14px; border-radius: 5px;
-    font-size: 12px; font-weight: 600;
-    border: none; cursor: pointer;
+  .menu-group { padding: 4px 0; }
+  .menu-group + .menu-group { border-top: 1px solid var(--border); margin-top: 2px; padding-top: 8px; }
+  .menu-group-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px 6px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 600;
+    color: var(--text-muted);
   }
-  .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .secondary-btn {
-    background: var(--bg-surface); color: var(--text-primary);
-    border: 1px solid var(--border);
-    padding: 6px 14px; border-radius: 5px;
-    font-size: 12px; font-weight: 600;
-    cursor: pointer;
-  }
-  .secondary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .link {
-    font-size: 11px; color: var(--accent);
-    text-decoration: none;
+  .no-key {
     margin-left: auto;
+    font-size: 9.5px;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
+    padding: 1px 6px;
+    border-radius: 8px;
   }
-  .link:hover { text-decoration: underline; }
-  .status { font-size: 11px; color: var(--success); }
+
+  .menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .menu-item:hover:not(:disabled) { background: var(--bg-surface); }
+  .menu-item:disabled { opacity: 0.4; cursor: not-allowed; }
+  .menu-item.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+  .mi-label { font-weight: 500; }
+  .mi-hint { color: var(--text-muted); font-size: 10.5px; margin-left: auto; }
+  .menu-item.active .mi-hint { margin-left: 0; }
+  .menu-item .check { margin-left: auto; color: var(--accent); }
+
+  /* Provider key grid */
+  .key-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  @media (max-width: 720px) {
+    .key-grid { grid-template-columns: 1fr; }
+  }
 </style>

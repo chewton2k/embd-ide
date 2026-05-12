@@ -14,24 +14,26 @@
   type ModelOption = { id: string; label: string };
   const MODELS_BY_PROVIDER: Record<AiProvider, ModelOption[]> = {
     openrouter: [
-      { id: 'openrouter/auto',                   label: 'OpenRouter — Auto' },
-      { id: 'anthropic/claude-sonnet-4',         label: 'Claude Sonnet 4' },
-      { id: 'anthropic/claude-haiku-4',          label: 'Claude Haiku 4' },
-      { id: 'openai/gpt-4o',                     label: 'GPT-4o' },
-      { id: 'openai/gpt-4o-mini',                label: 'GPT-4o mini' },
-      { id: 'google/gemini-2.5-pro-preview',     label: 'Gemini 2.5 Pro' },
-      { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+      { id: 'openrouter/auto',             label: 'OpenRouter — Auto' },
+      { id: 'anthropic/claude-opus-4.7',   label: 'Claude Opus 4.7' },
+      { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+      { id: 'openai/gpt-5',                label: 'GPT-5' },
+      { id: 'openai/o3',                   label: 'o3' },
+      { id: 'google/gemini-2.5-pro',       label: 'Gemini 2.5 Pro' },
+      { id: 'x-ai/grok-4',                 label: 'Grok 4' },
+      { id: 'deepseek/deepseek-v3.1',      label: 'DeepSeek V3.1' },
+      { id: 'meta-llama/llama-4-maverick', label: 'Llama 4 Maverick' },
     ],
     openai: [
-      { id: 'gpt-4o',          label: 'GPT-4o' },
-      { id: 'gpt-4o-mini',     label: 'GPT-4o mini' },
-      { id: 'gpt-4-turbo',     label: 'GPT-4 Turbo' },
-      { id: 'o1-mini',         label: 'o1-mini' },
+      { id: 'gpt-5',       label: 'GPT-5' },
+      { id: 'gpt-5-mini',  label: 'GPT-5 mini' },
+      { id: 'o3',          label: 'o3' },
+      { id: 'o4-mini',     label: 'o4-mini' },
     ],
     anthropic: [
-      { id: 'claude-3-5-sonnet-latest', label: 'Claude 3.5 Sonnet' },
-      { id: 'claude-3-5-haiku-latest',  label: 'Claude 3.5 Haiku' },
-      { id: 'claude-3-opus-latest',     label: 'Claude 3 Opus' },
+      { id: 'claude-opus-4-7',   label: 'Claude Opus 4.7' },
+      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+      { id: 'claude-haiku-4-5',  label: 'Claude Haiku 4.5' },
     ],
   };
 

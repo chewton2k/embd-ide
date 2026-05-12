@@ -11,7 +11,9 @@ const specialFileIcons: Record<string, string> = {
 const extensionIcons: Record<string, string> = {
   ts: 'vscode-icons:file-type-typescript',
   tsx: 'vscode-icons:file-type-reactts',
-  js: 'vscode-icons:file-type-javascript',
+  js: 'vscode-icons:file-type-js',
+  mjs: 'vscode-icons:file-type-js',
+  cjs: 'vscode-icons:file-type-js',
   jsx: 'vscode-icons:file-type-reactjs',
   py: 'vscode-icons:file-type-python',
   rs: 'vscode-icons:file-type-rust',

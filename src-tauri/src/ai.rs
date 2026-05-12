@@ -89,7 +89,7 @@ pub async fn ai_chat(
             .await
         }
         "openai" => {
-            let model = request.model.unwrap_or_else(|| "gpt-4o-mini".to_string());
+            let model = request.model.unwrap_or_else(|| "gpt-5-mini".to_string());
             call_openai_compatible(
                 "https://api.openai.com/v1/chat/completions",
                 &api_key,
@@ -102,7 +102,7 @@ pub async fn ai_chat(
         "anthropic" => {
             let model = request
                 .model
-                .unwrap_or_else(|| "claude-3-5-sonnet-latest".to_string());
+                .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
             call_anthropic(&api_key, &model, &user_content).await
         }
         other => Err(format!("Unknown provider: {}", other)),
