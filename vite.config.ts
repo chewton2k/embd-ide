@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [svelte()],
   build: {
     target: 'es2022',
+    sourcemap: 'hidden',
     minify: 'esbuild',
     cssMinify: true,
     reportCompressedSize: false,
@@ -103,6 +104,6 @@ export default defineConfig({
     chunkSizeWarningLimit: 5000,
   },
   esbuild: {
-    drop: ['console', 'debugger'],
+    drop: ['debugger'],
   },
 })

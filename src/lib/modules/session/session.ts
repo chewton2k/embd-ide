@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
 import { openFiles, activeFilePath, maxRecentProjects } from '../explorer/files';
 import { projectRoot } from '../git/git';
+import { log } from '../logging';
 
 export interface SessionFile {
   path: string;
@@ -52,7 +53,7 @@ export function scheduleSaveSession(): void {
     if (!root) return;
     const session = buildSessionData();
     const maxRecent = get(maxRecentProjects);
-    invoke('save_session', { projectPath: root, session, maxRecent }).catch(console.error);
+    invoke('save_session', { projectPath: root, session, maxRecent }).catch((e) => log.error('Failed to save session', e));
   }, 750);
 }
 

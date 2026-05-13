@@ -3,5 +3,6 @@ pub mod fs;
 pub mod git;
 pub mod graph;
 pub mod knowledge;
+pub mod log;
 pub mod session;
 pub mod shell;

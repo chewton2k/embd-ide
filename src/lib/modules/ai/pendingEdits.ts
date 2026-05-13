@@ -4,6 +4,7 @@ import type { EditProposal } from './editParser';
 import { projectRoot } from '../git/git';
 import { activeFilePath } from '../explorer/files';
 import { recordAiChange } from './aiHistory';
+import { log } from '../logging';
 
 /** Map of filePath → EditProposal[] for all pending edits across files. */
 export const pendingEdits = writable<Record<string, EditProposal[]>>({});
@@ -83,7 +84,7 @@ export async function approveEdit(editId: string) {
       recordAiChange(filePath, `Edit lines ${edit.startLine}-${edit.endLine}`, content, newContent);
       await invoke('write_file_content', { path: filePath, content: newContent });
     } catch (e) {
-      console.error('Failed to apply edit:', e);
+      log.error('Failed to apply edit', e);
     }
 
     // Remove from pending
@@ -130,7 +131,7 @@ export async function approveAll() {
       }
       await invoke('write_file_content', { path: filePath, content });
     } catch (e) {
-      console.error('Failed to apply edits to', filePath, e);
+      log.error('Failed to apply edits to ' + filePath, e);
     }
   }
   pendingEdits.set({});

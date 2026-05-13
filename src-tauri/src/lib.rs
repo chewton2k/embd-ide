@@ -1,6 +1,6 @@
 mod modules;
 
-use modules::{ai, fs, git, graph, knowledge, session, shell};
+use modules::{ai, fs, git, graph, knowledge, log as app_log, session, shell};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -18,10 +18,13 @@ pub fn run() {
         .manage(project_root_state)
         .manage(Arc::new(ai::AiState::new()))
         .manage(Arc::new(knowledge::KnowledgeState::new()))
+        .manage(app_log::LogState::new())
         .manage(session::AppStateHandle(std::sync::Mutex::new(
             session::AppState::default(),
         )))
         .invoke_handler(tauri::generate_handler![
+            // Logging
+            app_log::log_record,
             // File system
             fs::set_project_root,
             fs::read_dir_tree,

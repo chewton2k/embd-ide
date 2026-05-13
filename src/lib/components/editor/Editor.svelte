@@ -32,6 +32,7 @@
   import { aiDiffExtension, addDiffEffect, clearDiffEffect } from '../../modules/editor/aiDiffExtension';
   import { ghostTextExtension } from '../../modules/editor/ghostText';
   import { pendingEdits } from '../../modules/ai/pendingEdits';
+  import { log } from '../../modules/logging';
 
   function buildEditorTheme(id: EditorThemeId): import('@codemirror/state').Extension {
     const themes: Record<EditorThemeId, () => import('@codemirror/state').Extension> = {
@@ -1038,7 +1039,7 @@
       markFileSaved(path);
       updateGitGutter(path);
     } catch (e) {
-      console.error('Failed to save:', e);
+      log.error('Failed to save', e);
       ignoreWatchUntil = 0;
     }
     saving = false;

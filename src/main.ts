@@ -2,6 +2,7 @@ import { mount } from 'svelte'
 import './app.css'
 import App from './App.svelte'
 import SettingsWindow from './lib/settings/SettingsWindow.svelte'
+import { log } from './lib/modules/logging'
 
 const target = document.getElementById('app')!
 const isSettings = window.location.hash.startsWith('#settings')
@@ -51,7 +52,7 @@ async function loadIconCollectionsDeferred(): Promise<void> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       addCollection(simpleData as any)
     } catch (err) {
-      console.warn('Iconify collections failed to load locally:', err)
+      log.warn('Iconify collections failed to load locally', err);
     }
   })
 }

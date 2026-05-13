@@ -9,3 +9,4 @@ export * from './git';
 export * from './settings';
 export * from './ui';
 export * from './settingsSync';
+export * from './logging';

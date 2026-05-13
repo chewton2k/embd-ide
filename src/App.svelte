@@ -21,6 +21,7 @@
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal } from './lib/modules';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
+  import { log } from './lib/modules/logging';
   import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/ui';
   import { toggleTerminal } from './lib/modules/terminal';
   import { shortcutBindings, eventMatchesBinding, APP_LEVEL_SHORTCUT_IDS, type AppLevelShortcutId } from './lib/modules/shortcuts';
@@ -163,10 +164,10 @@
         focus: true,
       });
       win.once('tauri://error', (e) => {
-        console.error('Failed to open settings window', e);
+        log.error('Failed to open settings window', e);
       });
     } catch (e) {
-      console.error('openSettingsWindow failed', e);
+      log.error('openSettingsWindow failed', e);
     }
   }
 
@@ -234,7 +235,7 @@
       if (root) {
         invoke('knowledge_init', { projectRoot: root }).then(() => {
           invoke('knowledge_index', { projectRoot: root }).catch(() => {});
-        }).catch((e) => { console.warn('[leo] knowledge_init failed:', e); });
+        }).catch((e) => { log.warn('knowledge_init failed', e); });
         // Also persist for settings window
         localStorage.setItem('leo-project-root', root);
       }
@@ -271,7 +272,7 @@
             ),
           ]);
         } catch (e) {
-          console.error('Failed to save session on close:', e);
+          log.error('Failed to save session on close', e);
         }
       }
       await appWindow.destroy();

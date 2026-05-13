@@ -8,6 +8,7 @@ import { buildProjectContext } from './contextBuilder';
 import { addEdits } from './pendingEdits';
 import { activeFilePath, getFileContent } from '../explorer/files';
 import { projectRoot } from '../git/git';
+import { log } from '../logging';
 import { isTerminalPath, isPreviewPath, isDiagramPath } from '../terminal/shell';
 
 export interface ChatMessage {
@@ -240,7 +241,7 @@ export async function saveConversationNow(): Promise<void> {
       if (attempt < 2) {
         await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
       } else {
-        console.warn('[leo] Failed to save conversation after 3 attempts:', e);
+        log.warn('Failed to save conversation after 3 attempts', e);
       }
     }
   }

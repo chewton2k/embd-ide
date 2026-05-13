@@ -9,6 +9,7 @@
   import { FolderOpen, Folder, ChevronRight } from 'lucide-svelte';
   import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview, createFileSignal, createFolderSignal } from '../../modules';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
+  import { log } from '../../modules/logging';
   import { exists } from '@tauri-apps/plugin-fs';
   import Button from '../ui/button/Button.svelte';
   import { getFileIconName } from '../../modules/explorer';
@@ -132,7 +133,7 @@
         try {
           await invoke('move_entries', { sources: [currentPath], destDir: originalParent });
         } catch (e) {
-          console.error('Undo move failed:', e);
+          log.error('Undo move failed', e);
         }
       }
       // Push reverse op to redo stack
@@ -143,7 +144,7 @@
         await invoke('rename_entry', { oldPath: op.newPath, newPath: op.oldPath });
         redoStack = [...redoStack, op];
       } catch (e) {
-        console.error('Undo rename failed:', e);
+        log.error('Undo rename failed', e);
       }
       await refreshTree();
     }
@@ -159,7 +160,7 @@
         await invoke('move_entries', { sources: op.sources, destDir: op.destDir });
         undoStack = [...undoStack, op];
       } catch (e) {
-        console.error('Redo move failed:', e);
+        log.error('Redo move failed', e);
       }
       await refreshTree();
     } else if (op.type === 'rename' && op.oldPath && op.newPath) {
@@ -167,7 +168,7 @@
         await invoke('rename_entry', { oldPath: op.oldPath, newPath: op.newPath });
         undoStack = [...undoStack, op];
       } catch (e) {
-        console.error('Redo rename failed:', e);
+        log.error('Redo rename failed', e);
       }
       await refreshTree();
     }
@@ -403,7 +404,7 @@
       try {
         await saveSessionNow(rootPath);
       } catch (e) {
-        console.error('Failed to save session before folder switch:', e);
+        log.error('Failed to save session before folder switch', e);
       }
     }
     rootPath = path;
@@ -438,7 +439,7 @@
           }
         }
       } catch (e) {
-        console.error('Failed to restore session:', e);
+        log.error('Failed to restore session', e);
       }
     }
   }
@@ -451,9 +452,9 @@
       } catch (e) {
         const msg = String(e);
         if (msg.includes('scope') || msg.includes('not allowed')) {
-          console.error(`Cannot open folder: path "${selected}" is outside the allowed filesystem scope.`);
+          log.error(`Cannot open folder: path "${selected}" is outside the allowed filesystem scope`);
         } else {
-          console.error('Failed to open folder:', e);
+          log.error('Failed to open folder', e);
         }
       }
     }
@@ -463,7 +464,7 @@
     try {
       files = await invoke<FileEntry[]>('read_dir_tree', { path, depth: 1 });
     } catch (e) {
-      console.error('Failed to read directory:', e);
+      log.error('Failed to read directory', e);
     }
   }
 
@@ -483,7 +484,7 @@
         expandedDirs = new Set(expandedDirs);
         files = [...files];
       } catch (e) {
-        console.error('Failed to expand:', e);
+        log.error('Failed to expand', e);
       }
     }
   }
@@ -678,7 +679,7 @@
     try {
       await invoke('delete_entries', { paths });
     } catch (e) {
-      console.error('Failed to delete:', e);
+      log.error('Failed to delete', e);
     }
     selectedPaths = new Set();
     selectedPath = null;
@@ -708,7 +709,7 @@
     try {
       await invoke('paste_entries', { sources: clipboardPaths, destDir });
     } catch (e) {
-      console.error('Failed to paste:', e);
+      log.error('Failed to paste', e);
     }
     await refreshTree();
   }
@@ -737,7 +738,7 @@
     try {
       await invoke('duplicate_entry', { path });
     } catch (e) {
-      console.error('Failed to duplicate:', e);
+      log.error('Failed to duplicate', e);
     }
     await refreshTree();
   }
@@ -747,7 +748,7 @@
     try {
       await invoke('reveal_in_file_manager', { path });
     } catch (e) {
-      console.error('Failed to reveal in file manager:', e);
+      log.error('Failed to reveal in file manager', e);
     }
   }
 
@@ -775,7 +776,7 @@
         : `${content}\n${relativePath}\n`;
       await invoke('write_file_content', { path: gitignorePath, content: newContent });
     } catch (e) {
-      console.error('Failed to add to .gitignore:', e);
+      log.error('Failed to add to .gitignore', e);
     }
   }
 
@@ -785,7 +786,7 @@
       return;
     }
     if (!isValidName(renameValue.trim())) {
-      console.error('Invalid name: must not contain / or \\ or be . or ..');
+      log.error('Invalid name: must not contain / or \\ or be . or ..');
       cancelRename();
       return;
     }
@@ -799,7 +800,7 @@
         undoStack = [...undoStack, { type: 'rename', oldPath, newPath }];
         redoStack = [];
       } catch (e) {
-        console.error('Failed to rename:', e);
+        log.error('Failed to rename', e);
       }
     }
     renamingPath = null;
@@ -831,7 +832,7 @@
       undoStack = [...undoStack, { type: 'move', sources: paths, destDir, originalParents }];
       redoStack = []; // Clear redo on new action
     } catch (e) {
-      console.error('Failed to move:', e);
+      log.error('Failed to move', e);
     }
     await refreshTree();
   }
@@ -1075,7 +1076,7 @@
         try {
           await invoke('import_external_files', { sources: paths, destDir });
         } catch (e) {
-          console.error('Failed to import external files:', e);
+          log.error('Failed to import external files', e);
         }
         await refreshTree();
       }

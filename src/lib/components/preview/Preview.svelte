@@ -3,6 +3,7 @@
   import { open as openExternal } from '@tauri-apps/plugin-shell';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { previewUrl } from '../../modules';
+  import { log } from '../../modules/logging';
   import { get } from 'svelte/store';
 
   // ── Constants ──────────────────────────────────────────────────
@@ -84,7 +85,7 @@
   function openInBrowser() {
     const target = normalizeUrl(url);
     if (!target) return;
-    openExternal(target).catch((e) => console.error('Failed to open external', e));
+    openExternal(target).catch((e) => log.error('Failed to open external', e));
   }
 
   /**
@@ -125,14 +126,14 @@
       });
       activePopupLabel = label;
       win.once('tauri://error', (e) => {
-        console.error('Preview popup failed to open', e);
+        log.error('Preview popup failed to open', e);
         activePopupLabel = null;
       });
       win.once('tauri://destroyed', () => {
         if (activePopupLabel === label) activePopupLabel = null;
       });
     } catch (e) {
-      console.error('openInPopup failed', e);
+      log.error('openInPopup failed', e);
       activePopupLabel = null;
     }
   }
