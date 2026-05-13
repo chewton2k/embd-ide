@@ -31,6 +31,9 @@ pub fn validate_git_file_path(file_path: &str) -> Result<(), String> {
     if file_path.contains('\0') {
         return Err("Invalid file path: null bytes not allowed".to_string());
     }
+    if file_path.starts_with('-') {
+        return Err("Invalid file path: cannot start with '-' (flag injection)".to_string());
+    }
 
     let path = Path::new(file_path);
     for component in path.components() {
@@ -43,6 +46,42 @@ pub fn validate_git_file_path(file_path: &str) -> Result<(), String> {
             }
             Component::Normal(name) if name.eq_ignore_ascii_case(".git") => {
                 return Err("Invalid file path: .git paths are not allowed".to_string());
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Validate a git ref name per git-check-ref-format(1).
+/// Rejects names that could be misinterpreted as flags or contain illegal characters.
+pub fn validate_git_ref_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Invalid ref name: cannot be empty".to_string());
+    }
+    if name.starts_with('-') {
+        return Err("Invalid ref name: cannot start with '-'".to_string());
+    }
+    if name.starts_with('.') {
+        return Err("Invalid ref name: cannot start with '.'".to_string());
+    }
+    if name.ends_with('/') || name.starts_with('/') {
+        return Err("Invalid ref name: cannot start or end with '/'".to_string());
+    }
+    if name.ends_with(".lock") {
+        return Err("Invalid ref name: cannot end with '.lock'".to_string());
+    }
+    if name == "@" {
+        return Err("Invalid ref name: '@' alone is not allowed".to_string());
+    }
+    if name.contains("..") || name.contains("@{") || name.contains("//") || name.contains("/.") {
+        return Err("Invalid ref name: contains forbidden sequence".to_string());
+    }
+    for byte in name.bytes() {
+        match byte {
+            0..=0x1F | 0x7F => return Err("Invalid ref name: control characters not allowed".to_string()),
+            b' ' | b'\\' | b':' | b'?' | b'*' | b'[' | b'~' | b'^' => {
+                return Err(format!("Invalid ref name: character '{}' not allowed", byte as char));
             }
             _ => {}
         }
@@ -711,9 +750,7 @@ pub fn git_delete_branch(
     force: bool,
 ) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
-    if branch.contains("..") || branch.contains(' ') {
-        return Err("Invalid branch name".to_string());
-    }
+    validate_git_ref_name(&branch)?;
     let head_output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(&repo_path)
@@ -963,15 +1000,18 @@ pub fn git_checkout_branch(
     is_remote: bool,
 ) -> Result<String, String> {
     validate_repo_path(&repo_path, &state)?;
-    if branch.contains("..") || branch.contains(' ') {
-        return Err("Invalid branch name".to_string());
-    }
-
-    let output = if is_remote {
+    if is_remote {
+        // For remote branches like "origin/feature", validate the local name portion
         let local_name = branch.split('/').skip(1).collect::<Vec<&str>>().join("/");
         if local_name.is_empty() {
             return Err("Invalid remote branch name".to_string());
         }
+        validate_git_ref_name(&local_name)?;
+    } else {
+        validate_git_ref_name(&branch)?;
+    }
+
+    let output = if is_remote {
         Command::new("git")
             .args(["checkout", "--track", &format!("remotes/{}", branch)])
             .current_dir(&repo_path)
@@ -1025,4 +1065,73 @@ pub fn git_resolve_conflict(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_git_ref_name_rejects_bad_inputs() {
+        let bad = vec![
+            "", "-x", "..", "foo..bar", "foo bar", "\x01ctrl", "foo:bar",
+            "foo?", "foo*", "foo[", "foo~", "foo^", "foo\\bar", ".lock",
+            "foo.lock", "/foo", "foo/", "foo//bar", "foo/.bar", "@", "foo@{",
+            "foo\0bar",
+        ];
+        for input in bad {
+            assert!(
+                validate_git_ref_name(input).is_err(),
+                "Expected rejection for: {:?}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_git_ref_name_accepts_good_inputs() {
+        let good = vec![
+            "main",
+            "feature/login",
+            "release-1.0",
+            "fix_bug",
+            "dependabot/npm/foo-1.2.3",
+        ];
+        for input in good {
+            assert!(
+                validate_git_ref_name(input).is_ok(),
+                "Expected acceptance for: {:?}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_git_file_path_rejects_leading_dash() {
+        assert!(validate_git_file_path("--exec=evil").is_err());
+        assert!(validate_git_file_path("-flag").is_err());
+    }
+
+    #[test]
+    fn test_validate_git_file_path_rejects_traversal() {
+        assert!(validate_git_file_path("../etc/passwd").is_err());
+        assert!(validate_git_file_path("foo/../../bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_git_file_path_rejects_absolute() {
+        assert!(validate_git_file_path("/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn test_validate_git_file_path_rejects_git_dir() {
+        assert!(validate_git_file_path(".git/config").is_err());
+    }
+
+    #[test]
+    fn test_validate_git_file_path_accepts_valid() {
+        assert!(validate_git_file_path("src/main.rs").is_ok());
+        assert!(validate_git_file_path("README.md").is_ok());
+        assert!(validate_git_file_path("path/to/file.txt").is_ok());
+    }
 }
