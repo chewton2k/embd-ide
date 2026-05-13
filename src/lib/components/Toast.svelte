@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fly } from 'svelte/transition';
   import { Info, AlertTriangle, XCircle, CheckCircle2, X } from 'lucide-svelte';
-  import { toasts, dismissToast, type ToastEntry } from '../../modules/ui/toast';
+  import { toasts, dismissToast, type ToastEntry } from '../modules/ui/toast';
 
   const ICONS = {
     info: Info,
