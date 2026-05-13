@@ -1469,7 +1469,10 @@
     border-radius: 3px;
     margin: 0 3px;
     width: calc(100% - 6px);
-    transition: all 0.1s;
+    /* Only transition cosmetic properties — `transition: all` was animating
+       every state class change (drag, drop-target, selected) causing
+       cascading repaints during scrolling/dragging. */
+    transition: background-color 0.1s ease, color 0.1s ease;
     cursor: default;
     user-select: none;
   }

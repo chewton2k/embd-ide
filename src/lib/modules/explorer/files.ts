@@ -42,8 +42,30 @@ export function addFile(path: string, name: string) {
   });
 }
 
+/**
+ * Non-reactive cache of in-memory file content for currently-open files.
+ * Updated on every keystroke from the editor; consumers (AI chat, etc.)
+ * read from here instead of the reactive `openFiles` store so that
+ * typing doesn't fan out a re-render to every component subscribed to
+ * `openFiles` (Tabs, GitPanel, ChatPanel, App $effects, derived stores).
+ */
+const fileContentCache = new Map<string, string>();
+
+/** Read the latest in-memory content for a file (unsaved edits included). */
+export function getFileContent(path: string): string | null {
+  return fileContentCache.get(path) ?? null;
+}
+
 export function updateFileContent(path: string, content: string) {
-  openFiles.update(files => files.map(f => f.path === path ? { ...f, content, modified: true } : f));
+  // Hot path: every keystroke calls this. Avoid touching the reactive
+  // store unless the `modified` flag actually flips, otherwise every
+  // keystroke would cascade re-renders into Tabs/GitPanel/ChatPanel/etc.
+  fileContentCache.set(path, content);
+  const files = get(openFiles);
+  const file = files.find(f => f.path === path);
+  if (file && !file.modified) {
+    openFiles.update(fs => fs.map(f => f.path === path ? { ...f, modified: true } : f));
+  }
 }
 
 type FileRenameCallback = (oldPath: string, newPath: string) => void;
@@ -55,6 +77,11 @@ export function registerFileRenameCallback(cb: FileRenameCallback): () => void {
 }
 
 export function renameOpenFile(oldPath: string, newPath: string, newName: string) {
+  const cached = fileContentCache.get(oldPath);
+  if (cached !== undefined) {
+    fileContentCache.delete(oldPath);
+    fileContentCache.set(newPath, cached);
+  }
   openFiles.update(files => files.map(f => f.path === oldPath ? { ...f, path: newPath, name: newName } : f));
   activeFilePath.update(current => current === oldPath ? newPath : current);
   for (const cb of fileRenameCallbacks) cb(oldPath, newPath);
@@ -68,6 +95,7 @@ export function closeFile(path: string) {
   openFiles.update(files => {
     if (files.find(f => f.path === path)?.pinned) return files;
     const newFiles = files.filter(f => f.path !== path);
+    fileContentCache.delete(path);
     activeFilePath.update(current => current === path ? newFiles.at(-1)?.path ?? null : current);
     return newFiles;
   });
@@ -92,6 +120,10 @@ export function prevTab() {
 export function closeAllUnpinned() {
   openFiles.update(files => {
     const pinned = files.filter(f => f.pinned);
+    const pinnedPaths = new Set(pinned.map(f => f.path));
+    for (const key of fileContentCache.keys()) {
+      if (!pinnedPaths.has(key)) fileContentCache.delete(key);
+    }
     activeFilePath.set(pinned.at(-1)?.path ?? null);
     return pinned;
   });
@@ -102,5 +134,6 @@ export function markFileSaved(path: string) {
 }
 
 export function reloadFileContent(path: string, content: string) {
+  fileContentCache.set(path, content);
   openFiles.update(files => files.map(f => f.path === path ? { ...f, content, modified: false, version: f.version + 1 } : f));
 }

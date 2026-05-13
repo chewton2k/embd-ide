@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { chatMessages, apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, activeFile, openFiles, type ChatMessage, type AiProvider } from '../../modules';
+  import { chatMessages, apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, activeFile, openFiles, getFileContent, type ChatMessage, type AiProvider } from '../../modules';
   import { get } from 'svelte/store';
 
   let input = $state('');
@@ -115,10 +115,15 @@
     let context: string | undefined;
     const currentPath = get(activeFile);
     if (currentPath) {
-      const files = get(openFiles);
-      const file = files.find(f => f.path === currentPath);
-      if (file?.content) {
-        context = file.content;
+      // Read from the non-reactive cache so we get the latest unsaved
+      // edits without subscribing the chat panel to per-keystroke updates.
+      const live = getFileContent(currentPath);
+      if (live) {
+        context = live;
+      } else {
+        const files = get(openFiles);
+        const file = files.find(f => f.path === currentPath);
+        if (file?.content) context = file.content;
       }
     }
 

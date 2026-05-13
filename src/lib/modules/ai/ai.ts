@@ -6,7 +6,7 @@ import { parseAiEdits, hasEdits } from './editParser';
 import { EDIT_SYSTEM_PROMPT } from './systemPrompts';
 import { buildProjectContext } from './contextBuilder';
 import { addEdits } from './pendingEdits';
-import { activeFilePath } from '../explorer/files';
+import { activeFilePath, getFileContent } from '../explorer/files';
 import { projectRoot } from '../git/git';
 import { isTerminalPath, isPreviewPath, isDiagramPath } from '../terminal/shell';
 
@@ -59,7 +59,10 @@ async function readActiveFileContext(): Promise<{ path: string; content: string 
   if (!root || !activeFile.startsWith(root)) return null;
 
   try {
-    const raw = await invoke<string>('read_file_content', { path: activeFile });
+    // Prefer the in-memory editor cache so unsaved edits are sent to the
+    // model. Fall back to disk for files that haven't been touched yet.
+    const live = getFileContent(activeFile);
+    const raw = live ?? await invoke<string>('read_file_content', { path: activeFile });
     const name = activeFile.split('/').pop() || activeFile;
     if (raw.length > AUTO_ATTACH_MAX_BYTES) {
       const truncated = raw.slice(0, AUTO_ATTACH_MAX_BYTES);
