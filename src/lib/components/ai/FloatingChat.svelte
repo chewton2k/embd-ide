@@ -540,7 +540,9 @@
     z-index: 900;
     display: flex;
     flex-direction: column;
-    background: var(--bg-secondary);
+    background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     color: var(--text-primary);
     border: 1px solid var(--border);
     border-radius: 12px;
