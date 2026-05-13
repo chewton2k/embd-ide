@@ -574,6 +574,7 @@ pub async fn knowledge_delete_by_hash(
     }
 
     if db_p.exists() {
+        log::info!("Deleting knowledge DB by hash: {}", db_hash);
         std::fs::remove_file(&db_p)
             .map_err(|e| format!("Failed to delete {}: {}", db_p.display(), e))?;
     }
