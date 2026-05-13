@@ -1,6 +1,6 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
-  import type { AiProvider } from '../../modules/stores';
+  import type { AiProvider } from '../../modules';
 
   interface Props {
     provider: AiProvider;

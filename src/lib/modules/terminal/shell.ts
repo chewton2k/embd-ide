@@ -1,5 +1,5 @@
 import { writable, get, derived, type Writable } from 'svelte/store';
-import { persistedString, persistedNumber } from '../persisted';
+import { persistedString, persistedNumber } from '../session/persisted';
 
 export const showTerminal = writable<boolean>(false);
 export const showPreview = writable<boolean>(false);

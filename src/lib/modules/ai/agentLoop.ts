@@ -1,14 +1,14 @@
 import { get, writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { chatMessages, aiProvider, aiModel, isStreaming, type ChatMessage } from '../stores/ai';
-import { projectRoot } from '../stores/git';
+import { chatMessages, aiProvider, aiModel, isStreaming, type ChatMessage } from './ai';
+import { projectRoot } from '../git/git';
 import { parseAiEdits, hasEdits } from './editParser';
 import { parseCommands, hasCommands } from './commandParser';
-import { addEdits } from '../stores/pendingEdits';
+import { addEdits } from './pendingEdits';
 import { buildProjectContext } from './contextBuilder';
 import { EDIT_SYSTEM_PROMPT } from './systemPrompts';
-import { terminalSessions } from '../stores/shell';
+import { terminalSessions } from '../terminal/shell';
 
 // ── Agent state ──
 

@@ -1,6 +1,6 @@
 import { writable, get } from 'svelte/store';
-import { persistedString, persistedNumber } from '../persisted';
-import type { AppearanceMode, EditorThemeId } from '../themes';
+import { persistedString, persistedNumber } from '../session/persisted';
+import type { AppearanceMode, EditorThemeId } from '../theme/themes';
 
 export const showSettings = writable<boolean>(false);
 export const showChat = writable<boolean>(false);

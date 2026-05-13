@@ -7,11 +7,11 @@
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import Icon from '@iconify/svelte';
   import { Search, FilePlus2, FolderPlus, FolderOpen, Folder, ChevronRight, FolderSymlink } from 'lucide-svelte';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview } from '../../modules/stores';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview } from '../../modules';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
   import { exists } from '@tauri-apps/plugin-fs';
   import Button from '../ui/button/Button.svelte';
-  import { getFileIconName } from '../../modules/fileIcons';
+  import { getFileIconName } from '../../modules/explorer';
 
   function isValidName(name: string): boolean {
     return name.length > 0 && !/[\/\\]/.test(name) && name !== '..' && name !== '.';

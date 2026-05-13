@@ -1,5 +1,5 @@
 import { writable, derived, get } from 'svelte/store';
-import { persistedNumber } from '../persisted';
+import { persistedNumber } from '../session/persisted';
 
 export interface OpenFile {
   path: string;

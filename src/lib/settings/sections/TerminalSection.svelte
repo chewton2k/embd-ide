@@ -10,7 +10,7 @@
    * styles as GeneralSection — duplicated here because each section in
    * this codebase owns its own scoped CSS.
    */
-  import { terminalMode, terminalFontSize } from '../../modules/stores';
+  import { terminalMode, terminalFontSize } from '../../modules';
   import SectionHeader from '../components/SectionHeader.svelte';
 </script>
 

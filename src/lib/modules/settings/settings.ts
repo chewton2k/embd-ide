@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { persistedString, persistedNumber, persistedBool, persistedBoolDefaultTrue } from '../persisted';
+import { persistedString, persistedNumber, persistedBool, persistedBoolDefaultTrue } from '../session/persisted';
 
 export const autosaveEnabled = persistedBoolDefaultTrue('leo-autosave');
 export const autosaveDelay = persistedNumber('leo-autosave-delay', 1000);

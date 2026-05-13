@@ -1,8 +1,8 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
-import type { EditProposal } from '../ai/editParser';
-import { projectRoot } from './git';
-import { activeFilePath } from './files';
+import type { EditProposal } from './editParser';
+import { projectRoot } from '../git/git';
+import { activeFilePath } from '../explorer/files';
 import { recordAiChange } from './aiHistory';
 
 /** Map of filePath → EditProposal[] for all pending edits across files. */

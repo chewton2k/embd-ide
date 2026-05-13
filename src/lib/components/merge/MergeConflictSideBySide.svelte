@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ConflictHunk, Resolution } from '../../modules/mergeUtils';
+  import type { ConflictHunk, Resolution } from '../../modules/git';
 
   interface Props {
     rawContent: string;

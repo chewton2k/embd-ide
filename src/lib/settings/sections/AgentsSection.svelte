@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ghostTextEnabled, ghostTextDelay, agentMaxStepsConfig, agentAutoApproveConfig } from '../../modules/stores';
+  import { ghostTextEnabled, ghostTextDelay, agentMaxStepsConfig, agentAutoApproveConfig } from '../../modules';
   import SectionHeader from '../components/SectionHeader.svelte';
 </script>
 

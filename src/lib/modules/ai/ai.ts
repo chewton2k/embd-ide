@@ -1,14 +1,14 @@
 import { writable, get } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { persistedString } from '../persisted';
-import { parseAiEdits, hasEdits } from '../ai/editParser';
-import { EDIT_SYSTEM_PROMPT } from '../ai/systemPrompts';
-import { buildProjectContext } from '../ai/contextBuilder';
+import { persistedString } from '../session/persisted';
+import { parseAiEdits, hasEdits } from './editParser';
+import { EDIT_SYSTEM_PROMPT } from './systemPrompts';
+import { buildProjectContext } from './contextBuilder';
 import { addEdits } from './pendingEdits';
-import { activeFilePath } from './files';
-import { projectRoot } from './git';
-import { isTerminalPath, isPreviewPath, isDiagramPath } from './shell';
+import { activeFilePath } from '../explorer/files';
+import { projectRoot } from '../git/git';
+import { isTerminalPath, isPreviewPath, isDiagramPath } from '../terminal/shell';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';

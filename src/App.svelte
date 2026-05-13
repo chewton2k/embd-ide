@@ -18,10 +18,10 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow } from './lib/modules/stores';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow } from './lib/modules';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
-  import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/windowChrome';
-  import { toggleTerminal } from './lib/modules/terminalActions';
+  import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/ui';
+  import { toggleTerminal } from './lib/modules/terminal';
   import { shortcutBindings, eventMatchesBinding, APP_LEVEL_SHORTCUT_IDS, type AppLevelShortcutId } from './lib/modules/shortcuts';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';

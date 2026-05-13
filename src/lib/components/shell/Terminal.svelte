@@ -15,7 +15,7 @@
     isTerminalPath, terminalPath, terminalTabIdFromPath, allocateTerminalTabId,
     terminalMode,
     type TerminalTabInfo,
-  } from '../../modules/stores';
+  } from '../../modules';
   import { get } from 'svelte/store';
   import { SplitSquareVertical, PanelBottom, Columns2 } from 'lucide-svelte';
   import '@xterm/xterm/css/xterm.css';

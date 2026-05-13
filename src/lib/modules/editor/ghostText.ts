@@ -2,7 +2,7 @@ import { EditorView, Decoration, WidgetType, type DecorationSet } from '@codemir
 import { StateField, StateEffect } from '@codemirror/state';
 import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
-import { aiProvider, aiModel } from '../stores/ai';
+import { aiProvider, aiModel } from '../ai/ai';
 
 // ── Effects ──
 

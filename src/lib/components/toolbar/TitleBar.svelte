@@ -23,8 +23,8 @@
     showSettings, showGit, gitBranch, toggleGitPanel,
     showTerminal,
     openFileSearchSignal,
-  } from '../../modules/stores';
-  import { toggleTerminal } from '../../modules/terminalActions';
+  } from '../../modules';
+  import { toggleTerminal } from '../../modules/terminal';
 
   let { sidebarVisible, onToggleSidebar }: {
     sidebarVisible: boolean;

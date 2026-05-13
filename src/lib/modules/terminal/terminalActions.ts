@@ -25,8 +25,8 @@ import {
   createTerminalSignal,
   terminalPath,
   isTerminalPath,
-} from './stores/shell';
-import { activeFilePath } from './stores/files';
+} from './shell';
+import { activeFilePath } from '../explorer/files';
 
 export function toggleTerminal(): void {
   const tabs = get(terminalTabs);

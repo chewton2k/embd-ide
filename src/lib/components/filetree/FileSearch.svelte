@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { projectRoot, addFile } from '../../modules/stores';
+  import { projectRoot, addFile } from '../../modules';
 
   let { onClose, onSelect }: { onClose: () => void; onSelect?: (relPath: string) => void } = $props();
 

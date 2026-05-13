@@ -11,8 +11,8 @@
     sendStreamingMessage, cancelStream, clearChat, attachedFiles,
     type AiProvider,
     listConversations, loadConversation, saveConversationNow,
-  } from '../../modules/stores';
-  import { showChat, activeFile } from '../../modules/stores';
+  } from '../../modules';
+  import { showChat, activeFile } from '../../modules';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import {

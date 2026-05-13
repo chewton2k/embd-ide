@@ -26,7 +26,7 @@
     splitTerminalSignal,
     collapseTerminalSplitsSignal,
     killTerminalSignal,
-  } from '../../modules/stores';
+  } from '../../modules';
 
   // ── Resize: drag handle ──────────────────────────────────────────
 

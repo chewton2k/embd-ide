@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
-import { projectRoot } from '../stores/git';
-import { activeFile } from '../stores/files';
+import { projectRoot } from '../git/git';
+import { activeFile } from '../explorer/files';
 
 interface FileInfo {
   path: string;

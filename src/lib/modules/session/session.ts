@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
-import { openFiles, activeFilePath, projectRoot, maxRecentProjects } from './stores';
+import { openFiles, activeFilePath, maxRecentProjects } from '../explorer/files';
+import { projectRoot } from '../git/git';
 
 export interface SessionFile {
   path: string;

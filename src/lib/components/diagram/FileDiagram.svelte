@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { projectRoot } from '../../modules/stores';
+  import { projectRoot } from '../../modules';
   import { get } from 'svelte/store';
   import { computeLayout, type LayoutNode, type LayoutEdge } from './layout';
   import { ZoomIn, ZoomOut, Maximize2, RefreshCw } from 'lucide-svelte';

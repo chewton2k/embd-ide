@@ -2,7 +2,7 @@
   import { RefreshCw, Globe, ExternalLink, PictureInPicture2 } from 'lucide-svelte';
   import { open as openExternal } from '@tauri-apps/plugin-shell';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
-  import { previewUrl } from '../../modules/stores';
+  import { previewUrl } from '../../modules';
   import { get } from 'svelte/store';
 
   // ── Constants ──────────────────────────────────────────────────

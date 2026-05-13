@@ -14,7 +14,7 @@
     showTerminal, activeFilePath, panesInActiveTab,
     activeTerminalTabId, splitTerminalSignal, collapseTerminalSplitsSignal,
     terminalPath,
-  } from '../../modules/stores';
+  } from '../../modules';
 
   let splitMenuOpen = $state(false);
   let splitMenuPos = $state<{ top: number; left: number } | null>(null);

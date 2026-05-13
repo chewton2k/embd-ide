@@ -9,7 +9,7 @@
     hiddenPatterns,
     EDITOR_THEMES, EDITOR_THEME_LABELS,
     type AppearanceMode, type EditorThemeId,
-  } from '../../modules/stores';
+  } from '../../modules';
   import { save, open } from '@tauri-apps/plugin-dialog';
   import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs';
   import SectionHeader from '../components/SectionHeader.svelte';

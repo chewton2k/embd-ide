@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, type AiProvider } from '../../modules/stores';
+  import { apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, type AiProvider } from '../../modules';
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';

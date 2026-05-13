@@ -1,9 +1,9 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
   import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw, GitBranch } from 'lucide-svelte';
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalTabs, activeTerminalTabId, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, terminalTabIdFromPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode } from '../../modules/stores';
-  import { triggerFileTreeRefresh } from '../../modules/stores';
-  import { getFileIconName } from '../../modules/fileIcons';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalTabs, activeTerminalTabId, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, terminalTabIdFromPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode } from '../../modules';
+  import { triggerFileTreeRefresh } from '../../modules';
+  import { getFileIconName } from '../../modules/explorer';
 
   let tabsBar: HTMLDivElement | undefined = $state();
   let addMenuOpen = $state(false);

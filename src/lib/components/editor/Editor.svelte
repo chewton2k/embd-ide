@@ -31,7 +31,7 @@
   import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
   import { aiDiffExtension, addDiffEffect, clearDiffEffect } from '../../modules/editor/aiDiffExtension';
   import { ghostTextExtension } from '../../modules/editor/ghostText';
-  import { pendingEdits } from '../../modules/stores/pendingEdits';
+  import { pendingEdits } from '../../modules/ai/pendingEdits';
 
   function buildEditorTheme(id: EditorThemeId): import('@codemirror/state').Extension {
     const themes: Record<EditorThemeId, () => import('@codemirror/state').Extension> = {
@@ -118,8 +118,8 @@
   import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules/stores';
-  import type { EditorThemeId } from '../../modules/themes';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules';
+  import type { EditorThemeId } from '../../modules/theme';
 
   let { filePath }: { filePath: string } = $props();
 

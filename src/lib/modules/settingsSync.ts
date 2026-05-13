@@ -1,20 +1,10 @@
-export * from './files';
-export * from './ai';
-export * from './git';
-export * from './settings';
-export * from './shell';
-export * from './ui';
-export * from './pendingEdits';
-export * from './aiHistory';
-export { EDITOR_THEMES, EDITOR_THEME_LABELS, isLightEditorTheme, type AppearanceMode, type EditorThemeId } from '../themes';
-
 // ── Cross-window settings sync ───────────────────────────────────
-import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, terminalFontSize, hiddenPatterns } from './settings';
-import { appearanceMode, editorTheme, uiFontSize, uiDensity } from './ui';
-import { maxRecentProjects, maxTabs } from './files';
-import { aiProvider, aiModel, type AiProvider } from './ai';
-import { terminalMode, terminalPanelHeight, type TerminalMode } from './shell';
-import type { AppearanceMode, EditorThemeId } from '../themes';
+import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, terminalFontSize, hiddenPatterns } from './settings/settings';
+import { appearanceMode, editorTheme, uiFontSize, uiDensity } from './ui/ui';
+import { maxRecentProjects, maxTabs } from './explorer/files';
+import { aiProvider, aiModel, type AiProvider } from './ai/ai';
+import { terminalMode, terminalPanelHeight, type TerminalMode } from './terminal/shell';
+import type { AppearanceMode, EditorThemeId } from './theme/themes';
 
 const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
   'leo-autosave':            { set: v => autosaveEnabled.set(v !== 'false') },

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Check, X, RotateCcw } from 'lucide-svelte';
-  import { pendingEdits, approveEdit, rejectEdit, approveAll, rejectAll } from '../../modules/stores/pendingEdits';
+  import { pendingEdits, approveEdit, rejectEdit, approveAll, rejectAll } from '../../modules/ai/pendingEdits';
 
   let editCount = $derived(Object.values($pendingEdits).flat().filter(e => e.status === 'pending').length);
   let fileCount = $derived(Object.keys($pendingEdits).filter(k => $pendingEdits[k].some(e => e.status === 'pending')).length);
