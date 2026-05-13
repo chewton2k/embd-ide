@@ -33,8 +33,10 @@
 
   // New file/folder creation state
   let creating = $state<'file' | 'folder' | null>(null);
+  let createParentPath = $state<string | null>(null);
   let newName = $state('');
   let newNameInput: HTMLInputElement | undefined = $state();
+  let createError = $state<string | null>(null);
 
   // Context menu state
   let contextMenu = $state<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
@@ -467,6 +469,10 @@
 
   async function toggleDir(entry: FileEntry) {
     if (expandedDirs.has(entry.path)) {
+      // If collapsing the folder that has an active creation, cancel it
+      if (creating && createParentPath === entry.path) {
+        cancelCreate();
+      }
       expandedDirs.delete(entry.path);
       expandedDirs = new Set(expandedDirs);
     } else {
@@ -483,6 +489,16 @@
   }
 
   function handleFileClick(entry: FileEntry, e: MouseEvent) {
+    // If creating, cancel/confirm and consume the click — don't open the file
+    if (creating) {
+      if (newName.trim() && isValidName(newName.trim())) {
+        confirmCreate();
+      } else {
+        cancelCreate();
+      }
+      return;
+    }
+
     if (e.metaKey || e.ctrlKey) {
       // Multi-select toggle
       const next = new Set(selectedPaths);
@@ -506,58 +522,134 @@
     }
   }
 
-  function startCreate(type: 'file' | 'folder') {
+  function startCreate(type: 'file' | 'folder', targetPath?: string) {
+    // Cancel any existing creation
+    if (creating) cancelCreate();
+
     creating = type;
     newName = '';
-    // Focus input after render
-    requestAnimationFrame(() => newNameInput?.focus());
+    createError = null;
+
+    // Determine parent directory
+    if (targetPath) {
+      // Explicit target passed (from context menu or signal) — use directly
+      createParentPath = targetPath;
+    } else if (selectedPath && selectedPath !== rootPath) {
+      const entry = findEntry(files, selectedPath);
+      if (entry?.is_dir) {
+        createParentPath = entry.path;
+      } else if (selectedPath.includes('/')) {
+        createParentPath = selectedPath.substring(0, selectedPath.lastIndexOf('/'));
+      } else {
+        createParentPath = rootPath;
+      }
+    } else {
+      createParentPath = rootPath;
+    }
+
+    // Expand the parent folder so the inline input is visible
+    if (createParentPath) {
+      expandedDirs.add(createParentPath);
+      expandedDirs = new Set(expandedDirs);
+    }
+    if (rootPath) {
+      expandedDirs.add(rootPath);
+      expandedDirs = new Set(expandedDirs);
+    }
+
+    // Wait for DOM to update then focus
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        newNameInput?.focus();
+      });
+    });
   }
 
   async function confirmCreate() {
-    if (!newName.trim() || !rootPath) return;
-    if (!isValidName(newName.trim())) {
-      console.error('Invalid name: must not contain / or \\ or be . or ..');
-      creating = null;
-      newName = '';
+    const name = newName.trim();
+    createError = null;
+
+    if (!name || !rootPath || !createParentPath) {
+      cancelCreate();
       return;
     }
-    // Determine parent directory: use selected dir, or parent of selected file, or root
-    let parentDir = rootPath;
-    if (selectedPath) {
-      const selectedEntry = findEntry(files, selectedPath);
-      if (selectedEntry?.is_dir) {
-        parentDir = selectedEntry.path;
-      } else if (selectedPath.includes('/')) {
-        parentDir = selectedPath.substring(0, selectedPath.lastIndexOf('/'));
-      }
+
+    // Validation
+    if (!isValidName(name)) {
+      createError = 'Invalid name';
+      return;
     }
-    const fullPath = `${parentDir}/${newName.trim()}`;
+    if (name.includes('/') || name.includes('\\')) {
+      createError = 'Name cannot contain path separators';
+      return;
+    }
+    if (name.startsWith('.') && name.length === 1) {
+      createError = 'Invalid name';
+      return;
+    }
+
+    // Check for duplicates in parent
+    const parentEntry = createParentPath === rootPath
+      ? { children: files }
+      : findEntry(files, createParentPath);
+    const siblings = parentEntry?.children ?? files;
+    const duplicate = siblings.some(e => e.name.toLowerCase() === name.toLowerCase());
+    if (duplicate) {
+      createError = `"${name}" already exists`;
+      return;
+    }
+
+    const fullPath = `${createParentPath}/${name}`;
+    const type = creating;
+
     try {
-      if (creating === 'file') {
+      if (type === 'file') {
         await invoke('create_file', { path: fullPath });
-        onFileSelect(fullPath, newName.trim());
+        onFileSelect(fullPath, name);
       } else {
         await invoke('create_folder', { path: fullPath });
+        expandedDirs.add(fullPath);
+        expandedDirs = new Set(expandedDirs);
       }
-      // Expand all ancestor folders so the new item is visible
-      let dir = parentDir;
-      while (dir.length > (rootPath?.length ?? 0)) {
+
+      // Keep parent expanded
+      let dir = createParentPath;
+      while (dir && dir.length > (rootPath?.length ?? 0)) {
         expandedDirs.add(dir);
         dir = dir.substring(0, dir.lastIndexOf('/'));
       }
       expandedDirs = new Set(expandedDirs);
+
       await refreshTree();
       selectedPath = fullPath;
+      selectedPaths = new Set([fullPath]);
     } catch (e) {
-      console.error('Failed to create:', e);
+      createError = `Failed: ${e}`;
+      return;
     }
+
     creating = null;
+    createParentPath = null;
     newName = '';
+    createError = null;
   }
 
   function cancelCreate() {
     creating = null;
+    createParentPath = null;
     newName = '';
+    createError = null;
+  }
+
+  function handleCreateBlur() {
+    setTimeout(() => {
+      if (!creating) return;
+      if (newName.trim() && isValidName(newName.trim())) {
+        confirmCreate();
+      } else {
+        cancelCreate();
+      }
+    }, 100);
   }
 
   function handleContextMenu(e: MouseEvent, entry: FileEntry) {
@@ -1079,30 +1171,12 @@
       <p>Open a project to begin</p>
     </div>
   {:else}
-    {#if creating}
-      <div class="create-input-row">
-        <span class="create-label">{creating === 'file' ? '📄' : '📁'}</span>
-        <input
-          bind:this={newNameInput}
-          bind:value={newName}
-          class="create-input"
-          autocapitalize="off"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder={creating === 'file' ? 'filename.ext' : 'folder name'}
-          onkeydown={(e) => {
-            if (e.key === 'Enter') confirmCreate();
-            if (e.key === 'Escape') cancelCreate();
-          }}
-          onblur={cancelCreate}
-        />
-      </div>
-    {/if}
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="tree-content"
       onclick={(e) => {
         if (e.target === e.currentTarget) {
+          if (creating) cancelCreate();
           selectedPath = null;
           selectedPaths = new Set();
         }
@@ -1129,6 +1203,9 @@
         <span class="tree-item-name">{rootPath.split('/').pop()}</span>
       </div>
       {#if expandedDirs.has(rootPath!)}
+        {#if creating && createParentPath === rootPath}
+          {@render createInputRow(1)}
+        {/if}
         {#each files.filter(e => !isHidden(e.name)) as entry}
           {@render fileNode(entry, 1)}
         {/each}
@@ -1167,16 +1244,21 @@
       </button>
     {:else}
       <button class="context-item" onclick={() => {
-        selectedPath = contextMenu!.path;
+        const path = contextMenu!.path;
+        const isDir = contextMenu!.isDir;
         closeContextMenu();
-        startCreate('file');
+        // Use the folder itself, or the parent of a file
+        const target = isDir ? path : path.substring(0, path.lastIndexOf('/'));
+        startCreate('file', target);
       }}>
         New File
       </button>
       <button class="context-item" onclick={() => {
-        selectedPath = contextMenu!.path;
+        const path = contextMenu!.path;
+        const isDir = contextMenu!.isDir;
         closeContextMenu();
-        startCreate('folder');
+        const target = isDir ? path : path.substring(0, path.lastIndexOf('/'));
+        startCreate('folder', target);
       }}>
         New Folder
       </button>
@@ -1291,10 +1373,42 @@
   </div>
 
   {#if entry.is_dir && expandedDirs.has(entry.path) && entry.children}
+    {#if creating && createParentPath === entry.path}
+      {@render createInputRow(depth + 1)}
+    {/if}
     {#each entry.children.filter(c => !isHidden(c.name)) as child}
       {@render fileNode(child, depth + 1)}
     {/each}
   {/if}
+{/snippet}
+
+{#snippet createInputRow(depth: number)}
+  <div class="tree-item create-row" style="padding-left: {8 + depth * 8}px">
+    <span class="file-indent"></span>
+    {#if creating === 'folder'}
+      <Folder class="icon dir-icon" />
+    {:else}
+      <Icon class="icon file-icon-svg" icon={newName ? getFileIconName(newName) : 'vscode-icons:default-file'} />
+    {/if}
+    <input
+      bind:this={newNameInput}
+      bind:value={newName}
+      class="create-input"
+      autocapitalize="off"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder=""
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); confirmCreate(); }
+        if (e.key === 'Escape') { e.preventDefault(); cancelCreate(); }
+      }}
+      onblur={handleCreateBlur}
+    />
+    {#if createError}
+      <span class="create-error">{createError}</span>
+    {/if}
+  </div>
 {/snippet}
 
 <style>
@@ -1440,29 +1554,35 @@
   }
 
   /* Create input */
-  .create-input-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    border-bottom: 1px solid var(--border);
+  .create-row {
+    position: relative;
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
-
-  .create-label {
-    font-size: 12px;
-    flex-shrink: 0;
-  }
-
-  .create-input {
+  .create-row .create-input {
     flex: 1;
     min-width: 0;
-    font-size: 11px;
-    padding: 3px 6px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 1px 4px;
     background: var(--bg-tertiary);
-    border: 1px solid var(--accent);
+    border: 1px solid var(--border);
     color: var(--text-primary);
     border-radius: 3px;
     outline: none;
+    font-family: inherit;
+  }
+  .create-error {
+    position: absolute;
+    top: 100%;
+    left: 8px;
+    font-size: 10px;
+    color: var(--error);
+    white-space: nowrap;
+    padding: 2px 6px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--error);
+    border-radius: 3px;
+    z-index: 10;
   }
 
   /* Multi-select */
