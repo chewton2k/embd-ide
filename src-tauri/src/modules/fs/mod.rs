@@ -409,24 +409,25 @@ pub fn reveal_in_file_manager(
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<(), String> {
-    validate_path(&path, &state)?;
+    let canonical = validate_path(&path, &state)?;
+    let safe_path = canonical.to_string_lossy().to_string();
     #[cfg(target_os = "macos")]
     {
         Command::new("open")
-            .args(["-R", &path])
+            .args(["-R", &safe_path])
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "windows")]
     {
         Command::new("explorer")
-            .args(["/select,", &path])
+            .args(["/select,", &safe_path])
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
-        let parent = PathBuf::from(&path)
+        let parent = canonical
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or(path);

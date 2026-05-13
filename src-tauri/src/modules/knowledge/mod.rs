@@ -7,6 +7,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
+use crate::modules::fs::ProjectRootState;
+
 // ── State ──
 
 pub struct KnowledgeState {
@@ -17,6 +19,23 @@ impl KnowledgeState {
     pub fn new() -> Self {
         Self { db: Mutex::new(None) }
     }
+}
+
+/// Validate that the provided project_root matches the app's active project root.
+fn validate_knowledge_root(
+    project_root: &str,
+    state: &tauri::State<'_, ProjectRootState>,
+) -> Result<PathBuf, String> {
+    let root_guard = state.lock().map_err(|e| e.to_string())?;
+    let active_root = root_guard
+        .as_ref()
+        .ok_or_else(|| "No project is open".to_string())?;
+    let provided = std::fs::canonicalize(project_root)
+        .map_err(|e| format!("Invalid project root: {}", e))?;
+    if provided != *active_root {
+        return Err("Access denied: project root mismatch".to_string());
+    }
+    Ok(provided)
 }
 
 // ── Types ──
@@ -128,7 +147,9 @@ fn cleanup_old_data(conn: &Connection) {
 pub async fn knowledge_init(
     project_root: String,
     state: tauri::State<'_, Arc<KnowledgeState>>,
+    root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let path = db_path(&project_root);
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open DB: {}", e))?;
     init_schema(&conn)?;
@@ -148,7 +169,9 @@ pub async fn knowledge_init(
 pub async fn knowledge_index(
     project_root: String,
     app: AppHandle,
+    root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let root = PathBuf::from(&project_root);
 
     tokio::task::spawn_blocking(move || {
@@ -203,7 +226,9 @@ pub async fn knowledge_get_context(
     project_root: String,
     query: String,
     current_file: Option<String>,
+    root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<Vec<FileInfo>, String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
 
@@ -261,7 +286,9 @@ pub async fn knowledge_save_conversation(
     id: String,
     title: String,
     messages: String,
+    root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
@@ -274,7 +301,11 @@ pub async fn knowledge_save_conversation(
 }
 
 #[tauri::command]
-pub async fn knowledge_list_conversations(project_root: String) -> Result<Vec<ConversationSummary>, String> {
+pub async fn knowledge_list_conversations(
+    project_root: String,
+    root_state: tauri::State<'_, ProjectRootState>,
+) -> Result<Vec<ConversationSummary>, String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     let mut stmt = conn.prepare("SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
@@ -285,7 +316,12 @@ pub async fn knowledge_list_conversations(project_root: String) -> Result<Vec<Co
 }
 
 #[tauri::command]
-pub async fn knowledge_load_conversation(project_root: String, id: String) -> Result<String, String> {
+pub async fn knowledge_load_conversation(
+    project_root: String,
+    id: String,
+    root_state: tauri::State<'_, ProjectRootState>,
+) -> Result<String, String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.query_row("SELECT messages FROM conversations WHERE id = ?1", params![id], |row| row.get::<_, String>(0))
@@ -293,19 +329,24 @@ pub async fn knowledge_load_conversation(project_root: String, id: String) -> Re
 }
 
 #[tauri::command]
-pub async fn knowledge_delete_conversations(project_root: String) -> Result<(), String> {
+pub async fn knowledge_delete_conversations(
+    project_root: String,
+    root_state: tauri::State<'_, ProjectRootState>,
+) -> Result<(), String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.execute("DELETE FROM conversations", []).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Delete a single conversation from a project's knowledge DB.
 #[tauri::command]
 pub async fn knowledge_delete_conversation(
     project_root: String,
     id: String,
+    root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
+    validate_knowledge_root(&project_root, &root_state)?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])

@@ -27,7 +27,14 @@ fn read_keys_file() -> std::collections::HashMap<String, String> {
 fn write_keys_file(map: &std::collections::HashMap<String, String>) {
     let path = keys_file_path();
     if let Ok(bytes) = serde_json::to_vec_pretty(map) {
-        std::fs::write(&path, bytes).ok();
+        if std::fs::write(&path, bytes).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o600);
+                std::fs::set_permissions(&path, perms).ok();
+            }
+        }
     }
 }
 

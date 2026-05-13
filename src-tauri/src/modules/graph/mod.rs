@@ -1130,12 +1130,31 @@ fn find_dependents(target_path: &Path, project_root: &Path) -> Vec<DependentNode
 // ── Tauri Command ──
 
 #[tauri::command]
-pub fn analyze_file_graph(file_path: String, project_root: String) -> Result<FileGraph, String> {
-    let path = PathBuf::from(&file_path);
-    let root = PathBuf::from(&project_root);
+pub fn analyze_file_graph(
+    file_path: String,
+    project_root: String,
+    state: tauri::State<'_, crate::modules::fs::ProjectRootState>,
+) -> Result<FileGraph, String> {
+    // Validate both paths are within the project root
+    let root_guard = state.lock().map_err(|e| e.to_string())?;
+    let root_canonical = root_guard
+        .as_ref()
+        .ok_or_else(|| "No project is open".to_string())?;
+    let root = std::fs::canonicalize(&project_root)
+        .map_err(|e| format!("Invalid project root: {}", e))?;
+    if !root.starts_with(root_canonical) && root != *root_canonical {
+        return Err("Access denied: project root mismatch".to_string());
+    }
+    drop(root_guard);
 
+    let path = PathBuf::from(&file_path);
     if !path.exists() {
         return Err(format!("File not found: {}", file_path));
+    }
+    let path_canonical = std::fs::canonicalize(&path)
+        .map_err(|e| format!("Invalid file path: {}", e))?;
+    if !path_canonical.starts_with(&root) {
+        return Err("Access denied: file is outside the project directory".to_string());
     }
 
     let content = std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;

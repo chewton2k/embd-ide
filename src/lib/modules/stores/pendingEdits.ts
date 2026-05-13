@@ -8,12 +8,23 @@ import { recordAiChange } from './aiHistory';
 /** Map of filePath → EditProposal[] for all pending edits across files. */
 export const pendingEdits = writable<Record<string, EditProposal[]>>({});
 
-/** Resolve a relative file path from an edit to an absolute path. */
-function resolveEditPath(editPath: string): string {
+/** Resolve a relative file path from an edit to an absolute path.
+ *  Validates the result stays within the project root. */
+function resolveEditPath(editPath: string): string | null {
   const root = get(projectRoot);
-  if (editPath.startsWith('/')) return editPath;
-  if (root) return `${root}/${editPath}`;
-  return editPath;
+  let resolved: string;
+  if (editPath.startsWith('/')) {
+    resolved = editPath;
+  } else if (root) {
+    resolved = `${root}/${editPath}`;
+  } else {
+    return null;
+  }
+  // Normalize and reject path traversal
+  const normalized = resolved.replace(/\/\.\//g, '/').replace(/\/[^/]+\/\.\.\//g, '/');
+  if (root && !normalized.startsWith(root)) return null;
+  if (normalized.includes('/../') || normalized.endsWith('/..')) return null;
+  return normalized;
 }
 
 /** Add edits from an AI response. Does NOT open new tabs — edits show inline in already-open files. */
@@ -22,6 +33,7 @@ export function addEdits(edits: EditProposal[]) {
 
   for (const edit of edits) {
     const fullPath = resolveEditPath(edit.filePath);
+    if (!fullPath) continue;
     if (!byFile[fullPath]) byFile[fullPath] = [];
     byFile[fullPath].push({ ...edit, filePath: fullPath });
   }
@@ -34,9 +46,8 @@ export function addEdits(edits: EditProposal[]) {
       const editName = edit.filePath.split('/').pop();
       const activeName = active.split('/').pop();
       if (editName === activeName && !byFile[active]) {
-        // Remap to the active file path
         const resolved = resolveEditPath(edit.filePath);
-        if (resolved !== active && byFile[resolved]) {
+        if (resolved && resolved !== active && byFile[resolved]) {
           byFile[active] = byFile[resolved];
           delete byFile[resolved];
         }
@@ -98,14 +109,31 @@ export function rejectEdit(editId: string) {
   });
 }
 
-/** Approve all pending edits across all files. */
+/** Approve all pending edits across all files.
+ *  Applies edits bottom-up (highest startLine first) within each file
+ *  so that earlier line numbers remain valid after each edit is applied. */
 export async function approveAll() {
   const all = get(pendingEdits);
-  for (const edits of Object.values(all)) {
-    for (const edit of edits) {
-      await approveEdit(edit.id);
+  for (const [filePath, edits] of Object.entries(all)) {
+    // Sort descending by startLine so we apply from bottom to top
+    const sorted = [...edits].sort((a, b) => b.startLine - a.startLine);
+    try {
+      let content = await invoke<string>('read_file_content', { path: filePath });
+      for (const edit of sorted) {
+        const lines = content.split('\n');
+        const before = lines.slice(0, edit.startLine - 1);
+        const after = lines.slice(edit.endLine);
+        const newLines = edit.newCode.split('\n');
+        const newContent = [...before, ...newLines, ...after].join('\n');
+        recordAiChange(filePath, `Edit lines ${edit.startLine}-${edit.endLine}`, content, newContent);
+        content = newContent;
+      }
+      await invoke('write_file_content', { path: filePath, content });
+    } catch (e) {
+      console.error('Failed to apply edits to', filePath, e);
     }
   }
+  pendingEdits.set({});
 }
 
 /** Reject all pending edits. */

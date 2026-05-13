@@ -31,7 +31,7 @@ export function parseAiEdits(response: string): { edits: EditProposal[]; display
     const newCode = body.slice(separatorIdx + 5); // skip \n---\n
 
     edits.push({
-      id: `edit-${Date.now()}-${edits.length}`,
+      id: crypto.randomUUID(),
       filePath: filePath.trim(),
       startLine: parseInt(startStr, 10),
       endLine: parseInt(endStr, 10),

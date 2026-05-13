@@ -41,7 +41,7 @@ export function parseCommands(response: string): { commands: CommandProposal[]; 
     const dangerous = DANGEROUS_PATTERNS.some(p => p.test(command));
 
     commands.push({
-      id: `cmd-${Date.now()}-${commands.length}`,
+      id: crypto.randomUUID(),
       command,
       dangerous,
     });

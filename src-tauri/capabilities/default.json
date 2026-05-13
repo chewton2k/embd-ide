@@ -31,14 +31,16 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$HOME/**" },
-        { "path": "/tmp/**" },
-        { "path": "/mnt/**" },
-        { "path": "/media/**" },
-        { "path": "/Volumes/**" },
-        { "path": "/opt/**" },
-        { "path": "/var/**" },
-        { "path": "/usr/**" }
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.leo-ide/**" },
+        { "path": "$HOME/Desktop/**" },
+        { "path": "$HOME/Documents/**" },
+        { "path": "$HOME/Projects/**" },
+        { "path": "$HOME/Developer/**" },
+        { "path": "$HOME/repos/**" },
+        { "path": "$HOME/src/**" },
+        { "path": "$HOME/code/**" },
+        { "path": "/Volumes/**" }
       ]
     }
   ]
