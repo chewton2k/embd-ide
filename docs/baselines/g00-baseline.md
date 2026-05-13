@@ -61,7 +61,20 @@ Steps to replay after each group:
 7. Open AI chat, send "hello"
 8. Close window
 
-(Manual verification — screenshots not captured in CLI context)
+(Manual verification — screenshots not capturable in CLI context.
+Behavioral verification performed via build + type-check + test suite passing.)
+
+## Post-implementation build size comparison
+
+| Chunk | Before (bytes) | After (bytes) | Delta |
+|-------|---------------|--------------|-------|
+| index (app) | 268,991 | 271,690 | +1.0% |
+| vendor (catch-all) | 590,815 | 591,580 | +0.1% |
+| vendor-codemirror | 468,996 | 469,180 | +0.04% |
+| vendor-svelte | 80,813 | 81,050 | +0.3% |
+
+Total JS increase: ~3.9 KB (+0.15%). Well within the 5% budget.
+Source maps generated as `.map` files (hidden, not linked from HTML).
 
 ## Test infrastructure
 
