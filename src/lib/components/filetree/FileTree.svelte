@@ -6,8 +6,8 @@
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import Icon from '@iconify/svelte';
-  import { Search, FilePlus2, FolderPlus, FolderOpen, Folder, ChevronRight, FolderSymlink } from 'lucide-svelte';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview } from '../../modules';
+  import { FolderOpen, Folder, ChevronRight } from 'lucide-svelte';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview, createFileSignal, createFolderSignal } from '../../modules';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
   import { exists } from '@tauri-apps/plugin-fs';
   import Button from '../ui/button/Button.svelte';
@@ -80,6 +80,18 @@
       el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       fileTreeNavTarget.set(null);
     });
+  });
+
+  // React to toolbar create-file/folder signals
+  let lastCreateFile = 0;
+  $effect(() => {
+    const v = $createFileSignal;
+    if (v > lastCreateFile) { lastCreateFile = v; startCreate('file'); }
+  });
+  let lastCreateFolder = 0;
+  $effect(() => {
+    const v = $createFolderSignal;
+    if (v > lastCreateFolder) { lastCreateFolder = v; startCreate('folder'); }
   });
 
   // Clipboard for copy/paste files
@@ -1067,28 +1079,6 @@
       <p>Open a project to begin</p>
     </div>
   {:else}
-    <div class="tree-header">
-      <!-- svelte-ignore a11y_click_events_have_key_events -->
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="tree-header-left" onclick={() => { selectedPath = null; selectedPaths = new Set(); }}>
-        <FolderOpen class="header-folder-icon" />
-        <span class="root-name" title={rootPath}>{rootPath.split('/').pop()}</span>
-      </div>
-      <div class="tree-header-actions">
-        <Button variant="ghost" size="icon" class="header-btn" title="Search files (Cmd+P)" onclick={() => onSearchFiles?.()}>
-          <Search class="header-btn-icon" />
-        </Button>
-        <Button variant="ghost" size="icon" class="header-btn" title="New file" onclick={() => startCreate('file')}>
-          <FilePlus2 class="header-btn-icon" />
-        </Button>
-        <Button variant="ghost" size="icon" class="header-btn" title="New folder" onclick={() => startCreate('folder')}>
-          <FolderPlus class="header-btn-icon" />
-        </Button>
-        <Button variant="ghost" size="icon" class="header-btn" title="Open folder" onclick={openFolder}>
-          <FolderSymlink class="header-btn-icon" />
-        </Button>
-      </div>
-    </div>
     {#if creating}
       <div class="create-input-row">
         <span class="create-label">{creating === 'file' ? '📄' : '📁'}</span>
@@ -1119,8 +1109,23 @@
       }}
       class:drop-target={dropTargetPath === rootPath}
     >
+      <!-- Root folder displayed as first tree item (always expanded) -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="tree-item root-item"
+        class:selected={selectedPath === rootPath}
+        data-path={rootPath}
+        onclick={() => { selectedPath = rootPath; selectedPaths = new Set([rootPath!]); }}
+        oncontextmenu={(e) => handleContextMenu(e, { name: rootPath!.split('/').pop()!, path: rootPath!, is_dir: true, children: files })}
+      >
+        <span class="chevron expanded">
+          <ChevronRight size={10} />
+        </span>
+        <Icon icon={getFileIconName(rootPath!.split('/').pop()!, true, true)} width={16} height={16} />
+        <span class="tree-item-name root-folder-name">{rootPath.split('/').pop()}</span>
+      </div>
       {#each files.filter(e => !isHidden(e.name)) as entry}
-        {@render fileNode(entry, 0)}
+        {@render fileNode(entry, 1)}
       {/each}
     </div>
   {/if}
@@ -1321,65 +1326,14 @@
     letter-spacing: 0.3px;
   }
 
-  /* Header */
-  .tree-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 12px 8px;
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-    margin-bottom: 4px;
-    position: sticky;
-    top: 0;
-    background: var(--bg-secondary);
-    z-index: 5;
+  .root-item {
+    font-weight: 600;
   }
-
-  .tree-header-left {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    cursor: pointer;
-    border-radius: 3px;
-    padding: 2px 4px;
-  }
-
-  .tree-header-left:hover {
-    background: var(--bg-surface);
-  }
-
-  :global(.header-folder-icon) {
-    width: 15px;
-    height: 15px;
-    flex-shrink: 0;
-    color: #d8deef;
-  }
-
-  .root-name {
-    font-size: 10px;
+  .root-folder-name {
+    font-size: 12px;
     text-transform: uppercase;
-    letter-spacing: 0.8px;
+    letter-spacing: 0.5px;
     color: var(--text-secondary);
-    font-weight: 700;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .tree-header-actions {
-    display: flex;
-    gap: 2px;
-    flex-shrink: 0;
-  }
-
-  :global(.header-btn) {
-    border-radius: 6px;
-  }
-
-  :global(.header-btn-icon) {
-    width: 15px;
-    height: 15px;
   }
 
   /* Tree content */

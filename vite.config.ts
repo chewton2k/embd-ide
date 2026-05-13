@@ -55,15 +55,7 @@ export default defineConfig({
             return 'vendor-pdf';
           }
 
-          // Iconify icon sets — large per-collection JSON. Split each
-          // collection into its own chunk so they load in parallel and
-          // their attribution is visible in the build output.
-          if (id.includes('@iconify-json/vscode-icons')) {
-            return 'vendor-icons-vscode';
-          }
-          if (id.includes('@iconify-json/simple-icons')) {
-            return 'vendor-icons-simple';
-          }
+          // Iconify runtime
           if (id.includes('@iconify/svelte')) {
             return 'vendor-iconify';
           }

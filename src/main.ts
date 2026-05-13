@@ -40,11 +40,10 @@ async function loadIconCollectionsDeferred(): Promise<void> {
     try {
       const [iconify, vscode, simple] = await Promise.all([
         import('@iconify/svelte'),
-        import('@iconify-json/vscode-icons/icons.json'),
-        import('@iconify-json/simple-icons/icons.json'),
+        import('./lib/icons/vscode-icons-subset.json'),
+        import('./lib/icons/simple-icons-subset.json'),
       ])
       const addCollection = iconify.addCollection
-      // JSON modules expose the data on `.default` under Vite's ESM rules.
       const vscodeData = (vscode as { default?: unknown }).default ?? vscode
       const simpleData = (simple as { default?: unknown }).default ?? simple
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,11 +51,6 @@ async function loadIconCollectionsDeferred(): Promise<void> {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       addCollection(simpleData as any)
     } catch (err) {
-      // Best-effort: icons fall back to remote API on miss.
-      // NOTE: vite.config.ts strips `console.*` calls in production via
-      // esbuild's `drop` option, so this warning is dev-only. If
-      // diagnostics ever become important, surface via a Tauri event or
-      // a Svelte store flag instead of console.
       console.warn('Iconify collections failed to load locally:', err)
     }
   })

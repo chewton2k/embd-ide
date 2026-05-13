@@ -7,6 +7,8 @@ export const showChat = writable<boolean>(false);
 export const showGit = writable<boolean>(false);
 export const triggerSearchInFile = writable<number>(0);
 export const openFileSearchSignal = writable<number>(0);
+export const createFileSignal = writable<number>(0);
+export const createFolderSignal = writable<number>(0);
 export const openPreviewSignal = writable<number>(0);
 export const fileTreeNavTarget = writable<string | null>(null);
 

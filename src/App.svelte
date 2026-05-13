@@ -18,7 +18,8 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow } from './lib/modules';
+  import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal } from './lib/modules';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/ui';
   import { toggleTerminal } from './lib/modules/terminal';
@@ -57,8 +58,19 @@
       alert(`Project folder no longer exists:\n${project.path}`);
       return;
     }
-    // Session restoration is handled inside openFolderByPath
     await openFolderByPath(project.path);
+  }
+
+  async function openProjectFromToolbar(path: string) {
+    if (!openFolderByPath) return;
+    await openFolderByPath(path);
+  }
+
+  async function openFolderDialog() {
+    const selected = await openDialog({ directory: true, multiple: false });
+    if (selected && openFolderByPath) {
+      await openFolderByPath(selected as string);
+    }
   }
 
   let showFileSearch = $state(false);
@@ -433,7 +445,13 @@
 
 <div class="ide-layout" class:mac-traffic-lights={isMac && !$isFullscreen}>
   <TitleBar {sidebarVisible} onToggleSidebar={toggleSidebar} />
-  <Toolbar />
+  <Toolbar
+    onOpenProject={openProjectFromToolbar}
+    onOpenFolderDialog={openFolderDialog}
+    onSearchFiles={() => { showFileSearch = !showFileSearch; }}
+    onNewFile={() => createFileSignal.update(n => n + 1)}
+    onNewFolder={() => createFolderSignal.update(n => n + 1)}
+  />
   <div class="ide-top">
     <div class="sidebar" class:hidden={!sidebarVisible} style="width: {sidebarWidth}px">
       <FileTree onFileSelect={(path, name) => addFile(path, name)} onSearchFiles={() => showFileSearch = true} onOpenFolder={handleOpenFolder} />
