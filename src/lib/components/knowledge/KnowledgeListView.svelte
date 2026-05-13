@@ -3,7 +3,7 @@
   import { cubicOut } from 'svelte/easing';
   import { ChevronDown, ChevronRight, Trash2, FolderOpen, MessageSquare, File as FileIcon } from 'lucide-svelte';
   import {
-    listConversations, deleteProjectConversations,
+    listConversations, deleteProjectConversations, deleteProjectByHash,
     shortProjectName, formatRelativeTime, formatBytes,
     type ProjectInfo, type ConversationSummary,
   } from '../../modules/knowledge';
@@ -62,18 +62,23 @@
     }
   }
 
-  function requestDeleteProject(root: string) {
-    if (!confirmDelete[root]) {
-      confirmDelete = { ...confirmDelete, [root]: true };
+  function requestDeleteProject(root: string, dbHash?: string) {
+    const key = dbHash || root;
+    if (!confirmDelete[key]) {
+      confirmDelete = { ...confirmDelete, [key]: true };
       return;
     }
-    confirmDelete = { ...confirmDelete, [root]: false };
-    onDeleteProject(root);
+    confirmDelete = { ...confirmDelete, [key]: false };
+    if (root === '(unknown)' && dbHash) {
+      deleteProjectByHash(dbHash).then(() => onProjectChanged());
+    } else {
+      onDeleteProject(root);
+    }
   }
 
-  function cancelConfirms(root: string) {
-    confirmClear = { ...confirmClear, [root]: false };
-    confirmDelete = { ...confirmDelete, [root]: false };
+  function cancelConfirms(key: string) {
+    confirmClear = { ...confirmClear, [key]: false };
+    confirmDelete = { ...confirmDelete, [key]: false };
   }
 
   function handleRowKey(e: KeyboardEvent, root: string) {
@@ -134,11 +139,11 @@
             onclick={(e) => e.stopPropagation()}
             onkeydown={(e) => e.stopPropagation()}
           >
-            {#if confirmDelete[root]}
+            {#if confirmDelete[project.db_hash]}
               <div class="confirm-group" in:fly={{ x: 6, duration: 140 }}>
                 <span class="confirm">Delete project?</span>
-                <button class="mini-btn danger" onclick={() => requestDeleteProject(root)}>Confirm</button>
-                <button class="mini-btn" onclick={() => cancelConfirms(root)}>Cancel</button>
+                <button class="mini-btn danger" onclick={() => requestDeleteProject(root, project.db_hash)}>Confirm</button>
+                <button class="mini-btn" onclick={() => cancelConfirms(project.db_hash)}>Cancel</button>
               </div>
             {:else if confirmClear[root]}
               <div class="confirm-group" in:fly={{ x: 6, duration: 140 }}>
@@ -146,7 +151,7 @@
                   Delete {project.conversation_count} chat{project.conversation_count === 1 ? '' : 's'}?
                 </span>
                 <button class="mini-btn danger" onclick={() => confirmClearConversations(root)}>Confirm</button>
-                <button class="mini-btn" onclick={() => cancelConfirms(root)}>Cancel</button>
+                <button class="mini-btn" onclick={() => cancelConfirms(project.db_hash)}>Cancel</button>
               </div>
             {:else}
               <div class="action-group" in:fade={{ duration: 120 }}>
@@ -164,7 +169,7 @@
                 <button
                   type="button"
                   class="mini-btn danger-outline"
-                  onclick={() => requestDeleteProject(root)}
+                  onclick={() => requestDeleteProject(root, project.db_hash)}
                   title="Delete this project's knowledge DB"
                   aria-label="Delete {shortProjectName(root)}"
                 >

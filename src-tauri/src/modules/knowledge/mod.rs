@@ -547,6 +547,44 @@ pub async fn knowledge_delete_project(
     Ok(())
 }
 
+/// Delete a project's knowledge DB by its hash. Used for orphan projects
+/// where the original project_root is unknown.
+#[tauri::command]
+pub async fn knowledge_delete_by_hash(
+    db_hash: String,
+    state: tauri::State<'_, Arc<KnowledgeState>>,
+) -> Result<(), String> {
+    // Validate hash format: exactly 16 hex chars
+    if !db_hash.chars().all(|c| c.is_ascii_hexdigit()) || db_hash.len() != 16 {
+        return Err("Invalid db_hash: must be exactly 16 hex characters".to_string());
+    }
+
+    let dir = knowledge_dir();
+    let db_p = dir.join(format!("{}.db", db_hash));
+
+    // Defense-in-depth: verify the path is inside knowledge_dir
+    if !db_p.starts_with(&dir) {
+        return Err("Invalid db_hash: path traversal detected".to_string());
+    }
+
+    // Drop cached connection if it matches
+    {
+        let mut db = state.db.lock().await;
+        *db = None;
+    }
+
+    if db_p.exists() {
+        std::fs::remove_file(&db_p)
+            .map_err(|e| format!("Failed to delete {}: {}", db_p.display(), e))?;
+    }
+    // Clean up sidecars
+    for suffix in ["-journal", "-wal", "-shm"] {
+        let side = dir.join(format!("{}.db{}", db_hash, suffix));
+        if side.exists() { let _ = std::fs::remove_file(side); }
+    }
+    Ok(())
+}
+
 /// Delete every project's knowledge DB. Used by the "Clear all knowledge"
 /// global action. Silently skips any file it can't remove so partial
 /// failures don't abort the operation.

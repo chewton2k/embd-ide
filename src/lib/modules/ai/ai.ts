@@ -81,6 +81,17 @@ async function readActiveFileContext(): Promise<{ path: string; content: string 
 export async function sendStreamingMessage(userContent: string, fileContexts?: { path: string; content: string }[]) {
   if (get(isStreaming)) return;
 
+  const MAX_USER_MESSAGE_CHARS = 200_000;
+  const MAX_CONTEXT_CHARS = 200_000;
+
+  if (userContent.length > MAX_USER_MESSAGE_CHARS) {
+    chatMessages.update(msgs => [
+      ...msgs,
+      { role: 'assistant', content: `Message too large (${userContent.length.toLocaleString()} chars; limit ${MAX_USER_MESSAGE_CHARS.toLocaleString()}). Trim the message and try again.` },
+    ]);
+    return;
+  }
+
   // Auto-attach the active file's content if the user hasn't manually
   // attached anything. This matches the "my chat should know what I'm
   // looking at" expectation without double-sending when they explicitly
@@ -94,6 +105,14 @@ export async function sendStreamingMessage(userContent: string, fileContexts?: {
   // Build context from attached files
   let contextPrefix = '';
   if (effectiveContexts && effectiveContexts.length > 0) {
+    const totalContextChars = effectiveContexts.reduce((s, c) => s + c.content.length, 0);
+    if (totalContextChars > MAX_CONTEXT_CHARS) {
+      chatMessages.update(msgs => [
+        ...msgs,
+        { role: 'assistant', content: `Attached files exceed size limit (${totalContextChars.toLocaleString()} chars; limit ${MAX_CONTEXT_CHARS.toLocaleString()}). Remove some attachments and try again.` },
+      ]);
+      return;
+    }
     contextPrefix = effectiveContexts
       .map(f => `File: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``)
       .join('\n\n') + '\n\n';

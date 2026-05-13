@@ -83,6 +83,11 @@ export async function deleteProject(projectRoot: string): Promise<void> {
   await invoke<void>('knowledge_delete_project', { projectRoot });
 }
 
+/** Delete an orphan project's knowledge DB by its hash (for unknown projects). */
+export async function deleteProjectByHash(dbHash: string): Promise<void> {
+  await invoke<void>('knowledge_delete_by_hash', { dbHash });
+}
+
 /** Wipe every project's knowledge DB. Irreversible. */
 export async function deleteAllKnowledge(): Promise<void> {
   await invoke<void>('knowledge_delete_all_projects');
