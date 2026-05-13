@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { get } from 'svelte/store';
+  import { log } from '../../modules/logging';
   import {
     Send, Square, X, Minus, Maximize2, Paperclip, XCircle, Sparkles, History,
     FileText, Terminal as TerminalIcon, Search as SearchIcon, Pencil,
@@ -166,7 +167,7 @@
     try {
       const key = await invoke<string>('get_provider_key', { provider: selectedProvider });
       hasKey = !!key;
-    } catch { /* ignore */ }
+    } catch (e) { log.warn('Failed to check API key', e); }
     if (!hasKey) {
       chatMessages.update(msgs => [
         ...msgs,
@@ -186,7 +187,7 @@
         try {
           const content = await invoke<string>('read_file_content', { path: f.path });
           fileContexts.push({ path: f.name, content });
-        } catch { /* skip unreadable */ }
+        } catch { /* skip unreadable — legitimate: file may be binary or deleted */ }
       }
     }
 

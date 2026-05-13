@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { ask } from '@tauri-apps/plugin-dialog';
   import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh, sharedGitStatus, addFile } from '../../modules';
+  import { log } from '../../modules/logging';
 
   interface GitFile {
     path: string;       // absolute path
@@ -229,8 +230,8 @@
       const status = await invoke<Record<string, string>>('get_git_status', { path: root });
       sharedGitStatus.set(status);
       processGitStatus(status);
-    } catch {
-      // ignore
+    } catch (e) {
+      log.warn('Failed to fetch git status', e);
     }
     await fetchAheadBehind();
   }
@@ -264,7 +265,7 @@
     try {
       await invoke('git_stage', { repoPath: root, paths: [file.relPath] });
       await fetchStatusFromBackend();
-    } catch { /* ignore */ }
+    } catch (e) { log.warn('git stage failed', e); }
   }
 
   async function unstageFile(file: GitFile) {
@@ -273,7 +274,7 @@
     try {
       await invoke('git_unstage', { repoPath: root, paths: [file.relPath] });
       await fetchStatusFromBackend();
-    } catch { /* ignore */ }
+    } catch (e) { log.warn('git unstage failed', e); }
   }
 
   async function stageAll() {
@@ -284,7 +285,7 @@
     try {
       await invoke('git_stage', { repoPath: root, paths });
       await fetchStatusFromBackend();
-    } catch { /* ignore */ }
+    } catch (e) { log.warn('git stage all failed', e); }
   }
 
   async function unstageAll() {
@@ -295,7 +296,7 @@
     try {
       await invoke('git_unstage', { repoPath: root, paths });
       await fetchStatusFromBackend();
-    } catch { /* ignore */ }
+    } catch (e) { log.warn('git unstage all failed', e); }
   }
 
   async function reloadOpenFiles(discardedFiles: GitFile[]) {
