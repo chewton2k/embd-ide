@@ -336,7 +336,7 @@
       await reloadOpenFiles([file]);
       await fetchStatusFromBackend();
       triggerFileTreeRefresh();
-    } catch { /* ignore */ }
+    } catch (e) { log.warn('git discard failed', e); }
   }
 
   async function discardAll() {
@@ -357,7 +357,7 @@
       await reloadOpenFiles(filesToDiscard);
       await fetchStatusFromBackend();
       triggerFileTreeRefresh();
-    } catch { /* ignore */ }
+    } catch (e) { log.warn('git discard all failed', e); }
   }
 
   async function scanWarnings(): Promise<Warning[]> {

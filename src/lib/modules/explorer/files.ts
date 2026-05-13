@@ -47,7 +47,7 @@ export function addFile(path: string, name: string) {
  * Updated on every keystroke from the editor; consumers (AI chat, etc.)
  * read from here instead of the reactive `openFiles` store so that
  * typing doesn't fan out a re-render to every component subscribed to
- * `openFiles` (Tabs, GitPanel, ChatPanel, App $effects, derived stores).
+ * `openFiles` (Tabs, GitPanel, App $effects, derived stores).
  */
 class BoundedLru<K, V> {
   private map = new Map<K, V>();
@@ -81,7 +81,7 @@ export function getFileContent(path: string): string | null {
 export function updateFileContent(path: string, content: string) {
   // Hot path: every keystroke calls this. Avoid touching the reactive
   // store unless the `modified` flag actually flips, otherwise every
-  // keystroke would cascade re-renders into Tabs/GitPanel/ChatPanel/etc.
+  // keystroke would cascade re-renders into Tabs/GitPanel/etc.
   fileContentCache.set(path, content);
   const files = get(openFiles);
   const file = files.find(f => f.path === path);
