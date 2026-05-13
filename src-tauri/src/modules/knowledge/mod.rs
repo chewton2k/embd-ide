@@ -145,6 +145,10 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(
         "ALTER TABLE conversations ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;"
     ).ok(); // Ignore error if column already exists
+    // Migration: add mtime column to files if missing
+    conn.execute_batch(
+        "ALTER TABLE files ADD COLUMN mtime INTEGER NOT NULL DEFAULT 0;"
+    ).ok();
     Ok(())
 }
 
@@ -231,14 +235,33 @@ pub async fn knowledge_index(
 
         for (i, file) in files.iter().enumerate() {
             let rel = file.strip_prefix(&root).unwrap_or(file).to_string_lossy().to_string();
+
+            // Get file mtime
+            let mtime = std::fs::metadata(file)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+
+            // Check if mtime matches — skip file entirely if unchanged
+            let existing: Option<(String, i64)> = conn
+                .query_row("SELECT hash, mtime FROM files WHERE path = ?1", params![rel], |r| Ok((r.get(0)?, r.get::<_, i64>(1).unwrap_or(0))))
+                .ok();
+
+            if let Some((_, db_mtime)) = &existing {
+                if *db_mtime == mtime && mtime > 0 { continue; }
+            }
+
+            // mtime changed or new file — read content
             let Ok(content) = std::fs::read_to_string(file) else { continue };
             let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
 
-            // Check if already indexed with same hash
-            let existing_hash: Option<String> = conn
-                .query_row("SELECT hash FROM files WHERE path = ?1", params![rel], |r| r.get(0))
-                .ok();
-            if existing_hash.as_deref() == Some(&hash) { continue; }
+            // If hash unchanged (mtime changed but content didn't), just bump mtime
+            if existing.as_ref().map(|(h, _)| h.as_str()) == Some(&hash) {
+                conn.execute("UPDATE files SET mtime = ?1 WHERE path = ?2", params![mtime, rel]).ok();
+                continue;
+            }
 
             let lang = detect_lang(file);
             let size = content.len() as i64;
@@ -247,8 +270,8 @@ pub async fn knowledge_index(
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
 
             conn.execute(
-                "INSERT OR REPLACE INTO files (path, hash, language, size, last_indexed, summary, exports) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![rel, hash, lang, size, now, summary, exports],
+                "INSERT OR REPLACE INTO files (path, hash, language, size, last_indexed, summary, exports, mtime) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![rel, hash, lang, size, now, summary, exports, mtime],
             ).ok();
 
             if (i + 1) % 20 == 0 || i + 1 == files.len() {

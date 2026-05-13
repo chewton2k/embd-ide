@@ -1,9 +1,39 @@
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
+
+/// Shared HTTP client for non-streaming requests (with timeout).
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .pool_idle_timeout(Some(Duration::from_secs(90)))
+            .pool_max_idle_per_host(4)
+            .tcp_keepalive(Some(Duration::from_secs(30)))
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(120))
+            .build()
+            .expect("reqwest client build")
+    })
+}
+
+/// Shared HTTP client for streaming requests (no overall timeout).
+fn http_client_streaming() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .pool_idle_timeout(Some(Duration::from_secs(90)))
+            .pool_max_idle_per_host(4)
+            .tcp_keepalive(Some(Duration::from_secs(30)))
+            .connect_timeout(Duration::from_secs(15))
+            .build()
+            .expect("reqwest streaming client build")
+    })
+}
 
 const SERVICE_NAME: &str = "leo-ide";
 
@@ -227,7 +257,7 @@ async fn stream_response(
 ) -> Result<(), String> {
     let (url, headers, body) = build_stream_request(provider, api_key, model, messages)?;
 
-    let client = reqwest::Client::new();
+    let client = http_client_streaming();
     let mut req = client.post(&url);
     for (k, v) in &headers {
         req = req.header(k.as_str(), v.as_str());
@@ -248,7 +278,7 @@ async fn stream_response(
     // Read SSE stream
     let mut stream = response.bytes_stream();
     use futures_util::StreamExt;
-    let mut buffer = String::new();
+    let mut buffer: Vec<u8> = Vec::with_capacity(8192);
 
     loop {
         tokio::select! {
@@ -257,14 +287,18 @@ async fn stream_response(
                     None => break,
                     Some(Err(e)) => return Err(format!("Stream error: {}", e)),
                     Some(Ok(chunk)) => {
-                        buffer.push_str(&String::from_utf8_lossy(&chunk));
+                        buffer.extend_from_slice(&chunk);
+                        if buffer.len() > 1_048_576 {
+                            return Err("SSE buffer overflow: no newline in 1MB of data".to_string());
+                        }
 
-                        while let Some(line_end) = buffer.find('\n') {
-                            let line = buffer[..line_end].trim_end_matches('\r').to_string();
-                            buffer = buffer[line_end + 1..].to_string();
+                        loop {
+                            let Some(line_end) = buffer.iter().position(|&b| b == b'\n') else { break };
+                            let line_bytes = &buffer[..line_end];
+                            let line_bytes = line_bytes.strip_suffix(b"\r").unwrap_or(line_bytes);
+                            let line = String::from_utf8_lossy(line_bytes);
 
-                            if line.starts_with("data: ") {
-                                let data = &line[6..];
+                            if let Some(data) = line.strip_prefix("data: ") {
                                 if data == "[DONE]" {
                                     return Ok(());
                                 }
@@ -284,6 +318,8 @@ async fn stream_response(
                                     }
                                 }
                             }
+
+                            buffer.drain(..line_end + 1);
                         }
                     }
                 }
@@ -394,7 +430,7 @@ async fn call_blocking(provider: &str, api_key: &str, model: &str, messages: &[C
             let system = messages.iter().find(|m| m.role == "system").map(|m| m.content.clone()).unwrap_or_default();
             let msgs: Vec<Value> = messages.iter().filter(|m| m.role != "system").map(|m| json!({"role": m.role, "content": m.content})).collect();
             let body = json!({ "model": model, "max_tokens": 4096, "system": system, "messages": msgs });
-            let client = reqwest::Client::new();
+            let client = http_client();
             let response = client.post("https://api.anthropic.com/v1/messages")
                 .header("x-api-key", api_key)
                 .header("anthropic-version", "2023-06-01")
@@ -420,7 +456,7 @@ async fn call_blocking(provider: &str, api_key: &str, model: &str, messages: &[C
             let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
             let token_field = if provider == "openai" { "max_completion_tokens" } else { "max_tokens" };
             let body = json!({ "model": model, token_field: 4096, "messages": msgs });
-            let client = reqwest::Client::new();
+            let client = http_client();
             let response = client.post(url)
                 .header("Authorization", format!("Bearer {}", api_key))
                 .header("content-type", "application/json")
