@@ -410,7 +410,7 @@
     closeAllUnpinned();
     openDiagrams.set([]);
     showPreview.set(false);
-    expandedDirs = new Set();
+    expandedDirs = new Set([rootPath]);
     await loadDirectory(rootPath);
     await fetchGitStatus();
     startWatching(rootPath);
@@ -1109,24 +1109,30 @@
       }}
       class:drop-target={dropTargetPath === rootPath}
     >
-      <!-- Root folder displayed as first tree item (always expanded) -->
+      <!-- Root folder displayed as first tree item -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="tree-item root-item"
+        class="tree-item"
         class:selected={selectedPath === rootPath}
         data-path={rootPath}
-        onclick={() => { selectedPath = rootPath; selectedPaths = new Set([rootPath!]); }}
+        onclick={() => { toggleDir({ name: rootPath!.split('/').pop()!, path: rootPath!, is_dir: true, children: files }); selectedPath = rootPath; selectedPaths = new Set([rootPath!]); }}
         oncontextmenu={(e) => handleContextMenu(e, { name: rootPath!.split('/').pop()!, path: rootPath!, is_dir: true, children: files })}
       >
-        <span class="chevron expanded">
+        <span class="chevron" class:expanded={expandedDirs.has(rootPath!)}>
           <ChevronRight size={10} />
         </span>
-        <Icon icon={getFileIconName(rootPath!.split('/').pop()!, true, true)} width={16} height={16} />
-        <span class="tree-item-name root-folder-name">{rootPath.split('/').pop()}</span>
+        {#if expandedDirs.has(rootPath!)}
+          <FolderOpen class="icon dir-icon" />
+        {:else}
+          <Folder class="icon dir-icon" />
+        {/if}
+        <span class="tree-item-name">{rootPath.split('/').pop()}</span>
       </div>
-      {#each files.filter(e => !isHidden(e.name)) as entry}
-        {@render fileNode(entry, 1)}
-      {/each}
+      {#if expandedDirs.has(rootPath!)}
+        {#each files.filter(e => !isHidden(e.name)) as entry}
+          {@render fileNode(entry, 1)}
+        {/each}
+      {/if}
     </div>
   {/if}
 </div>
@@ -1326,15 +1332,6 @@
     letter-spacing: 0.3px;
   }
 
-  .root-item {
-    font-weight: 600;
-  }
-  .root-folder-name {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-secondary);
-  }
 
   /* Tree content */
   .tree-content {
