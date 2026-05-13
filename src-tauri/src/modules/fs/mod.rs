@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex};
 
 pub type ProjectRootState = Arc<Mutex<Option<PathBuf>>>;
 
+const MAX_TEXT_FILE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
+const MAX_BINARY_FILE_BYTES: u64 = 100 * 1024 * 1024; // 100 MB
+
 pub fn create_project_root_state() -> ProjectRootState {
     Arc::new(Mutex::new(None))
 }
@@ -174,6 +177,10 @@ pub fn read_file_content(
     path: String,
 ) -> Result<String, String> {
     validate_path(&path, &state)?;
+    let meta = fs::metadata(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))?;
+    if meta.len() > MAX_TEXT_FILE_BYTES {
+        return Err(format!("FILE_TOO_LARGE: {} bytes; limit {}", meta.len(), MAX_TEXT_FILE_BYTES));
+    }
     fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))
 }
 
@@ -184,6 +191,9 @@ pub fn write_file_content(
     content: String,
 ) -> Result<(), String> {
     validate_path(&path, &state)?;
+    if content.len() as u64 > MAX_TEXT_FILE_BYTES {
+        return Err(format!("CONTENT_TOO_LARGE: {} bytes; limit {}", content.len(), MAX_TEXT_FILE_BYTES));
+    }
     fs::write(&path, &content).map_err(|e| format!("Failed to write file: {}", e.kind()))
 }
 
@@ -193,6 +203,10 @@ pub fn read_file_binary(
     path: String,
 ) -> Result<String, String> {
     validate_path(&path, &state)?;
+    let meta = fs::metadata(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))?;
+    if meta.len() > MAX_BINARY_FILE_BYTES {
+        return Err(format!("FILE_TOO_LARGE: {} bytes; limit {}", meta.len(), MAX_BINARY_FILE_BYTES));
+    }
     let bytes = fs::read(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }

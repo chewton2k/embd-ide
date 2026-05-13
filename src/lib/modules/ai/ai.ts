@@ -220,6 +220,9 @@ export function scheduleSaveConversation() {
   saveTimeout = setTimeout(() => saveConversationNow(), 2000);
 }
 
+/** Monotonic generation counter for conversation saves. */
+let saveGeneration = 0;
+
 /** Immediately save the current conversation to SQLite. */
 export async function saveConversationNow(): Promise<void> {
   if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
@@ -228,6 +231,8 @@ export async function saveConversationNow(): Promise<void> {
   const root = get(projectRoot);
   if (!root) return;
   const title = msgs.find(m => m.role === 'user')?.content.slice(0, 60) || 'Untitled';
+  saveGeneration++;
+  const gen = saveGeneration;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await invoke('knowledge_save_conversation', {
@@ -235,6 +240,7 @@ export async function saveConversationNow(): Promise<void> {
         id: currentConversationId,
         title,
         messages: JSON.stringify(msgs),
+        generation: gen,
       });
       return;
     } catch (e) {

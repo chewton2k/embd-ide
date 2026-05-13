@@ -140,7 +140,12 @@ fn init_schema(conn: &Connection) -> Result<(), String> {
             key TEXT PRIMARY KEY,
             value TEXT
         );"
-    ).map_err(|e| format!("Schema init failed: {}", e))
+    ).map_err(|e| format!("Schema init failed: {}", e))?;
+    // Migration: add generation column if missing
+    conn.execute_batch(
+        "ALTER TABLE conversations ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;"
+    ).ok(); // Ignore error if column already exists
+    Ok(())
 }
 
 // ── Cleanup ──
@@ -320,18 +325,32 @@ pub async fn knowledge_save_conversation(
     id: String,
     title: String,
     messages: String,
+    generation: Option<u64>,
     root_state: tauri::State<'_, ProjectRootState>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     validate_knowledge_root(&project_root, &root_state)?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
+    let gen = generation.unwrap_or(0) as i64;
+
+    // Check if a newer generation already exists
+    let existing_gen: i64 = conn.query_row(
+        "SELECT COALESCE((SELECT generation FROM conversations WHERE id = ?1), -1)",
+        params![id],
+        |row| row.get(0),
+    ).unwrap_or(-1);
+
+    if existing_gen >= gen && gen > 0 {
+        // Stale write — a newer generation already saved
+        return Ok(false);
+    }
 
     conn.execute(
-        "INSERT OR REPLACE INTO conversations (id, title, created_at, updated_at, messages) VALUES (?1, ?2, COALESCE((SELECT created_at FROM conversations WHERE id = ?1), ?3), ?3, ?4)",
-        params![id, title, now, messages],
+        "INSERT OR REPLACE INTO conversations (id, title, created_at, updated_at, messages, generation) VALUES (?1, ?2, COALESCE((SELECT created_at FROM conversations WHERE id = ?1), ?3), ?3, ?4, ?5)",
+        params![id, title, now, messages, gen],
     ).map_err(|e| format!("Save failed: {}", e))?;
-    Ok(())
+    Ok(true)
 }
 
 #[tauri::command]

@@ -17,6 +17,7 @@ pub struct SpawnResult {
 pub struct PtyInstance {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 pub struct TerminalManager {
@@ -109,6 +110,7 @@ pub fn spawn_terminal(
         PtyInstance {
             writer,
             master: pair.master,
+            child,
         },
     );
     drop(manager);
@@ -176,7 +178,13 @@ pub fn write_terminal(
 #[tauri::command]
 pub fn kill_terminal(state: tauri::State<'_, TerminalState>, id: u32) -> Result<(), String> {
     let mut manager = state.lock().map_err(|e| e.to_string())?;
-    manager.sessions.remove(&id);
+    if let Some(mut session) = manager.sessions.remove(&id) {
+        // Kill the child process and reap it in a background thread
+        let _ = session.child.kill();
+        std::thread::spawn(move || {
+            let _ = session.child.wait();
+        });
+    }
     Ok(())
 }
 
