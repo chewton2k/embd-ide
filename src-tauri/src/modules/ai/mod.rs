@@ -475,8 +475,8 @@ async fn call_blocking(provider: &str, api_key: &str, model: &str, messages: &[C
 
 fn default_model(provider: &str) -> String {
     match provider {
-        "openai" => "gpt-5-mini".into(),
-        "anthropic" => "claude-sonnet-4-6".into(),
+        "openai" => "gpt-4o-mini".into(),
+        "anthropic" => "claude-sonnet-4-20250514".into(),
         _ => "openrouter/auto".into(),
     }
 }

@@ -14,6 +14,7 @@
   import FileSearch from './lib/components/filetree/FileSearch.svelte';
   import Preview from './lib/components/preview/Preview.svelte';
   import FileDiagram from './lib/components/diagram/FileDiagram.svelte';
+  import Toast from './lib/components/Toast.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -23,6 +24,7 @@
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { log } from './lib/modules/logging';
   import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/ui';
+  import { showToast } from './lib/modules/ui/toast';
   import { toggleTerminal } from './lib/modules/terminal';
   import { shortcutBindings, eventMatchesBinding, APP_LEVEL_SHORTCUT_IDS, type AppLevelShortcutId } from './lib/modules/shortcuts';
   import { onMount } from 'svelte';
@@ -56,7 +58,7 @@
     if (!folderExists) {
       await removeRecentProject(project.path);
       recentProjects = recentProjects.filter(p => p.path !== project.path);
-      alert(`Project folder no longer exists:\n${project.path}`);
+      showToast({ level: 'warn', message: `Project folder no longer exists: ${project.path}` });
       return;
     }
     await openFolderByPath(project.path);
@@ -658,6 +660,7 @@
 </div>
 
 <FloatingChat />
+<Toast />
 
 <style>
   .ide-layout {
