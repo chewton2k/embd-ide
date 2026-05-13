@@ -200,8 +200,16 @@
     });
   }
 
-  // Auto-scroll while streaming
-  $effect(() => { $chatMessages; scrollToBottom(); });
+  let userPinnedToBottom = true;
+
+  function onMessagesScroll() {
+    if (messagesEl) {
+      userPinnedToBottom = messagesEl.scrollHeight - messagesEl.clientHeight - messagesEl.scrollTop < 80;
+    }
+  }
+
+  // Auto-scroll while streaming — only if user is at the bottom
+  $effect(() => { $chatMessages; if (userPinnedToBottom) scrollToBottom(); });
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -356,7 +364,7 @@
       {/if}
 
       <!-- Messages -->
-      <div class="messages" bind:this={messagesEl} role="log" aria-live="polite">
+      <div class="messages" bind:this={messagesEl} onscroll={onMessagesScroll} role="log" aria-live="polite">
         {#if $chatMessages.length === 0}
           <div class="empty">
             <div class="empty-icon"><Sparkles size={22} /></div>

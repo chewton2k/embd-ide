@@ -43,13 +43,35 @@ export function addFile(path: string, name: string) {
 }
 
 /**
- * Non-reactive cache of in-memory file content for currently-open files.
+ * Bounded LRU cache for in-memory file content.
  * Updated on every keystroke from the editor; consumers (AI chat, etc.)
  * read from here instead of the reactive `openFiles` store so that
  * typing doesn't fan out a re-render to every component subscribed to
  * `openFiles` (Tabs, GitPanel, ChatPanel, App $effects, derived stores).
  */
-const fileContentCache = new Map<string, string>();
+class BoundedLru<K, V> {
+  private map = new Map<K, V>();
+  constructor(private cap: number) {}
+  get(k: K): V | undefined {
+    const v = this.map.get(k);
+    if (v !== undefined) { this.map.delete(k); this.map.set(k, v); }
+    return v;
+  }
+  set(k: K, v: V): void {
+    if (this.map.has(k)) this.map.delete(k);
+    this.map.set(k, v);
+    while (this.map.size > this.cap) {
+      const first = this.map.keys().next().value;
+      if (first === undefined) break;
+      this.map.delete(first);
+    }
+  }
+  delete(k: K): void { this.map.delete(k); }
+  has(k: K): boolean { return this.map.has(k); }
+  keys(): IterableIterator<K> { return this.map.keys(); }
+}
+
+const fileContentCache = new BoundedLru<string, string>(50);
 
 /** Read the latest in-memory content for a file (unsaved edits included). */
 export function getFileContent(path: string): string | null {
@@ -87,8 +109,29 @@ export function renameOpenFile(oldPath: string, newPath: string, newName: string
   for (const cb of fileRenameCallbacks) cb(oldPath, newPath);
 }
 
+/**
+ * Patch a single file's fields in the openFiles store.
+ * Skips the store update entirely if no field actually changed,
+ * eliminating spurious reactive notifications.
+ */
+function patchFile(path: string, patchFn: (f: OpenFile) => Partial<OpenFile>): void {
+  const files = get(openFiles);
+  const idx = files.findIndex(f => f.path === path);
+  if (idx === -1) return;
+  const cur = files[idx];
+  const patch = patchFn(cur);
+  let changed = false;
+  for (const k in patch) {
+    if (cur[k as keyof OpenFile] !== patch[k as keyof OpenFile]) { changed = true; break; }
+  }
+  if (!changed) return;
+  const next = files.slice();
+  next[idx] = { ...cur, ...patch };
+  openFiles.set(next);
+}
+
 export function togglePin(path: string) {
-  openFiles.update(files => files.map(f => f.path === path ? { ...f, pinned: !f.pinned } : f));
+  patchFile(path, (f) => ({ pinned: !f.pinned }));
 }
 
 export function closeFile(path: string) {
@@ -130,7 +173,7 @@ export function closeAllUnpinned() {
 }
 
 export function markFileSaved(path: string) {
-  openFiles.update(files => files.map(f => f.path === path ? { ...f, modified: false } : f));
+  patchFile(path, () => ({ modified: false }));
 }
 
 export function reloadFileContent(path: string, content: string) {

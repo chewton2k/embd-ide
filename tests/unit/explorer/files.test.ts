@@ -108,3 +108,45 @@ describe('renameOpenFile', () => {
     expect(get(openFiles)[0].path).toBe('/test/new.ts');
   });
 });
+
+describe('fileContentCache LRU eviction', () => {
+  it('evicts oldest entry when over capacity', () => {
+    // The cache has cap=50. Fill it beyond capacity via updateFileContent.
+    for (let i = 0; i < 51; i++) {
+      addFile(`/test/file${i}.ts`, `file${i}.ts`);
+      updateFileContent(`/test/file${i}.ts`, `content-${i}`);
+    }
+    // First entry should be evicted
+    expect(getFileContent('/test/file0.ts')).toBeNull();
+    // Last entry should still be there
+    expect(getFileContent('/test/file50.ts')).toBe('content-50');
+  });
+
+  it('bumps accessed entry to most-recent', () => {
+    for (let i = 0; i < 50; i++) {
+      addFile(`/test/lru${i}.ts`, `lru${i}.ts`);
+      updateFileContent(`/test/lru${i}.ts`, `val-${i}`);
+    }
+    // Access the first entry to bump it
+    getFileContent('/test/lru0.ts');
+    // Add one more to trigger eviction
+    addFile('/test/lru50.ts', 'lru50.ts');
+    updateFileContent('/test/lru50.ts', 'val-50');
+    // lru0 should survive (was bumped), lru1 should be evicted
+    expect(getFileContent('/test/lru0.ts')).toBe('val-0');
+    expect(getFileContent('/test/lru1.ts')).toBeNull();
+  });
+});
+
+describe('markFileSaved no-op skip', () => {
+  it('does not notify subscribers when file is already saved', () => {
+    addFile('/test/saved.ts', 'saved.ts');
+    // File starts as modified=false, markFileSaved should be a no-op
+    let notifyCount = 0;
+    const unsub = openFiles.subscribe(() => { notifyCount++; });
+    notifyCount = 0; // reset after initial subscription call
+    markFileSaved('/test/saved.ts');
+    expect(notifyCount).toBe(0);
+    unsub();
+  });
+});
