@@ -536,4 +536,29 @@
   }
   .secondary-btn:hover { background: var(--border); }
   .status { font-size: 11px; color: var(--success); }
+
+  /*
+   * Consolidated keyboard focus indicator.
+   *
+   * The earlier `:focus { ... outline: none; }` rules on inputs were
+   * suppressing native outlines for mouse interaction; this rule adds
+   * back a clean, theme-aware focus ring for keyboard users specifically.
+   * `:focus-visible` is keyboard-only by browser heuristic, so mouse
+   * clicks remain ringless. Listed at the end of the stylesheet so the
+   * cascade beats the earlier `outline: none` rules.
+   */
+  .toggle:focus-visible,
+  .step-btn:focus-visible,
+  .pill:focus-visible,
+  .appearance-card:focus-visible,
+  .select:focus-visible,
+  .text-input:focus-visible,
+  .add-input:focus-visible,
+  .add-btn:focus-visible,
+  .primary-btn:focus-visible,
+  .secondary-btn:focus-visible,
+  .delete-btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    outline-offset: 2px;
+  }
 </style>

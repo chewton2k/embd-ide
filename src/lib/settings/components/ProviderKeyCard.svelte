@@ -19,12 +19,22 @@
     docsUrl, currentKey, onSave, onClear,
   }: Props = $props();
 
-  // svelte-ignore state_referenced_locally
-  let editing = $state(currentKey.length === 0);
+  let editing = $state(false);
+  let userInitiatedEdit = $state(false);
   let draft = $state('');
   let show = $state(false);
   let error = $state('');
   let saving = $state(false);
+
+  // Reactively sync editing state when currentKey changes (e.g. async keychain load).
+  // Only auto-flip if the user hasn't manually started editing.
+  $effect(() => {
+    if (currentKey.length > 0 && !userInitiatedEdit) {
+      editing = false;
+    } else if (currentKey.length === 0 && !userInitiatedEdit) {
+      editing = true;
+    }
+  });
 
   const isConfigured = $derived(currentKey.trim().length > 0);
 
@@ -37,6 +47,7 @@
   function startEdit() {
     draft = currentKey;
     error = '';
+    userInitiatedEdit = true;
     editing = true;
   }
 
@@ -44,6 +55,7 @@
     draft = '';
     error = '';
     show = false;
+    userInitiatedEdit = false;
     if (isConfigured) editing = false;
   }
 
@@ -60,6 +72,7 @@
       editing = false;
       show = false;
       draft = '';
+      userInitiatedEdit = false;
     } finally {
       saving = false;
     }
@@ -67,6 +80,7 @@
 
   async function clear() {
     await onClear();
+    userInitiatedEdit = true;
     editing = true;
     draft = '';
   }
@@ -127,8 +141,15 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .card:hover {
+    border-color: color-mix(in srgb, var(--accent) 22%, var(--border));
   }
   .card.configured { border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+  .card.configured:hover {
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--success) 12%, transparent);
+  }
 
   .head {
     display: flex;
@@ -208,8 +229,14 @@
     font-weight: 600;
     cursor: pointer;
     border: 1px solid transparent;
+    transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease, opacity 0.12s ease;
   }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn:not(:disabled):active { transform: translateY(1px); }
+  .btn:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    outline-offset: 1px;
+  }
   .btn-primary {
     background: var(--accent);
     color: var(--bg-tertiary);
@@ -226,7 +253,10 @@
     color: var(--error);
     border-color: color-mix(in srgb, var(--error) 30%, transparent);
   }
-  .btn-danger:hover { background: color-mix(in srgb, var(--error) 12%, transparent); }
+  .btn-danger:hover {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    border-color: color-mix(in srgb, var(--error) 45%, transparent);
+  }
   .link {
     margin-left: auto;
     font-size: 11px;
@@ -234,7 +264,16 @@
     background: none;
     border: none;
     cursor: pointer;
-    padding: 0;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: background 0.12s ease;
   }
-  .link:hover { text-decoration: underline; }
+  .link:hover {
+    text-decoration: underline;
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .link:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    outline-offset: 1px;
+  }
 </style>

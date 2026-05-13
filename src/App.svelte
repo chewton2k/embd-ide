@@ -22,6 +22,7 @@
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/windowChrome';
   import { toggleTerminal } from './lib/modules/terminalActions';
+  import { shortcutBindings, eventMatchesBinding, APP_LEVEL_SHORTCUT_IDS, type AppLevelShortcutId } from './lib/modules/shortcuts';
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
 
@@ -332,39 +333,100 @@
   });
 
   function handleKeydown(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === '`') {
-      e.preventDefault();
-      toggleTerminal();
+    dispatchAppShortcut(e);
+  }
+
+  /**
+   * Match `e` against the app-level shortcut bindings and run the
+   * corresponding action. Returns true if the event was handled (caller
+   * is responsible for preventing default / stopping propagation as
+   * appropriate for the phase it's running in).
+   *
+   * Editor (CodeMirror) and tab-system shortcuts like `editor.find` or
+   * `file.save` are deliberately excluded — they're owned by the
+   * focused control, not the app shell. Adding a new app-level
+   * shortcut means: add the id to APP_LEVEL_SHORTCUT_IDS in
+   * shortcuts.ts and add the action below. TypeScript enforces that
+   * the action map covers every id (`Record<AppLevelShortcutId, …>`).
+   */
+  function dispatchAppShortcut(e: KeyboardEvent): boolean {
+    const bindings = $shortcutBindings;
+
+    const actions: Record<AppLevelShortcutId, () => void> = {
+      'view.toggleTerminal': () => toggleTerminal(),
+      'view.toggleChat':     () => toggleChatPanel(),
+      'view.toggleGit':      () => toggleGitPanel(),
+      'view.toggleSidebar':  () => toggleSidebar(),
+      'view.openSettings':   () => showSettings.set(true),
+      'file.search':         () => { showFileSearch = !showFileSearch; },
+      'tabs.nextAlt':        () => nextTab(),
+      'tabs.prevAlt':        () => prevTab(),
+      'tabs.next':           () => nextTab(),
+      'tabs.prev':           () => prevTab(),
+    };
+
+    for (const id of APP_LEVEL_SHORTCUT_IDS) {
+      const binding = bindings[id];
+      if (binding && eventMatchesBinding(e, binding)) {
+        e.preventDefault();
+        actions[id]();
+        return true;
+      }
     }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'l') {
-      e.preventDefault();
-      toggleChatPanel();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
-      e.preventDefault();
-      toggleGitPanel();
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'o') {
-      e.preventDefault();
-      showFileSearch = !showFileSearch;
-    }
-    // Tab navigation: Ctrl/Cmd+Shift+] or Ctrl/Cmd+Tab → next tab
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === ']') {
-      e.preventDefault();
-      nextTab();
-    }
-    // Tab navigation: Ctrl/Cmd+Shift+[ or Ctrl/Cmd+Shift+Tab → prev tab
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === '[') {
-      e.preventDefault();
-      prevTab();
-    }
-    // Ctrl/Cmd+Tab → next tab, Ctrl/Cmd+Shift+Tab → prev tab
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Tab') {
-      e.preventDefault();
-      if (e.shiftKey) prevTab();
-      else nextTab();
+    return false;
+  }
+
+  /**
+   * Capture-phase keydown listener installed on `window`.
+   *
+   * xterm.js installs its own keydown listener on a hidden helper
+   * textarea inside the terminal and, by default, processes most
+   * keystrokes locally (writing them to the PTY and calling
+   * preventDefault + stopPropagation on the way out). That means the
+   * bubble-phase `<svelte:window onkeydown>` listener below never sees
+   * the event when the terminal has focus — so without this capture
+   * listener, opening a terminal silently disables every app-level
+   * shortcut (Ctrl+Tab, Ctrl+`, Cmd+B, Cmd+L, Cmd+G, Cmd+Shift+], …).
+   *
+   * Why capture phase: events flow window → … → xterm-helper-textarea
+   * during the capture phase. Listening at the window with
+   * `{ capture: true }` puts us first in line, before xterm.js can
+   * call preventDefault/stopPropagation. This is the same pattern used
+   * by terax-ai's `useGlobalShortcuts`.
+   *
+   * Why scoped to terminal targets: many app shortcuts share key
+   * combinations with editor / chat keymaps (Cmd+G = "find next" in
+   * CodeMirror, Cmd+L = "select line", Cmd+Shift+] / [ = indent more
+   * / less). When the editor is focused, the editor's keymap MUST win
+   * — so we only intercept events whose target is inside the terminal
+   * area. Anything else falls through to the editor's local handler
+   * and (if it doesn't preventDefault) to the bubble-phase listener.
+   *
+   * Why stopImmediatePropagation: prevents the event from also being
+   * delivered to the bubble-phase window handler later, which would
+   * fire the action a second time.
+   */
+  function handleKeydownCapture(e: KeyboardEvent) {
+    // Don't intercept events that are part of an active IME composition
+    // sequence (e.g. CJK input). Today none of the app-level shortcuts
+    // could overlap with composition because they all require a
+    // non-letter modifier combo, but bare-letter shortcuts could be
+    // added in the future and this guard makes that safe.
+    if (e.isComposing) return;
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+    if (!target.closest('.terminal-content')) return;
+    if (dispatchAppShortcut(e)) {
+      e.stopImmediatePropagation();
     }
   }
+
+  onMount(() => {
+    window.addEventListener('keydown', handleKeydownCapture, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', handleKeydownCapture, { capture: true });
+    };
+  });
 </script>
 
 <svelte:window onkeydown={handleKeydown} />

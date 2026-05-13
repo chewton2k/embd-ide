@@ -376,6 +376,18 @@
 
       xterm.attachCustomKeyEventHandler((e: KeyboardEvent) => {
         if (e.type !== 'keydown') return true;
+
+        // App-level shortcuts (tab navigation, panel toggles, file
+        // search, settings, etc.) are intercepted upstream by a
+        // capture-phase listener on `window` in App.svelte
+        // (`handleKeydownCapture`). That listener fires before this
+        // handler, calls preventDefault + stopImmediatePropagation,
+        // and dispatches the action — so by the time we get here the
+        // event is guaranteed to NOT be an app shortcut. We therefore
+        // only deal with terminal-specific keystrokes that map to PTY
+        // control codes. Returning false means xterm doesn't process
+        // the key; we've already dispatched the equivalent control
+        // sequence ourselves via `write_terminal`.
         if (e.metaKey && e.key === 'Backspace') { invoke('write_terminal', { id: sessionId, data: '\x15' }); return false; }
         if (e.metaKey && e.key === 'ArrowLeft') { invoke('write_terminal', { id: sessionId, data: '\x01' }); return false; }
         if (e.metaKey && e.key === 'ArrowRight') { invoke('write_terminal', { id: sessionId, data: '\x05' }); return false; }
@@ -791,15 +803,21 @@
 
   /* One absolutely-positioned layer per terminal tab. Only the active layer
      is visible — inactive layers keep their xterm DOM mounted so PTYs stay
-     live and their scrollback isn't lost when switching. */
+     live and their scrollback isn't lost when switching.
+
+     Uses opacity (not visibility) so that the parent .terminal-tab-slot's
+     visibility:hidden cannot be overridden by children. CSS spec allows a
+     child to set visibility:visible and punch through a hidden parent, but
+     opacity on a child cannot override a parent's visibility:hidden. This
+     keeps the slot/layer hiding hierarchy correct. */
   .tab-layer {
     position: absolute;
     inset: 0;
-    visibility: hidden;
+    opacity: 0;
     pointer-events: none;
   }
   .tab-layer.active {
-    visibility: visible;
+    opacity: 1;
     pointer-events: auto;
   }
 

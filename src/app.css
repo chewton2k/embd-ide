@@ -186,3 +186,58 @@ input:focus, textarea:focus { border-color: var(--accent); }
 .cm-selectionMatch { background: color-mix(in srgb, var(--accent) 25%, transparent) !important; }
 .cm-searchMatch { background: color-mix(in srgb, var(--warning) 30%, transparent) !important; border-radius: 2px; }
 .cm-searchMatch-selected { background: color-mix(in srgb, var(--warning) 50%, transparent) !important; }
+
+/* ───────────────────────────────────────────────────────────── *
+ * Copy / text-selection policy
+ *
+ * Disable text selection across the IDE chrome (file tree, tabs,
+ * toolbar, status bar, git/knowledge panels, file viewers, etc.)
+ * so static UI text cannot be copied, then re-enable it for the
+ * three areas where copy is expected: the editor, the terminal,
+ * and the AI chat. Form fields stay selectable so search inputs,
+ * settings inputs, and pasting continue to behave normally.
+ * ───────────────────────────────────────────────────────────── */
+.ide-layout {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Editor (CodeMirror) */
+.cm-editor,
+.cm-editor .cm-scroller,
+.cm-editor .cm-content,
+.cm-editor .cm-line {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Terminal (xterm.js) */
+.terminal-content,
+.terminal-pane,
+.xterm,
+.xterm .xterm-screen,
+.xterm .xterm-rows,
+.xterm-helper-textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* AI chat (FloatingChat) */
+.chat,
+.chat .messages,
+.chat .msg,
+.chat textarea,
+.chat input {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Always keep editable form fields selectable so users can edit
+   their own input, paste keys, etc. */
+input,
+textarea,
+select,
+[contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
+}

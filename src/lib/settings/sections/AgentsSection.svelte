@@ -108,68 +108,88 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-primary);
     cursor: pointer;
+    padding: 4px 0;
   }
 
+  /* Toggle — visually matches the General section's toggle so users
+     get the same feel across tabs. Uses a soft surface track with a
+     muted dot in the off state, accent track + white knob when on. */
   .toggle {
     position: relative;
-    width: 36px;
+    width: 34px;
     height: 20px;
     border-radius: 10px;
-    background: var(--border);
-    border: none;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
     cursor: pointer;
-    transition: background 0.2s;
+    transition: background 0.15s ease, border-color 0.15s ease;
     flex-shrink: 0;
+    padding: 0;
   }
-
+  .toggle:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    outline-offset: 2px;
+  }
   .toggle.on {
-    background: var(--accent);
+    background: var(--success);
+    border-color: var(--success);
   }
 
   .toggle-knob {
     position: absolute;
-    top: 3px;
-    left: 3px;
+    top: 2px;
+    left: 2px;
     width: 14px;
     height: 14px;
     border-radius: 50%;
-    background: #fff;
-    transition: transform 0.2s;
+    background: var(--text-muted);
+    transition: transform 0.15s ease, background 0.15s ease;
   }
-
   .toggle.on .toggle-knob {
-    transform: translateX(16px);
+    transform: translateX(14px);
+    background: #fff;
   }
 
   .slider-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-primary);
     gap: 12px;
+    padding: 4px 0;
   }
 
   .slider-group {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
 
+  /* Native range with a tighter, accent-colored track. We deliberately
+     keep this minimal — heavier custom-rendered sliders look out of
+     place against the rest of the section's neutral palette. */
   .slider-group input[type="range"] {
-    width: 120px;
+    width: 130px;
     accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .slider-group input[type="range"]:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    outline-offset: 4px;
+    border-radius: 6px;
   }
 
   .slider-value {
     font-size: 11px;
     color: var(--text-muted);
-    min-width: 45px;
+    min-width: 48px;
     text-align: right;
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
   }
 
   .hint {
