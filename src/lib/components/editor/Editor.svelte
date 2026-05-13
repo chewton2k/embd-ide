@@ -867,7 +867,13 @@
         updateGitGutter(path);
         startWatching(path);
       } catch (e) {
-        createEditor(`// Error loading file: ${e}`, path);
+        const errStr = String(e);
+        if (errStr.startsWith('FILE_TOO_LARGE:')) {
+          const sizeInfo = errStr.replace('FILE_TOO_LARGE: ', '');
+          createEditor(`// This file is too large to open in the editor (${sizeInfo}).\n// Use an external tool for files over 50 MB.`, path);
+        } else {
+          createEditor(`// Error loading file: ${e}`, path);
+        }
         currentFilePath = path;
       }
     }

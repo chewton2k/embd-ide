@@ -343,6 +343,7 @@ pub async fn knowledge_save_conversation(
 
     if existing_gen >= gen && gen > 0 {
         // Stale write — a newer generation already saved
+        log::warn!("Stale conversation save rejected: id={}, incoming_gen={}, existing_gen={}", id, gen, existing_gen);
         return Ok(false);
     }
 

@@ -32,6 +32,12 @@ impl TerminalManager {
             next_id: 1,
         }
     }
+
+    pub fn kill_all(&mut self) {
+        for (_, mut session) in self.sessions.drain() {
+            let _ = session.child.kill();
+        }
+    }
 }
 
 pub type TerminalState = Arc<Mutex<TerminalManager>>;

@@ -111,6 +111,15 @@ pub fn run() {
             *guard = loaded;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                if let Some(state) = window.try_state::<shell::TerminalState>() {
+                    if let Ok(mut manager) = state.lock() {
+                        manager.kill_all();
+                    }
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
