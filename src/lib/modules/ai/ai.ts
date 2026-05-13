@@ -224,14 +224,23 @@ export async function saveConversationNow(): Promise<void> {
   const root = get(projectRoot);
   if (!root) return;
   const title = msgs.find(m => m.role === 'user')?.content.slice(0, 60) || 'Untitled';
-  try {
-    await invoke('knowledge_save_conversation', {
-      projectRoot: root,
-      id: currentConversationId,
-      title,
-      messages: JSON.stringify(msgs),
-    });
-  } catch { /* optional feature */ }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await invoke('knowledge_save_conversation', {
+        projectRoot: root,
+        id: currentConversationId,
+        title,
+        messages: JSON.stringify(msgs),
+      });
+      return;
+    } catch (e) {
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      } else {
+        console.warn('[leo] Failed to save conversation after 3 attempts:', e);
+      }
+    }
+  }
 }
 
 export async function loadConversation(id: string): Promise<void> {

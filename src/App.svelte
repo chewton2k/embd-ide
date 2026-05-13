@@ -215,7 +215,7 @@
       if (root) {
         invoke('knowledge_init', { projectRoot: root }).then(() => {
           invoke('knowledge_index', { projectRoot: root }).catch(() => {});
-        }).catch(() => {});
+        }).catch((e) => { console.warn('[leo] knowledge_init failed:', e); });
         // Also persist for settings window
         localStorage.setItem('leo-project-root', root);
       }

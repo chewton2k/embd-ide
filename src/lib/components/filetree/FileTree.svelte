@@ -407,8 +407,8 @@
       }
     }
     rootPath = path;
-    projectRoot.set(rootPath);
     await invoke('set_project_root', { path: rootPath });
+    projectRoot.set(rootPath);
     closeAllUnpinned();
     openDiagrams.set([]);
     showPreview.set(false);

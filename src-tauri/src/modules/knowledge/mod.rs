@@ -22,6 +22,8 @@ impl KnowledgeState {
 }
 
 /// Validate that the provided project_root matches the app's active project root.
+/// Compares both canonicalized and raw paths to handle symlinks, /private prefix
+/// on macOS, and cases where canonicalize fails.
 fn validate_knowledge_root(
     project_root: &str,
     state: &tauri::State<'_, ProjectRootState>,
@@ -30,12 +32,33 @@ fn validate_knowledge_root(
     let active_root = root_guard
         .as_ref()
         .ok_or_else(|| "No project is open".to_string())?;
-    let provided = std::fs::canonicalize(project_root)
-        .map_err(|e| format!("Invalid project root: {}", e))?;
-    if provided != *active_root {
-        return Err("Access denied: project root mismatch".to_string());
+
+    let provided = PathBuf::from(project_root);
+
+    // Fast path: direct match (covers the common case where both are the
+    // same raw path, or both are already canonical).
+    if provided == *active_root {
+        return Ok(provided);
     }
-    Ok(provided)
+
+    // Try canonicalizing the provided path to match against the stored
+    // canonical root (set_project_root canonicalizes before storing).
+    if let Ok(canonical) = std::fs::canonicalize(project_root) {
+        if canonical == *active_root {
+            return Ok(canonical);
+        }
+    }
+
+    // On macOS, /tmp → /private/tmp and similar. Try stripping/adding /private.
+    let active_str = active_root.to_string_lossy();
+    let provided_str = project_root;
+    if active_str.strip_prefix("/private") == Some(provided_str)
+        || provided_str.strip_prefix("/private") == Some(active_str.as_ref())
+    {
+        return Ok(provided);
+    }
+
+    Err("Access denied: project root mismatch".to_string())
 }
 
 // ── Types ──
@@ -149,6 +172,17 @@ pub async fn knowledge_init(
     state: tauri::State<'_, Arc<KnowledgeState>>,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
+    // Ensure the project root state is set — handles the case where
+    // knowledge_init fires before set_project_root completes (race condition
+    // from the Svelte store subscription triggering immediately).
+    {
+        let mut root_guard = root_state.lock().map_err(|e| e.to_string())?;
+        if root_guard.is_none() {
+            let canonical = std::fs::canonicalize(&project_root)
+                .unwrap_or_else(|_| PathBuf::from(&project_root));
+            *root_guard = Some(canonical);
+        }
+    }
     validate_knowledge_root(&project_root, &root_state)?;
     let path = db_path(&project_root);
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open DB: {}", e))?;
