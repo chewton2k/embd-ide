@@ -859,6 +859,7 @@
     dragPendingEntry = entry;
     dragStartPos = { x: e.clientX, y: e.clientY };
     e.preventDefault(); // Prevent text selection from starting
+    window.addEventListener('mousemove', handleGlobalMouseMove);
   }
 
   let dragRafId: number | null = null;
@@ -1026,6 +1027,7 @@
     dropTargetPath = null;
     dragPending = false;
     dragPendingEntry = null;
+    window.removeEventListener('mousemove', handleGlobalMouseMove);
     if (dragGhost) {
       dragGhost.remove();
       dragGhost = null;
@@ -1147,7 +1149,6 @@
   let unsubTreeRefresh: (() => void) | null = null;
 
   onMount(() => {
-    window.addEventListener('mousemove', handleGlobalMouseMove);
     window.addEventListener('mouseup', handleGlobalMouseUp);
     window.addEventListener('keydown', handleKeyDown);
     setupExternalDropListeners();
