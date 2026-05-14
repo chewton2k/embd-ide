@@ -1,13 +1,11 @@
 //! Encrypted key file store.
 //!
-//! Used as a fallback when the OS keyring is unavailable or returns errors.
-//! Keys are encrypted with ChaCha20-Poly1305 (AEAD) using a 32-byte master
-//! key. The master key itself is sourced (in this order) by the parent
-//! module:
-//!
-//!   1. OS keyring entry `__file_key__` (preferred — never on disk)
-//!   2. Newly-generated random key, stored in keyring
-//!   3. Machine-derived key (last-resort obfuscation; documented limitation)
+//! The authoritative durable store for API keys. Keys are encrypted with
+//! ChaCha20-Poly1305 (AEAD) using a 32-byte master key derived
+//! deterministically from machine-specific paths (SHA-256). The OS
+//! keyring is used as a fast-path cache by the parent module; this file
+//! store is the fallback that survives keyring failures (e.g. macOS code
+//! signature changes between dev builds).
 //!
 //! File layout on disk:
 //!

@@ -1,4 +1,3 @@
-use base64::Engine as _;
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -58,8 +57,6 @@ const SERVICE_NAME: &str = "leo-ide";
 // Migration: any plaintext `keys.json` left over from earlier builds is
 // re-keyed into the new format on startup and renamed to `keys.json.bak`.
 
-const FILE_KEY_ENTRY: &str = "__file_key__";
-
 fn keys_dir() -> PathBuf {
     let dir = dirs::home_dir().unwrap_or_default().join(".leo-ide");
     let _ = std::fs::create_dir_all(&dir);
@@ -72,34 +69,18 @@ fn legacy_keys_file_in(base: &Path) -> PathBuf {
 
 /// Resolve the 32-byte master key used to seal `keys.enc`.
 ///
-/// We first try the OS keyring — this is the only path where the key
-/// never touches disk. If keyring read fails but write succeeds we mint a
-/// fresh key. If both fail we fall back to a machine-derived key (tier 3)
-/// so an existing encrypted file remains decryptable on systems where
-/// keyring support broke between builds.
+/// Uses a deterministic machine-derived key so that `keys.enc` is always
+/// readable regardless of OS keyring state. Previous versions stored a
+/// random key in the keyring, but that created a fragility: if keyring
+/// access was lost (e.g. code signature change on macOS dev builds), the
+/// encrypted file became permanently unreadable.
+///
+/// Security model: the file key is derived from machine-specific paths
+/// and a build-time salt. This is obfuscation (not strong protection);
+/// the primary defenses are OS-level FDE and 0o600 file permissions.
+/// The OS keyring is still used as the *primary* store for the actual
+/// API keys — the encrypted file is the durable fallback.
 fn get_or_create_file_key() -> Result<[u8; key_store::KEY_SIZE], String> {
-    if let Ok(entry) = Entry::new(SERVICE_NAME, FILE_KEY_ENTRY) {
-        if let Ok(b64) = entry.get_password() {
-            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&b64) {
-                if bytes.len() == key_store::KEY_SIZE {
-                    let mut k = [0u8; key_store::KEY_SIZE];
-                    k.copy_from_slice(&bytes);
-                    return Ok(k);
-                }
-                // Corrupt entry — fall through and try to overwrite it.
-            }
-        }
-        // No existing key (or unparsable). Try to create one.
-        let mut k = [0u8; key_store::KEY_SIZE];
-        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut k);
-        let b64 = base64::engine::general_purpose::STANDARD.encode(k);
-        if entry.set_password(&b64).is_ok() {
-            return Ok(k);
-        }
-    }
-    // Tier 3: derive deterministically from machine-specific data so that
-    // a previously-written keys.enc remains readable. This is obfuscation
-    // only and is documented as such.
     Ok(derive_machine_file_key())
 }
 
@@ -157,18 +138,15 @@ fn set_key(provider: &str, key: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    // Try keyring first.
+    // Always write to the encrypted file store (authoritative, durable).
+    key_store::put(&dir, &file_key, provider, key)?;
+
+    // Best-effort write to OS keyring (fast-path cache for reads).
     if let Ok(entry) = Entry::new(SERVICE_NAME, provider) {
-        if entry.set_password(key).is_ok() {
-            // Make sure the encrypted file doesn't keep an older copy
-            // around that would shadow future reads.
-            let _ = key_store::remove(&dir, &file_key, provider);
-            return Ok(());
-        }
+        let _ = entry.set_password(key);
     }
 
-    // Keyring unavailable — fall back to the encrypted file.
-    key_store::put(&dir, &file_key, provider, key)
+    Ok(())
 }
 
 /// Migrate any plaintext `keys.json` from older builds into the new
