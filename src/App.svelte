@@ -20,7 +20,7 @@
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal } from './lib/modules';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal, breadcrumbSegmentsFor } from './lib/modules';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { log } from './lib/modules/logging';
   import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/ui';
@@ -182,26 +182,9 @@
     }
   });
 
-  let breadcrumbSegments = $derived.by(() => {
-    const path = $activeFilePath;
-    const root = $projectRoot;
-    if (!path) return [];
-    const normPath = path.replace(/\\/g, '/');
-    const normRoot = root ? root.replace(/\\/g, '/') : null;
-    if (normRoot && normPath.startsWith(normRoot + '/')) {
-      const rel = normPath.slice(normRoot.length + 1);
-      const relParts = rel.split('/');
-      const rootName = normRoot.split('/').pop() || normRoot;
-      return [
-        { name: rootName, path: normRoot },
-        ...relParts.map((part, i) => ({
-          name: part,
-          path: normRoot + '/' + relParts.slice(0, i + 1).join('/')
-        }))
-      ];
-    }
-    return [{ name: normPath.split('/').pop() || path, path: normPath }];
-  });
+  let breadcrumbSegments = $derived(
+    breadcrumbSegmentsFor($activeFilePath, $projectRoot)
+  );
 
   function navigateBreadcrumb(path: string) {
     if (!sidebarVisible) toggleSidebar();

@@ -10,3 +10,4 @@ export * from './settings';
 export * from './ui';
 export * from './settingsSync';
 export * from './logging';
+export * from './layout';
