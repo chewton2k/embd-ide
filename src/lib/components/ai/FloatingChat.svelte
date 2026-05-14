@@ -12,12 +12,14 @@
     sendStreamingMessage, cancelStream, clearChat, attachedFiles,
     type AiProvider,
     listConversations, loadConversation, saveConversationNow,
+    conversationId,
+    createParsedMessagesCache,
   } from '../../modules';
   import { showChat, activeFile } from '../../modules';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import {
-    parseAssistantContent, parseUserContent, truncate, basename,
+    truncate, basename,
     type ChatBlock,
   } from '../../modules/ai/chatRenderer';
 
@@ -275,17 +277,13 @@
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
-  // Parse each message into blocks. Re-runs reactively as messages mutate.
+  // Parse each message into blocks. Re-runs reactively as messages mutate,
+  // but memoizes per-message results keyed by (conversationId, index, role,
+  // content.length). During streaming only the actively-streaming message
+  // (last in array) misses the cache; completed messages hit.
+  const parseCache = createParsedMessagesCache();
   const parsedMessages = $derived(
-    $chatMessages.map((msg, i) => ({
-      role: msg.role,
-      blocks: msg.role === 'user'
-        ? parseUserContent(msg.content)
-        : msg.role === 'assistant'
-          ? parseAssistantContent(msg.content)
-          : [{ kind: 'prose' as const, text: msg.content }],
-      index: i,
-    }))
+    parseCache.parse($chatMessages, $conversationId)
   );
 
   /** Returns true if the assistant's last message is just an empty prose block

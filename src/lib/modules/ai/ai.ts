@@ -224,6 +224,9 @@ export function clearChat() {
   chatMessages.set([]);
   attachedFiles.set([]);
   currentConversationId = generateSessionId();
+  // Keep the exported store in sync with the internal id so consumers
+  // (e.g. parsed-message memoization) can invalidate caches reactively.
+  conversationId.set(currentConversationId);
 }
 
 // ── Conversation persistence ──

@@ -7,3 +7,4 @@ export * from './contextBuilder';
 export * from './systemPrompts';
 export * from './pendingEdits';
 export * from './aiHistory';
+export * from './parsedMessagesCache';
