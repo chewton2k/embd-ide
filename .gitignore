@@ -30,3 +30,4 @@ CLAUDE.md
 .vscode
 todo.md
 docs/
+scripts/bump-version.sh
