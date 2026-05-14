@@ -17,13 +17,12 @@
   import Toast from './lib/components/Toast.svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal, breadcrumbSegmentsFor, createPanelResizer, type PanelTarget } from './lib/modules';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { log } from './lib/modules/logging';
-  import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/ui';
+  import { isMac, isFullscreen, installWindowChromeWatchers, openSettingsWindow } from './lib/modules/ui';
   import { showToast } from './lib/modules/ui/toast';
   import { toggleTerminal } from './lib/modules/terminal';
   import { shortcutBindings, eventMatchesBinding, APP_LEVEL_SHORTCUT_IDS, type AppLevelShortcutId } from './lib/modules/shortcuts';
@@ -111,32 +110,11 @@
 
   let isClosing = false;
 
-  async function openSettingsWindow() {
-    try {
-      const existing = await WebviewWindow.getByLabel('settings');
-      if (existing) {
-        try { await existing.show(); } catch { /* Legitimate: window may not exist yet */ }
-        try { await existing.setFocus(); } catch { /* Legitimate: focus may fail on hidden window */ }
-        return;
-      }
-      const win = new WebviewWindow('settings', {
-        url: 'index.html#settings',
-        title: 'Settings',
-        width: 900,
-        height: 640,
-        minWidth: 720,
-        minHeight: 480,
-        resizable: true,
-        center: true,
-        focus: true,
-      });
-      win.once('tauri://error', (e) => {
-        log.error('Failed to open settings window', e);
-      });
-    } catch (e) {
-      log.error('openSettingsWindow failed', e);
-    }
-  }
+  // openSettingsWindow lives in lib/modules/ui/windows so the same
+  // helper can be invoked from the toolbar, the command palette, or
+  // any other launch point without re-implementing the focus-or-spawn
+  // dance. We just keep the reactive subscription to `showSettings`
+  // here because it's a Svelte-level concern.
 
   // Treat `showSettings` as an "open settings" trigger. Reset it after
   // launching so the Toolbar's toggle reads as off again.
