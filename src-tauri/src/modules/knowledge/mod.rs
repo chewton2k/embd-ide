@@ -24,11 +24,15 @@ impl KnowledgeState {
 /// Validate that the provided project_root matches the app's active project root.
 /// Compares both canonicalized and raw paths to handle symlinks, /private prefix
 /// on macOS, and cases where canonicalize fails.
-fn validate_knowledge_root(
+///
+/// Async because all four call sites are async commands and the lock is
+/// `tokio::sync::RwLock`. Calling `blocking_read` from inside an async
+/// task would panic; `.read().await` is the correct discipline.
+async fn validate_knowledge_root(
     project_root: &str,
     state: &tauri::State<'_, ProjectRootState>,
 ) -> Result<PathBuf, String> {
-    let root_guard = state.lock().map_err(|e| e.to_string())?;
+    let root_guard = state.read().await;
     let active_root = root_guard
         .as_ref()
         .ok_or_else(|| "No project is open".to_string())?;
@@ -185,14 +189,14 @@ pub async fn knowledge_init(
     // knowledge_init fires before set_project_root completes (race condition
     // from the Svelte store subscription triggering immediately).
     {
-        let mut root_guard = root_state.lock().map_err(|e| e.to_string())?;
+        let mut root_guard = root_state.write().await;
         if root_guard.is_none() {
             let canonical = std::fs::canonicalize(&project_root)
                 .unwrap_or_else(|_| PathBuf::from(&project_root));
             *root_guard = Some(canonical);
         }
     }
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let path = db_path(&project_root);
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open DB: {}", e))?;
     init_schema(&conn)?;
@@ -214,7 +218,7 @@ pub async fn knowledge_index(
     app: AppHandle,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let root = PathBuf::from(&project_root);
 
     tokio::task::spawn_blocking(move || {
@@ -290,7 +294,7 @@ pub async fn knowledge_get_context(
     current_file: Option<String>,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<Vec<FileInfo>, String> {
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
 
@@ -351,7 +355,7 @@ pub async fn knowledge_save_conversation(
     generation: Option<u64>,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<bool, String> {
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
@@ -382,7 +386,7 @@ pub async fn knowledge_list_conversations(
     project_root: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<Vec<ConversationSummary>, String> {
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     let mut stmt = conn.prepare("SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
@@ -398,7 +402,7 @@ pub async fn knowledge_load_conversation(
     id: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<String, String> {
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.query_row("SELECT messages FROM conversations WHERE id = ?1", params![id], |row| row.get::<_, String>(0))
@@ -410,7 +414,7 @@ pub async fn knowledge_delete_conversations(
     project_root: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.execute("DELETE FROM conversations", []).map_err(|e| e.to_string())?;
@@ -423,7 +427,7 @@ pub async fn knowledge_delete_conversation(
     id: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    validate_knowledge_root(&project_root, &root_state)?;
+    validate_knowledge_root(&project_root, &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])

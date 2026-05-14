@@ -11,7 +11,9 @@ pub fn validate_repo_path(
     repo_path: &str,
     state: &tauri::State<'_, ProjectRootState>,
 ) -> Result<PathBuf, String> {
-    let root = state.lock().map_err(|e| e.to_string())?;
+    // Sync command path: see fs::set_project_root for why blocking_read
+    // is safe here (Tauri sync commands run off the tokio worker pool).
+    let root = state.blocking_read();
     let root = root
         .as_ref()
         .ok_or_else(|| "No project is open".to_string())?;
@@ -395,7 +397,7 @@ pub fn get_git_branch(
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<Option<String>, String> {
-    let root = state.lock().map_err(|e| e.to_string())?;
+    let root = state.blocking_read();
     let root = root
         .as_ref()
         .ok_or_else(|| "No project is open".to_string())?;
@@ -596,7 +598,7 @@ pub fn git_discard(
     }
 
     if !untracked.is_empty() {
-        let root = state.lock().map_err(|e| e.to_string())?;
+        let root = state.blocking_read();
         let root = root
             .as_ref()
             .ok_or_else(|| "No project is open".to_string())?;

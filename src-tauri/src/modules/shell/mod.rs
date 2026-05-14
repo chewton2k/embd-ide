@@ -66,7 +66,7 @@ pub fn spawn_terminal(
     // Validate cwd against project root — require a project to be open.
     // When cwd is None, default to the project root so callers cannot bypass containment.
     let cwd = {
-        let root = project_root.lock().map_err(|e| e.to_string())?;
+        let root = project_root.blocking_read();
         let root_path = root
             .as_ref()
             .ok_or_else(|| "No project is open. Open a folder first.".to_string())?;

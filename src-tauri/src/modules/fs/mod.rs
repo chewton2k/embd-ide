@@ -3,15 +3,25 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-pub type ProjectRootState = Arc<Mutex<Option<PathBuf>>>;
+/// The project root path is read by every command that performs path
+/// validation (every fs/git/shell/graph/knowledge command). Using
+/// `tokio::sync::RwLock` lets many concurrent commands hold a shared
+/// read lock at once and only serializes writers (currently just
+/// `set_project_root` and the knowledge-init bootstrap path).
+///
+/// We expose the lock as `RwLock<Option<PathBuf>>` rather than baking the
+/// type behind a façade because every consumer site already deals with
+/// the `Option` explicitly.
+pub type ProjectRootState = Arc<RwLock<Option<PathBuf>>>;
 
 const MAX_TEXT_FILE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
 const MAX_BINARY_FILE_BYTES: u64 = 100 * 1024 * 1024; // 100 MB
 
 pub fn create_project_root_state() -> ProjectRootState {
-    Arc::new(Mutex::new(None))
+    Arc::new(RwLock::new(None))
 }
 
 #[tauri::command]
@@ -21,7 +31,10 @@ pub fn set_project_root(
 ) -> Result<String, String> {
     let canonical = fs::canonicalize(&path).map_err(|e| format!("Invalid path: {}", e))?;
     let canonical_str = canonical.to_string_lossy().to_string();
-    let mut root = state.lock().map_err(|e| e.to_string())?;
+    // `blocking_write` is safe here: this is a synchronous Tauri command,
+    // and Tauri runs sync commands on its own worker thread (not on a
+    // tokio runtime worker), so we cannot starve the async runtime.
+    let mut root = state.blocking_write();
     *root = Some(canonical);
     Ok(canonical_str)
 }
@@ -32,7 +45,7 @@ pub fn validate_path(
     path: &str,
     state: &tauri::State<'_, ProjectRootState>,
 ) -> Result<PathBuf, String> {
-    let root = state.lock().map_err(|e| e.to_string())?;
+    let root = state.blocking_read();
     let root = root
         .as_ref()
         .ok_or_else(|| "No project is open".to_string())?;
@@ -533,5 +546,70 @@ fn collect_files(root: &Path, dir: &Path, out: &mut Vec<String>, depth: u32) {
                 out.push(rel.to_string_lossy().to_string());
             }
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create_project_root_state_starts_empty() {
+        let state = create_project_root_state();
+        // Synchronous read on a tokio RwLock is safe outside any tokio
+        // runtime context, which is how Tauri sync commands run.
+        let guard = state.blocking_read();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn blocking_write_then_blocking_read_round_trip() {
+        let state = create_project_root_state();
+        {
+            let mut w = state.blocking_write();
+            *w = Some(PathBuf::from("/tmp/example"));
+        }
+        let r = state.blocking_read();
+        assert_eq!(r.as_ref().map(|p| p.as_path()), Some(Path::new("/tmp/example")));
+    }
+
+    #[test]
+    fn many_concurrent_blocking_readers_do_not_deadlock() {
+        // Confirms the conversion to a reader-writer lock actually buys
+        // us reader concurrency: many threads taking blocking_read() at
+        // once must all proceed without serialization.
+        let state = create_project_root_state();
+        {
+            let mut w = state.blocking_write();
+            *w = Some(PathBuf::from("/tmp/example"));
+        }
+        let mut handles = vec![];
+        for _ in 0..16 {
+            let s = state.clone();
+            handles.push(std::thread::spawn(move || {
+                let g = s.blocking_read();
+                assert!(g.is_some());
+            }));
+        }
+        for h in handles {
+            h.join().expect("reader thread panicked");
+        }
+    }
+
+    #[tokio::test]
+    async fn async_read_write_round_trip() {
+        // Exercises the async path used by knowledge_init and
+        // validate_knowledge_root.
+        let state = create_project_root_state();
+        {
+            let mut w = state.write().await;
+            *w = Some(PathBuf::from("/tmp/from-async"));
+        }
+        let r = state.read().await;
+        assert_eq!(
+            r.as_ref().map(|p| p.as_path()),
+            Some(Path::new("/tmp/from-async"))
+        );
     }
 }

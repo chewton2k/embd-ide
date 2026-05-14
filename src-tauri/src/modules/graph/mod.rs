@@ -1136,7 +1136,7 @@ pub fn analyze_file_graph(
     state: tauri::State<'_, crate::modules::fs::ProjectRootState>,
 ) -> Result<FileGraph, String> {
     // Validate both paths are within the project root
-    let root_guard = state.lock().map_err(|e| e.to_string())?;
+    let root_guard = state.blocking_read();
     let root_canonical = root_guard
         .as_ref()
         .ok_or_else(|| "No project is open".to_string())?;
