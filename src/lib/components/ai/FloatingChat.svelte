@@ -70,6 +70,8 @@
   let dragStart = { x: 0, y: 0, winX: 0, winY: 0 };
   let resizeStart = { x: 0, y: 0, w: 0, h: 0 };
 
+  let dragRafId: number | null = null;
+
   function startDrag(e: MouseEvent) {
     if ((e.target as HTMLElement).closest('button, select, input')) return;
     dragging = true;
@@ -78,14 +80,24 @@
     window.addEventListener('mouseup', stopDrag);
   }
   function onDragMove(e: MouseEvent) {
-    x = Math.max(0, Math.min(window.innerWidth - 100, dragStart.winX + e.clientX - dragStart.x));
-    y = Math.max(0, Math.min(window.innerHeight - 40, dragStart.winY + e.clientY - dragStart.y));
+    dragStart._pendingX = Math.max(0, Math.min(window.innerWidth - 100, dragStart.winX + e.clientX - dragStart.x));
+    dragStart._pendingY = Math.max(0, Math.min(window.innerHeight - 40, dragStart.winY + e.clientY - dragStart.y));
+    if (dragRafId === null) dragRafId = requestAnimationFrame(applyDrag);
+  }
+  function applyDrag() {
+    dragRafId = null;
+    x = dragStart._pendingX ?? x;
+    y = dragStart._pendingY ?? y;
   }
   function stopDrag() {
     dragging = false;
+    if (dragRafId !== null) { cancelAnimationFrame(dragRafId); dragRafId = null; }
+    applyDrag();
     window.removeEventListener('mousemove', onDragMove);
     window.removeEventListener('mouseup', stopDrag);
   }
+
+  let resizeRafId: number | null = null;
 
   function startResize(e: MouseEvent) {
     e.preventDefault();
@@ -95,11 +107,19 @@
     window.addEventListener('mouseup', stopResize);
   }
   function onResizeMove(e: MouseEvent) {
-    width = Math.max(320, resizeStart.w + e.clientX - resizeStart.x);
-    height = Math.max(320, resizeStart.h + e.clientY - resizeStart.y);
+    resizeStart._pendingW = Math.max(320, resizeStart.w + e.clientX - resizeStart.x);
+    resizeStart._pendingH = Math.max(320, resizeStart.h + e.clientY - resizeStart.y);
+    if (resizeRafId === null) resizeRafId = requestAnimationFrame(applyResize);
+  }
+  function applyResize() {
+    resizeRafId = null;
+    width = resizeStart._pendingW ?? width;
+    height = resizeStart._pendingH ?? height;
   }
   function stopResize() {
     resizing = false;
+    if (resizeRafId !== null) { cancelAnimationFrame(resizeRafId); resizeRafId = null; }
+    applyResize();
     window.removeEventListener('mousemove', onResizeMove);
     window.removeEventListener('mouseup', stopResize);
   }
