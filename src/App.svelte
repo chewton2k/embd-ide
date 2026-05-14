@@ -20,7 +20,7 @@
   import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
   import { exists } from '@tauri-apps/plugin-fs';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal, breadcrumbSegmentsFor } from './lib/modules';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal, breadcrumbSegmentsFor, createPanelResizer, type PanelTarget } from './lib/modules';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { log } from './lib/modules/logging';
   import { isMac, isFullscreen, installWindowChromeWatchers } from './lib/modules/ui';
@@ -89,55 +89,20 @@
   let gitWidth = $state(360);
 
   // --- Drag resize logic ---
-  let dragging = $state<'sidebar' | 'chat' | 'git' | null>(null);
-  // Most recent pointer X for the in-progress drag. The mousemove handler
-  // just stores this; the actual width update happens once per animation
-  // frame so we don't reflow the layout 120+ times per second on
-  // high-refresh-rate displays.
-  let pendingDragX = 0;
-  let dragRafId: number | null = null;
-
-  function applyDragWidth() {
-    dragRafId = null;
-    if (!dragging) return;
-    const x = pendingDragX;
-    if (dragging === 'sidebar') {
-      sidebarWidth = Math.max(140, Math.min(500, x));
-    } else if (dragging === 'chat') {
-      chatWidth = Math.max(200, Math.min(600, window.innerWidth - x));
-    } else if (dragging === 'git') {
-      gitWidth = Math.max(260, Math.min(600, window.innerWidth - x));
-    }
-  }
-
-  function startDrag(target: 'sidebar' | 'chat' | 'git') {
-    return (e: MouseEvent) => {
-      e.preventDefault();
-      dragging = target;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-      window.addEventListener('mousemove', onDrag);
-      window.addEventListener('mouseup', stopDrag);
-    };
-  }
-
-  function onDrag(e: MouseEvent) {
-    pendingDragX = e.clientX;
-    if (dragRafId !== null) return;
-    dragRafId = requestAnimationFrame(applyDragWidth);
-  }
-
-  function stopDrag() {
-    dragging = null;
-    if (dragRafId !== null) {
-      cancelAnimationFrame(dragRafId);
-      dragRafId = null;
-    }
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    window.removeEventListener('mousemove', onDrag);
-    window.removeEventListener('mouseup', stopDrag);
-  }
+  // The state machine (rAF coalescing, body-cursor toggle, listener
+  // lifecycle) lives in modules/layout/panelResize.ts so it's testable
+  // independently. The component just owns the three width cells.
+  let dragging = $state<PanelTarget | null>(null);
+  const panelResizer = createPanelResizer({
+    sidebar: { min: 140, max: 500 },
+    chat:    { min: 200, max: 600 },
+    git:     { min: 260, max: 600 },
+    setSidebarWidth: (w) => { sidebarWidth = w; },
+    setChatWidth:    (w) => { chatWidth = w; },
+    setGitWidth:     (w) => { gitWidth = w; },
+    onDragStateChange: (t) => { dragging = t; },
+  });
+  const startDrag = (t: PanelTarget) => panelResizer.startDrag(t);
 
   // toggleTerminal() lives in `./lib/modules/terminalActions` so it's
   // shared between App.svelte (Cmd+`), TitleBar.svelte's terminal
