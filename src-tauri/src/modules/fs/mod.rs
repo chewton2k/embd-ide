@@ -18,11 +18,12 @@ pub fn create_project_root_state() -> ProjectRootState {
 pub fn set_project_root(
     state: tauri::State<'_, ProjectRootState>,
     path: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let canonical = fs::canonicalize(&path).map_err(|e| format!("Invalid path: {}", e))?;
+    let canonical_str = canonical.to_string_lossy().to_string();
     let mut root = state.lock().map_err(|e| e.to_string())?;
     *root = Some(canonical);
-    Ok(())
+    Ok(canonical_str)
 }
 
 /// Validate that a path is within the current project root.

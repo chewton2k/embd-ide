@@ -408,8 +408,9 @@
       }
     }
     rootPath = path;
-    await invoke('set_project_root', { path: rootPath });
-    projectRoot.set(rootPath);
+    const canonical = await invoke<string>('set_project_root', { path: rootPath });
+    rootPath = canonical;
+    projectRoot.set(canonical);
     closeAllUnpinned();
     openDiagrams.set([]);
     showPreview.set(false);
