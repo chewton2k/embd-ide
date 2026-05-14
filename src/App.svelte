@@ -150,8 +150,8 @@
     try {
       const existing = await WebviewWindow.getByLabel('settings');
       if (existing) {
-        try { await existing.show(); } catch {}
-        try { await existing.setFocus(); } catch {}
+        try { await existing.show(); } catch { /* Legitimate: window may not exist yet */ }
+        try { await existing.setFocus(); } catch { /* Legitimate: focus may fail on hidden window */ }
         return;
       }
       const win = new WebviewWindow('settings', {

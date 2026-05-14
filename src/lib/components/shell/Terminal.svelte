@@ -230,7 +230,7 @@
     if (!pane.mounted) return;
     const mount = getPaneMount(pane.id);
     if (!mount || mount.clientWidth === 0 || mount.clientHeight === 0) return;
-    try { pane.fitAddon.fit(); } catch { /* ignore */ }
+    try { pane.fitAddon.fit(); } catch { /* Legitimate: xterm may not be attached to DOM yet */ }
   }
 
   function focusPane(id: number) {
@@ -244,7 +244,7 @@
     requestAnimationFrame(() => {
       fitPane(pane);
       if (pane.mounted) {
-        try { pane.xterm.focus(); } catch { /* ignore */ }
+        try { pane.xterm.focus(); } catch { /* Legitimate: terminal may not be visible */ }
       }
     });
   }
@@ -460,7 +460,7 @@
     setActivePane(tabId, sessionId);
     requestAnimationFrame(() => {
       if (pane.mounted) {
-        try { pane.xterm.focus(); } catch { /* ignore */ }
+        try { pane.xterm.focus(); } catch { /* Legitimate: terminal may not be visible */ }
       }
     });
 
@@ -480,7 +480,7 @@
     pane.xterm.dispose();
 
     if (killBackend) {
-      try { await invoke('kill_terminal', { id: pane.sessionId }); } catch { /* ignore */ }
+      try { await invoke('kill_terminal', { id: pane.sessionId }); } catch { /* Legitimate: session may already be dead */ }
     }
 
     const remaining = panes.filter((entry) => entry.id !== paneId);

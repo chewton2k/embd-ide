@@ -124,11 +124,11 @@
 
   async function saveKey(p: Provider, value: string) {
     p.store.set(value);
-    try { await invoke('set_provider_key', { provider: p.id, key: value }); } catch {}
+    try { await invoke('set_provider_key', { provider: p.id, key: value }); } catch { /* Legitimate: keyring may be unavailable */ }
   }
   async function clearKey(p: Provider) {
     p.store.set('');
-    try { await invoke('set_provider_key', { provider: p.id, key: '' }); } catch {}
+    try { await invoke('set_provider_key', { provider: p.id, key: '' }); } catch { /* Legitimate: keyring may be unavailable */ }
     // If the cleared provider owned the default model, pick another configured one.
     if (currentProvider.id === p.id) {
       const next = PROVIDERS.find(x => configured[x.id]) ?? PROVIDERS[0];

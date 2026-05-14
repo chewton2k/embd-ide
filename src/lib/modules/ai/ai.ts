@@ -216,7 +216,7 @@ export async function cancelStream() {
   if (currentSessionId) {
     try {
       await invoke('ai_chat_cancel', { sessionId: currentSessionId });
-    } catch { /* ignore */ }
+    } catch { /* Legitimate: cancel may fail if stream already ended */ }
   }
 }
 
@@ -281,7 +281,7 @@ export async function loadConversation(id: string): Promise<void> {
     chatMessages.set(msgs);
     currentConversationId = id;
     conversationId.set(id);
-  } catch { /* ignore */ }
+  } catch { /* Legitimate: conversation may not exist or DB not initialized */ }
 }
 
 export async function listConversations(): Promise<{ id: string; title: string; created_at: number; updated_at: number }[]> {
@@ -297,5 +297,5 @@ export async function deleteAllConversations(): Promise<void> {
   if (!root) return;
   try {
     await invoke('knowledge_delete_conversations', { projectRoot: root });
-  } catch { /* ignore */ }
+  } catch { /* Legitimate: best-effort cleanup, DB may not exist */ }
 }
