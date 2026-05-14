@@ -14,10 +14,9 @@
     listConversations, loadConversation, saveConversationNow,
     conversationId,
     createParsedMessagesCache,
+    createProseRenderer,
   } from '../../modules';
   import { showChat, activeFile } from '../../modules';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
   import {
     truncate, basename,
     type ChatBlock,
@@ -263,8 +262,12 @@
   }
 
   // ── Markdown rendering ──────────────────────────────────────────
-  function renderProse(content: string): string {
-    return DOMPurify.sanitize(marked.parse(content, { async: false }) as string);
+  // Cache final rendered HTML so completed messages never re-render.
+  // Streaming intermediates are NOT cached (each chunk is a different key
+  // and we don't want to fill the cache with throw-away HTML).
+  const proseRenderer = createProseRenderer();
+  function renderProse(content: string, isStreamingNow: boolean): string {
+    return proseRenderer.render(content, isStreamingNow);
   }
 
   function formatConvDate(epochSecs: number): string {
@@ -442,7 +445,8 @@
                 {#each m.blocks as block, bi}
                   {#if block.kind === 'prose'}
                     {#if block.text.trim()}
-                      <div class="prose">{@html renderProse(block.text)}</div>
+                      {@const isLastMsgStreaming = $isStreaming && m.index === $chatMessages.length - 1}
+                      <div class="prose">{@html renderProse(block.text, isLastMsgStreaming)}</div>
                     {/if}
                   {:else}
                     {@const key = `${m.index}:${bi}`}
