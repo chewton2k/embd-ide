@@ -1212,10 +1212,13 @@
 
   // React to store version changes (e.g. git discard) — force editor to match store content
   $effect(() => {
-    const file = $openFiles.find(f => f.path === filePath);
+    const files = $openFiles; // subscribe to changes
+    const path = currentFilePath; // read fresh value, not closure-captured filePath
+    if (!view || !path) return;
+    const file = files.find(f => f.path === path);
     if (!file || file.version === 0) return;
     // version > 0 means an external reload happened — push content into editor
-    if (view && currentFilePath === filePath) {
+    if (currentFilePath === filePath) {
       const editorContent = view.state.doc.toString();
       if (editorContent !== file.content) {
         ignoreNextDocChange = true;
