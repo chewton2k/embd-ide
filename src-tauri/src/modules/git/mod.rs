@@ -218,6 +218,66 @@ fn parse_hunk_range(s: &str) -> (u32, u32) {
 
 // ── Tauri commands ───────────────────────────────────────────────
 
+/// One row from `git status --porcelain -z` output. The full stdout is
+/// a sequence of NUL-separated entries; rename ('R') and copy ('C')
+/// entries are followed by an additional entry containing the source
+/// path. Parsing as raw bytes (not `String::from_utf8_lossy` over the
+/// whole buffer) preserves non-UTF-8 path bytes per-entry rather than
+/// smearing replacement characters across the whole buffer.
+pub(crate) struct PorcelainEntry {
+    pub index_status: u8,
+    pub wt_status: u8,
+    pub file: String,
+    /// Source path for renames/copies. `None` for everything else.
+    #[allow(dead_code)] // present for future consumers; not used yet
+    pub orig: Option<String>,
+}
+
+/// Parse byte output from `git status --porcelain -z`.
+///
+/// The `-z` flag produces NUL-separated entries with no quoting, so we
+/// can treat the buffer as `&[u8]` and only convert per-entry. Each
+/// entry has the layout `XY <path>` where X is the index status, Y is
+/// the working-tree status, and one space follows. Rename and copy
+/// entries are followed by an extra NUL-separated entry containing the
+/// source path.
+pub(crate) fn parse_status_porcelain_z(stdout: &[u8]) -> Vec<PorcelainEntry> {
+    let entries: Vec<&[u8]> = stdout.split(|&b| b == 0).collect();
+    let mut result = Vec::new();
+    let mut i = 0;
+    while i < entries.len() {
+        let entry = entries[i];
+        if entry.len() < 4 {
+            i += 1;
+            continue;
+        }
+        let index_status = entry[0];
+        let wt_status = entry[1];
+        // entry[2] is a space separator; the path is everything after.
+        let file_bytes = &entry[3..];
+        let file = String::from_utf8_lossy(file_bytes).into_owned();
+
+        let orig = if (index_status == b'R' || index_status == b'C')
+            && i + 1 < entries.len()
+            && !entries[i + 1].is_empty()
+        {
+            i += 1;
+            Some(String::from_utf8_lossy(entries[i]).into_owned())
+        } else {
+            None
+        };
+
+        result.push(PorcelainEntry {
+            index_status,
+            wt_status,
+            file,
+            orig,
+        });
+        i += 1;
+    }
+    result
+}
+
 #[tauri::command]
 pub fn get_git_status(
     state: tauri::State<'_, ProjectRootState>,
@@ -234,32 +294,12 @@ pub fn get_git_status(
         return Ok(HashMap::new());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let mut result = HashMap::new();
-
-    let entries: Vec<&str> = stdout.split('\0').collect();
-    let mut i = 0;
-    while i < entries.len() {
-        let entry = entries[i];
-        if entry.len() < 4 {
-            i += 1;
-            continue;
-        }
-        let index_status = entry.as_bytes()[0];
-        let wt_status = entry.as_bytes()[1];
-        let file_path = &entry[3..];
-
-        let file_path = if index_status == b'R' || index_status == b'C' {
-            i += 1;
-            file_path
-        } else {
-            file_path
-        };
-
-        let abs_path = PathBuf::from(&path).join(file_path);
+    for entry in parse_status_porcelain_z(&output.stdout) {
+        let abs_path = PathBuf::from(&path).join(&entry.file);
         let abs_str = abs_path.to_string_lossy().to_string();
 
-        let status = match (index_status, wt_status) {
+        let status = match (entry.index_status, entry.wt_status) {
             (b'?', b'?') => "U",
             (b'U', b'U')
             | (b'A', b'A')
@@ -278,7 +318,6 @@ pub fn get_git_status(
         };
 
         result.insert(abs_str, status.to_string());
-        i += 1;
     }
 
     Ok(result)
@@ -311,11 +350,19 @@ pub fn get_git_remote_status(
         return Ok(HashMap::new());
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Parse line-by-line over the raw byte buffer rather than running
+    // `String::from_utf8_lossy` over the whole output up-front. This
+    // confines any UTF-8 replacement characters to a single line if a
+    // path happens to contain non-UTF-8 bytes, instead of smearing
+    // them across the buffer.
     let mut result = HashMap::new();
 
-    for line in stdout.lines() {
-        let line = line.trim();
+    for line_bytes in output.stdout.split(|&b| b == b'\n') {
+        if line_bytes.is_empty() {
+            continue;
+        }
+        let line_cow = String::from_utf8_lossy(line_bytes);
+        let line = line_cow.trim();
         if line.is_empty() {
             continue;
         }
@@ -552,36 +599,19 @@ pub fn git_discard(
         .current_dir(&repo_path)
         .output()
         .map_err(|e| e.to_string())?;
-    let stdout = String::from_utf8_lossy(&status_output.stdout);
     let mut untracked: Vec<String> = Vec::new();
     let mut tracked: Vec<String> = Vec::new();
 
     let path_set: std::collections::HashSet<&str> = paths.iter().map(|s| s.as_str()).collect();
 
-    let entries: Vec<&str> = stdout.split('\0').collect();
-    let mut idx = 0;
-    while idx < entries.len() {
-        let entry = entries[idx];
-        if entry.len() < 4 {
-            idx += 1;
-            continue;
-        }
-        let ix = entry.as_bytes()[0];
-        let wt = entry.as_bytes()[1];
-        let file = &entry[3..];
-
-        if ix == b'R' || ix == b'C' {
-            idx += 1;
-        }
-
-        if path_set.contains(file) {
-            if ix == b'?' && wt == b'?' {
-                untracked.push(file.to_string());
+    for entry in parse_status_porcelain_z(&status_output.stdout) {
+        if path_set.contains(entry.file.as_str()) {
+            if entry.index_status == b'?' && entry.wt_status == b'?' {
+                untracked.push(entry.file);
             } else {
-                tracked.push(file.to_string());
+                tracked.push(entry.file);
             }
         }
-        idx += 1;
     }
 
     if !tracked.is_empty() {
@@ -1135,5 +1165,128 @@ mod tests {
         assert!(validate_git_file_path("src/main.rs").is_ok());
         assert!(validate_git_file_path("README.md").is_ok());
         assert!(validate_git_file_path("path/to/file.txt").is_ok());
+    }
+
+    // ── Byte-level porcelain-z parser tests (C6) ────────────────
+
+    fn build_z(parts: &[&[u8]]) -> Vec<u8> {
+        // Helper: join byte slices with NUL separators, ending with a
+        // trailing NUL just like real `git status -z` output.
+        let mut out = Vec::new();
+        for (i, p) in parts.iter().enumerate() {
+            out.extend_from_slice(p);
+            if i + 1 < parts.len() {
+                out.push(0);
+            }
+        }
+        out.push(0);
+        out
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_ascii_paths() {
+        // Two simple modifications, one untracked file.
+        let raw = build_z(&[
+            b" M src/main.rs",
+            b"M  Cargo.toml",
+            b"?? notes.txt",
+        ]);
+        let entries = parse_status_porcelain_z(&raw);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].file, "src/main.rs");
+        assert_eq!(entries[0].index_status, b' ');
+        assert_eq!(entries[0].wt_status, b'M');
+        assert!(entries[0].orig.is_none());
+
+        assert_eq!(entries[1].file, "Cargo.toml");
+        assert_eq!(entries[1].index_status, b'M');
+        assert_eq!(entries[1].wt_status, b' ');
+
+        assert_eq!(entries[2].file, "notes.txt");
+        assert_eq!(entries[2].index_status, b'?');
+        assert_eq!(entries[2].wt_status, b'?');
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_handles_utf8_cjk_paths() {
+        // Mandarin filename — valid UTF-8, should round-trip cleanly.
+        let path = "src/笔记.md";
+        let raw = build_z(&[format!(" M {path}").as_bytes()]);
+        let entries = parse_status_porcelain_z(&raw);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file, path);
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_handles_rename_pair() {
+        // R<status> NEW \0 OLD \0 — ensure we consume both entries
+        // and remember the source path under `orig`.
+        let raw = build_z(&[b"R  src/new.rs", b"src/old.rs", b" M README.md"]);
+        let entries = parse_status_porcelain_z(&raw);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].file, "src/new.rs");
+        assert_eq!(entries[0].orig.as_deref(), Some("src/old.rs"));
+        // Critical: the next entry is the unrelated README modification,
+        // NOT the consumed source path.
+        assert_eq!(entries[1].file, "README.md");
+        assert!(entries[1].orig.is_none());
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_handles_copy_pair() {
+        let raw = build_z(&[b"C  copy.rs", b"original.rs"]);
+        let entries = parse_status_porcelain_z(&raw);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file, "copy.rs");
+        assert_eq!(entries[0].orig.as_deref(), Some("original.rs"));
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_skips_short_entries() {
+        // Real `-z` output includes a trailing NUL, which produces an
+        // empty trailing entry. Anything < 4 bytes is skipped.
+        let raw = build_z(&[b" M ok.rs", b"", b"x"]);
+        let entries = parse_status_porcelain_z(&raw);
+        // Only the valid entry survives.
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file, "ok.rs");
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_empty_input() {
+        let entries = parse_status_porcelain_z(b"");
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_preserves_non_utf8_paths_lossily() {
+        // Construct an entry whose path contains invalid UTF-8 (a lone
+        // 0xFF byte). The parser must NOT crash; the path becomes a
+        // lossy string but the rest of the parse still works.
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b" M ok\xFFbad.rs");
+        raw.push(0);
+        raw.extend_from_slice(b" M next.rs");
+        raw.push(0);
+        let entries = parse_status_porcelain_z(&raw);
+        assert_eq!(entries.len(), 2);
+        // The next entry is unaffected — this is the win over the
+        // previous "lossy the whole buffer first" approach where a
+        // malformed path could shift offsets.
+        assert_eq!(entries[1].file, "next.rs");
+    }
+
+    #[test]
+    fn test_parse_porcelain_z_truncated_rename_does_not_consume_trailing_nul() {
+        // Edge case: a rename entry with no source path, where the
+        // buffer simply ends with the trailing NUL that real git output
+        // always emits. The parser must not treat the empty trailing
+        // slice as a valid source path; orig stays None.
+        let raw = build_z(&[b"R  src/new.rs"]);
+        let entries = parse_status_porcelain_z(&raw);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].file, "src/new.rs");
+        assert!(entries[0].orig.is_none(),
+            "truncated rename must not produce an empty-string source");
     }
 }
