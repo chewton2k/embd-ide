@@ -103,6 +103,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // One-shot: re-key any plaintext keys.json from older builds
+            // into the encrypted store. No-op when there's nothing to
+            // migrate. Set LEO_DISABLE_KEY_MIGRATION=1 to skip.
+            ai::migrate_plaintext_keys();
             let loaded = session::load_state_from_disk(app.handle()).unwrap_or_default();
             let handle = app.state::<session::AppStateHandle>();
             let mut guard = handle

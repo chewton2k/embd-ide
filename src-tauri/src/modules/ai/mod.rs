@@ -1,10 +1,14 @@
+use base64::Engine as _;
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
+
+mod key_store;
 
 /// Shared HTTP client for non-streaming requests (with timeout).
 fn http_client() -> &'static reqwest::Client {
@@ -37,67 +41,194 @@ fn http_client_streaming() -> &'static reqwest::Client {
 
 const SERVICE_NAME: &str = "leo-ide";
 
-// ── Key storage: keyring with file fallback ──
-// On macOS in dev mode, keyring can silently fail due to unsigned binaries.
-// We use a file fallback at ~/.leo-ide/keys.json as a reliable alternative.
+// ── Key storage ──
+//
+// Order of preference, on every read AND write:
+//
+//   1. OS keyring (primary, never on disk)
+//   2. ChaCha20-Poly1305 encrypted file at `<base>/keys.enc`. The 32-byte
+//      master key is itself stored in the keyring under `__file_key__`,
+//      so the file is meaningless without keyring access.
+//   3. Last-resort: derive the master key from machine-specific paths so
+//      we can still read keys.enc on systems with no keyring at all.
+//      This is *obfuscation*, not strong protection — see the security
+//      notes in the deferred-items plan. The primary protections at this
+//      tier are OS-level FDE and the 0o600 file permissions.
+//
+// Migration: any plaintext `keys.json` left over from earlier builds is
+// re-keyed into the new format on startup and renamed to `keys.json.bak`.
 
-fn keys_file_path() -> std::path::PathBuf {
+const FILE_KEY_ENTRY: &str = "__file_key__";
+
+fn keys_dir() -> PathBuf {
     let dir = dirs::home_dir().unwrap_or_default().join(".leo-ide");
-    std::fs::create_dir_all(&dir).ok();
-    dir.join("keys.json")
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }
 
-fn read_keys_file() -> std::collections::HashMap<String, String> {
-    let path = keys_file_path();
-    if !path.exists() { return std::collections::HashMap::new(); }
-    let Ok(bytes) = std::fs::read(&path) else { return std::collections::HashMap::new(); };
-    serde_json::from_slice(&bytes).unwrap_or_default()
+fn legacy_keys_file_in(base: &Path) -> PathBuf {
+    base.join("keys.json")
 }
 
-fn write_keys_file(map: &std::collections::HashMap<String, String>) {
-    let path = keys_file_path();
-    if let Ok(bytes) = serde_json::to_vec_pretty(map) {
-        if std::fs::write(&path, bytes).is_ok() {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(0o600);
-                std::fs::set_permissions(&path, perms).ok();
+/// Resolve the 32-byte master key used to seal `keys.enc`.
+///
+/// We first try the OS keyring — this is the only path where the key
+/// never touches disk. If keyring read fails but write succeeds we mint a
+/// fresh key. If both fail we fall back to a machine-derived key (tier 3)
+/// so an existing encrypted file remains decryptable on systems where
+/// keyring support broke between builds.
+fn get_or_create_file_key() -> Result<[u8; key_store::KEY_SIZE], String> {
+    if let Ok(entry) = Entry::new(SERVICE_NAME, FILE_KEY_ENTRY) {
+        if let Ok(b64) = entry.get_password() {
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&b64) {
+                if bytes.len() == key_store::KEY_SIZE {
+                    let mut k = [0u8; key_store::KEY_SIZE];
+                    k.copy_from_slice(&bytes);
+                    return Ok(k);
+                }
+                // Corrupt entry — fall through and try to overwrite it.
             }
         }
+        // No existing key (or unparsable). Try to create one.
+        let mut k = [0u8; key_store::KEY_SIZE];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut k);
+        let b64 = base64::engine::general_purpose::STANDARD.encode(k);
+        if entry.set_password(&b64).is_ok() {
+            return Ok(k);
+        }
     }
+    // Tier 3: derive deterministically from machine-specific data so that
+    // a previously-written keys.enc remains readable. This is obfuscation
+    // only and is documented as such.
+    Ok(derive_machine_file_key())
+}
+
+fn derive_machine_file_key() -> [u8; key_store::KEY_SIZE] {
+    use sha2::{Digest, Sha256};
+    // Build-time constant: changing the binary changes the salt and thus
+    // invalidates the tier-3 fallback. Acceptable: tier-3 only matters on
+    // systems with no keyring, where users will re-enter their keys.
+    const SALT: &[u8] = b"leo-ide:v1:file-key-fallback";
+    let mut h = Sha256::new();
+    h.update(SALT);
+    if let Some(p) = dirs::data_local_dir() {
+        h.update(p.to_string_lossy().as_bytes());
+    }
+    if let Some(p) = dirs::home_dir() {
+        h.update(p.to_string_lossy().as_bytes());
+    }
+    let digest = h.finalize();
+    let mut k = [0u8; key_store::KEY_SIZE];
+    k.copy_from_slice(&digest);
+    k
 }
 
 fn get_key(provider: &str) -> Result<Option<String>, String> {
-    // Try keyring first
     if let Ok(entry) = Entry::new(SERVICE_NAME, provider) {
         if let Ok(pw) = entry.get_password() {
-            if !pw.is_empty() { return Ok(Some(pw)); }
+            if !pw.is_empty() {
+                return Ok(Some(pw));
+            }
         }
     }
-    // Fallback to file
-    let map = read_keys_file();
-    Ok(map.get(provider).cloned())
+    let file_key = get_or_create_file_key()?;
+    let dir = keys_dir();
+    match key_store::get(&dir, &file_key, provider) {
+        Ok(v) => Ok(v),
+        // Corrupted file: surface as "no key" so the caller asks the user
+        // to re-enter, instead of crashing the AI flow.
+        Err(e) => {
+            log::warn!("encrypted keys file unreadable: {e}");
+            Ok(None)
+        }
+    }
 }
 
 fn set_key(provider: &str, key: &str) -> Result<(), String> {
-    // Write to both keyring and file for reliability
+    let file_key = get_or_create_file_key()?;
+    let dir = keys_dir();
+
+    if key.is_empty() {
+        // Delete from both stores so a stale entry can't shadow a new one.
+        if let Ok(entry) = Entry::new(SERVICE_NAME, provider) {
+            let _ = entry.delete_credential();
+        }
+        let _ = key_store::remove(&dir, &file_key, provider);
+        return Ok(());
+    }
+
+    // Try keyring first.
     if let Ok(entry) = Entry::new(SERVICE_NAME, provider) {
-        if key.is_empty() {
-            entry.delete_credential().ok();
-        } else {
-            entry.set_password(key).ok();
+        if entry.set_password(key).is_ok() {
+            // Make sure the encrypted file doesn't keep an older copy
+            // around that would shadow future reads.
+            let _ = key_store::remove(&dir, &file_key, provider);
+            return Ok(());
         }
     }
-    // Always write to file as fallback
-    let mut map = read_keys_file();
-    if key.is_empty() {
-        map.remove(provider);
-    } else {
-        map.insert(provider.to_string(), key.to_string());
+
+    // Keyring unavailable — fall back to the encrypted file.
+    key_store::put(&dir, &file_key, provider, key)
+}
+
+/// Migrate any plaintext `keys.json` from older builds into the new
+/// secure storage. The old file is renamed to `keys.json.bak` so users
+/// can recover by hand if migration goes sideways.
+///
+/// Setting the `LEO_DISABLE_KEY_MIGRATION` env var skips migration —
+/// useful as an emergency rollback knob.
+pub fn migrate_plaintext_keys() {
+    if std::env::var("LEO_DISABLE_KEY_MIGRATION").is_ok() {
+        return;
     }
-    write_keys_file(&map);
-    Ok(())
+    migrate_plaintext_keys_in(&keys_dir(), &mut |provider, key| set_key(provider, key));
+}
+
+/// Test-friendly variant: migrate from `base/keys.json` using a custom
+/// store function so we don't have to touch the real keyring or the
+/// user's home directory.
+pub fn migrate_plaintext_keys_in(
+    base: &Path,
+    store: &mut dyn FnMut(&str, &str) -> Result<(), String>,
+) -> usize {
+    let path = legacy_keys_file_in(base);
+    if !path.exists() {
+        return 0;
+    }
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) => {
+            log::warn!("could not read legacy keys.json: {e}");
+            return 0;
+        }
+    };
+    let map: std::collections::HashMap<String, String> = match serde_json::from_slice(&bytes) {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("legacy keys.json malformed: {e}");
+            return 0;
+        }
+    };
+
+    let mut migrated = 0usize;
+    for (provider, key) in &map {
+        if key.is_empty() {
+            continue;
+        }
+        match store(provider, key) {
+            Ok(()) => migrated += 1,
+            Err(e) => log::warn!("migration: failed to store key for '{provider}': {e}"),
+        }
+    }
+
+    let backup = path.with_extension("json.bak");
+    // Best-effort rename. If it fails, we leave the plaintext file in
+    // place rather than risk losing it; next startup will retry.
+    if let Err(e) = std::fs::rename(&path, &backup) {
+        log::warn!("migration: failed to rename keys.json → keys.json.bak: {e}");
+    }
+    log::info!("Migrated {migrated} key(s) from plaintext to secure storage");
+    migrated
 }
 
 #[tauri::command]
@@ -487,5 +618,155 @@ fn display_provider(p: &str) -> &str {
         "openai" => "OpenAI",
         "anthropic" => "Anthropic",
         _ => p,
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn key_bytes(seed: u8) -> [u8; key_store::KEY_SIZE] {
+        let mut k = [0u8; key_store::KEY_SIZE];
+        for (i, b) in k.iter_mut().enumerate() {
+            *b = seed.wrapping_add(i as u8);
+        }
+        k
+    }
+
+    #[test]
+    fn migrate_moves_plaintext_into_encrypted_store_and_renames_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("keys.json");
+        std::fs::write(
+            &legacy,
+            br#"{"openai":"sk-old","anthropic":"ant-old","empty":""}"#,
+        )
+        .unwrap();
+
+        // Simulate: keyring is unavailable, so the migration writes into
+        // the encrypted file via the test store closure.
+        let file_key = key_bytes(0xA1);
+        let captured: std::cell::RefCell<Vec<(String, String)>> = std::cell::RefCell::new(vec![]);
+        let mut store = |provider: &str, key: &str| -> Result<(), String> {
+            captured
+                .borrow_mut()
+                .push((provider.to_string(), key.to_string()));
+            key_store::put(dir.path(), &file_key, provider, key)
+        };
+        let migrated = migrate_plaintext_keys_in(dir.path(), &mut store);
+
+        assert_eq!(migrated, 2, "two non-empty keys must be migrated");
+        // Empty entry was skipped (set_key with empty string would *delete*).
+        let captured = captured.into_inner();
+        assert!(captured.iter().any(|(p, _)| p == "openai"));
+        assert!(captured.iter().any(|(p, _)| p == "anthropic"));
+        assert!(!captured.iter().any(|(p, _)| p == "empty"));
+
+        // Encrypted file now holds the keys.
+        assert_eq!(
+            key_store::get(dir.path(), &file_key, "openai").unwrap(),
+            Some("sk-old".to_string())
+        );
+        assert_eq!(
+            key_store::get(dir.path(), &file_key, "anthropic").unwrap(),
+            Some("ant-old".to_string())
+        );
+
+        // Legacy plaintext renamed to .bak, original gone.
+        assert!(!legacy.exists());
+        assert!(dir.path().join("keys.json.bak").exists());
+    }
+
+    #[test]
+    fn migrate_is_noop_when_no_legacy_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = |_: &str, _: &str| -> Result<(), String> { Ok(()) };
+        let n = migrate_plaintext_keys_in(dir.path(), &mut store);
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn migrate_handles_malformed_legacy_file_without_crashing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("keys.json"), b"{not json").unwrap();
+        let mut store = |_: &str, _: &str| -> Result<(), String> {
+            unreachable!("malformed file must produce no store calls")
+        };
+        let n = migrate_plaintext_keys_in(dir.path(), &mut store);
+        assert_eq!(n, 0);
+        // Malformed file is left in place so an operator can inspect it.
+        assert!(dir.path().join("keys.json").exists());
+    }
+
+    #[test]
+    fn migrate_continues_when_a_single_store_call_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("keys.json"),
+            br#"{"a":"1","b":"2","c":"3"}"#,
+        )
+        .unwrap();
+
+        let succeeded = std::cell::RefCell::new(0);
+        let mut store = |provider: &str, _key: &str| -> Result<(), String> {
+            if provider == "b" {
+                Err("simulated keyring failure".into())
+            } else {
+                *succeeded.borrow_mut() += 1;
+                Ok(())
+            }
+        };
+        let n = migrate_plaintext_keys_in(dir.path(), &mut store);
+        assert_eq!(n, 2);
+        assert_eq!(*succeeded.borrow(), 2);
+        // Even with a partial failure we still rename the legacy file:
+        // re-reading it on next startup would just retry. Since the user
+        // still has keys.json.bak as a manual recovery, this is safer
+        // than blocking startup forever.
+        assert!(dir.path().join("keys.json.bak").exists());
+    }
+
+    #[test]
+    fn machine_derived_file_key_is_stable_across_calls() {
+        // Tier-3 fallback must be deterministic so a previously-written
+        // keys.enc remains decryptable.
+        let a = derive_machine_file_key();
+        let b = derive_machine_file_key();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn corrupted_keys_enc_does_not_panic_and_returns_no_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_key = key_bytes(0x66);
+        std::fs::write(key_store::encrypted_path(dir.path()), b"\x99garbage").unwrap();
+        // Reading via the store API surfaces an Err — the production
+        // get_key wraps that into Ok(None) so the AI flow degrades to
+        // "no key configured" rather than crashing.
+        assert!(key_store::read_all(dir.path(), &file_key).is_err());
+    }
+
+    #[test]
+    fn provider_round_trip_via_file_only_path() {
+        // Simulates the keyring-unavailable case: every put/get goes
+        // through the encrypted file. Mirrors what runtime set_key/
+        // get_key do when Entry::new succeeds but the actual keyring
+        // operation fails.
+        let dir = tempfile::tempdir().unwrap();
+        let file_key = key_bytes(0x4F);
+        let mut map = HashMap::new();
+        map.insert("openrouter".into(), "or-1".into());
+        map.insert("openai".into(), "sk-1".into());
+        map.insert("anthropic".into(), "an-1".into());
+        key_store::write_all(dir.path(), &file_key, &map).unwrap();
+
+        for (p, expected) in &map {
+            assert_eq!(
+                key_store::get(dir.path(), &file_key, p).unwrap().as_deref(),
+                Some(expected.as_str())
+            );
+        }
     }
 }
