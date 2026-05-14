@@ -121,6 +121,13 @@ pub struct FileEntry {
     pub name: String,
     pub path: String,
     pub is_dir: bool,
+    /// True when the entry itself is a symbolic link. The frontend
+    /// renders a badge so users can see at a glance which entries are
+    /// links rather than real files. Symlinks resolving outside the
+    /// project root are still shown but cannot be opened —
+    /// `validate_path` canonicalizes before any I/O and rejects paths
+    /// that escape the root.
+    pub is_symlink: bool,
     pub children: Option<Vec<FileEntry>>,
 }
 
@@ -134,14 +141,27 @@ pub fn read_dir_tree(
 ) -> Result<Vec<FileEntry>, String> {
     validate_path(&path, &state)?;
     let max_depth = depth.unwrap_or(1).min(50);
-    read_dir_recursive(&PathBuf::from(path), 0, max_depth)
+    let mut visited = std::collections::HashSet::new();
+    read_dir_recursive(&PathBuf::from(path), 0, max_depth, &mut visited)
 }
 
 fn read_dir_recursive(
-    path: &PathBuf,
+    path: &Path,
     current_depth: u32,
     max_depth: u32,
+    visited: &mut std::collections::HashSet<PathBuf>,
 ) -> Result<Vec<FileEntry>, String> {
+    // Cycle detection: track the canonical path of every directory we
+    // descend into. A symlinked directory that points back to (or
+    // through) an ancestor would otherwise loop forever once
+    // recursion follows it. We only insert canonical paths so two
+    // routes to the same target (e.g. via different symlink chains)
+    // are detected as a cycle.
+    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if !visited.insert(canonical) {
+        return Ok(Vec::new());
+    }
+
     let entries = fs::read_dir(path).map_err(|e| e.to_string())?;
     let mut result: Vec<FileEntry> = Vec::new();
 
@@ -155,13 +175,30 @@ fn read_dir_recursive(
 
         let file_path = entry.path();
         let ft = entry.file_type().map_err(|e| e.to_string())?;
-        if ft.is_symlink() {
-            continue;
-        }
-        let is_dir = ft.is_dir();
+        let is_symlink = ft.is_symlink();
 
-        let children = if is_dir && current_depth < max_depth {
-            Some(read_dir_recursive(&file_path, current_depth + 1, max_depth).unwrap_or_default())
+        // For symlinks we need the *target's* metadata to know if the
+        // tree should treat this entry as a directory. `entry.file_type`
+        // reports the link itself; `fs::metadata` follows it. Dangling
+        // symlinks fall back to "treat as file" so they're visible
+        // without crashing the walk.
+        let is_dir = if is_symlink {
+            fs::metadata(&file_path).map(|m| m.is_dir()).unwrap_or(false)
+        } else {
+            ft.is_dir()
+        };
+
+        // Recurse into REAL directories only. Symlinked directories
+        // are listed but never expanded — that's the cheapest way to
+        // avoid the cycles the visited-set is also guarding against.
+        // Users can still navigate symlinked dirs by clicking through
+        // (FileTree.svelte fetches their children lazily), where the
+        // visited set provides the real safety net.
+        let children = if is_dir && !is_symlink && current_depth < max_depth {
+            Some(
+                read_dir_recursive(&file_path, current_depth + 1, max_depth, visited)
+                    .unwrap_or_default(),
+            )
         } else if is_dir {
             Some(Vec::new())
         } else {
@@ -172,6 +209,7 @@ fn read_dir_recursive(
             name: file_name,
             path: file_path.to_string_lossy().to_string(),
             is_dir,
+            is_symlink,
             children,
         });
     }
@@ -611,5 +649,123 @@ mod tests {
             r.as_ref().map(|p| p.as_path()),
             Some(Path::new("/tmp/from-async"))
         );
+    }
+
+    // ── M15: symlinks in the file tree ──────────────────────────
+
+    #[cfg(unix)]
+    fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    #[cfg(unix)]
+    fn find<'a>(entries: &'a [FileEntry], name: &str) -> Option<&'a FileEntry> {
+        entries.iter().find(|e| e.name == name)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_dir_recursive_marks_file_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("real.txt");
+        std::fs::write(&target, b"hello").unwrap();
+        let link = dir.path().join("link.txt");
+        symlink(&target, &link).unwrap();
+
+        let mut visited = std::collections::HashSet::new();
+        let entries =
+            read_dir_recursive(dir.path(), 0, 5, &mut visited).expect("walk");
+
+        let real = find(&entries, "real.txt").expect("real entry present");
+        assert!(!real.is_symlink, "regular file must not be flagged as symlink");
+
+        let link_entry = find(&entries, "link.txt").expect("symlink entry present");
+        assert!(link_entry.is_symlink, "symlink must be flagged");
+        assert!(!link_entry.is_dir, "symlink to file must report is_dir=false");
+        assert!(link_entry.children.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_dir_recursive_lists_symlinked_directory_without_recursing() {
+        let dir = tempfile::tempdir().unwrap();
+        // real_dir contains one file
+        let real_dir = dir.path().join("real_dir");
+        std::fs::create_dir(&real_dir).unwrap();
+        std::fs::write(real_dir.join("inner.txt"), b"x").unwrap();
+        // link_dir → real_dir
+        let link_dir = dir.path().join("link_dir");
+        symlink(&real_dir, &link_dir).unwrap();
+
+        let mut visited = std::collections::HashSet::new();
+        let entries =
+            read_dir_recursive(dir.path(), 0, 5, &mut visited).expect("walk");
+
+        let real = find(&entries, "real_dir").expect("real_dir present");
+        assert!(real.is_dir);
+        assert!(!real.is_symlink);
+        // The real directory's children are populated.
+        assert_eq!(real.children.as_ref().map(|c| c.len()), Some(1));
+
+        let linked = find(&entries, "link_dir").expect("link_dir present");
+        assert!(linked.is_dir, "symlink to directory should report is_dir=true");
+        assert!(linked.is_symlink);
+        // Symlinked directory shows up but children is empty: we do
+        // not recurse into the link target through the recursive walk.
+        // (The frontend's lazy expansion path can fetch them later.)
+        assert_eq!(
+            linked.children.as_ref().map(|c| c.len()),
+            Some(0),
+            "symlinked directory must not recurse via the same walk"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_dir_recursive_handles_symlink_cycle_without_infinite_loop() {
+        // Construct: parent/{child_dir, loop_link → parent}. A naive
+        // walk that follows symlinks would recurse forever; the
+        // visited set should stop it on the second hop.
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        std::fs::create_dir(&parent).unwrap();
+        let child_dir = parent.join("child");
+        std::fs::create_dir(&child_dir).unwrap();
+        std::fs::write(child_dir.join("leaf.txt"), b"x").unwrap();
+        // The cycle: parent/loop -> parent itself.
+        let cycle_link = parent.join("loop");
+        symlink(&parent, &cycle_link).unwrap();
+
+        let mut visited = std::collections::HashSet::new();
+        let entries =
+            read_dir_recursive(&parent, 0, 5, &mut visited).expect("walk");
+
+        // The walk completes (no infinite loop) and reports the link.
+        let loop_entry = find(&entries, "loop").expect("loop entry present");
+        assert!(loop_entry.is_symlink);
+        // child still walked and contains its leaf.
+        let child = find(&entries, "child").expect("child entry present");
+        assert!(child.is_dir);
+        assert_eq!(child.children.as_ref().map(|c| c.len()), Some(1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_dir_recursive_exposes_dangling_symlink_as_a_file() {
+        // Symlink whose target was removed — we must list it (so the
+        // user can clean it up) without crashing the walk.
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("dangling");
+        symlink(Path::new("/no/such/path/leo-dangling-target"), &link).unwrap();
+
+        let mut visited = std::collections::HashSet::new();
+        let entries =
+            read_dir_recursive(dir.path(), 0, 5, &mut visited).expect("walk");
+
+        let dangling = find(&entries, "dangling").expect("dangling entry present");
+        assert!(dangling.is_symlink);
+        // metadata() fails for a dangling symlink → we treat it as a
+        // file (is_dir=false). Better than panicking.
+        assert!(!dangling.is_dir);
     }
 }

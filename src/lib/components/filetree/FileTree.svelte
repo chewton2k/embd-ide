@@ -6,7 +6,7 @@
   import { watch, type UnwatchFn } from '@tauri-apps/plugin-fs';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import Icon from '@iconify/svelte';
-  import { FolderOpen, Folder, ChevronRight } from 'lucide-svelte';
+  import { FolderOpen, Folder, ChevronRight, Link2 } from 'lucide-svelte';
   import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview, createFileSignal, createFolderSignal } from '../../modules';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
   import { log } from '../../modules/logging';
@@ -22,6 +22,10 @@
     name: string;
     path: string;
     is_dir: boolean;
+    /** True when the entry is a symbolic link. The tree shows a Link2
+        badge for these entries; symlinked directories are listed but
+        not expanded. */
+    is_symlink?: boolean;
     children: FileEntry[] | null;
   }
 
@@ -1374,6 +1378,11 @@
       {@const remoteColor = getGitRemoteStatusColor(entry.path, entry.is_dir)}
       {@const nameColor = gitColor || remoteColor}
       <span class="file-name" class:dir-name={entry.is_dir} style={nameColor ? `color: ${nameColor}` : ''}>{entry.name}</span>
+      {#if entry.is_symlink}
+        <span class="symlink-badge" title="Symbolic link" aria-label="Symbolic link">
+          <Link2 size={10} />
+        </span>
+      {/if}
       {#if !entry.is_dir && gitRemoteFileStatus.has(entry.path)}
         <span class="git-badge remote-badge" style="color: {remoteColor}">↓{gitRemoteFileStatus.get(entry.path)}</span>
       {/if}
@@ -1568,6 +1577,17 @@
 
   .remote-badge {
     margin-right: 2px;
+  }
+
+  /* Symbolic-link indicator: a small Link2 icon to the right of the
+     filename (before any git badges). Stays visible at every theme. */
+  .symlink-badge {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-left: 4px;
+    opacity: 0.75;
   }
 
   /* Create input */
