@@ -222,6 +222,13 @@
   // Gitignored paths (files and directories)
   let gitIgnoredPaths = $state<Set<string>>(new Set());
 
+  function recordsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+    const keysA = Object.keys(a);
+    if (keysA.length !== Object.keys(b).length) return false;
+    for (const k of keysA) { if (a[k] !== b[k]) return false; }
+    return true;
+  }
+
   async function fetchGitStatus() {
     if (!rootPath) return;
     let newFileStatus: Map<string, string>;
@@ -229,8 +236,10 @@
     let newIgnored: Set<string>;
     try {
       const status = await invoke<Record<string, string>>('get_git_status', { path: rootPath });
-      // Publish to shared store so GitPanel can use it without a separate poll
-      sharedGitStatus.set(status);
+      // Skip reactive update if status unchanged (avoids full tree re-render)
+      if (!recordsEqual(status, $sharedGitStatus)) {
+        sharedGitStatus.set(status);
+      }
       newFileStatus = new Map(Object.entries(status));
       // Compute folder statuses
       const folders = new Map<string, string>();
@@ -256,7 +265,9 @@
     let newRemoteFolderStatus: Map<string, string>;
     try {
       const remoteStatus = await invoke<Record<string, string>>('get_git_remote_status', { path: rootPath });
-      sharedGitRemoteStatus.set(remoteStatus);
+      if (!recordsEqual(remoteStatus, $sharedGitRemoteStatus)) {
+        sharedGitRemoteStatus.set(remoteStatus);
+      }
       newRemoteFileStatus = new Map(Object.entries(remoteStatus));
       // Compute folder propagation for remote status
       const remoteFolders = new Map<string, string>();
