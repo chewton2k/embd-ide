@@ -15,6 +15,7 @@ import { TOOL_SCHEMAS, dispatchTool, parseToolArgs, type ToolCall, type ToolResu
 import { checkPermission, getBlockReason, type PermissionLevel } from './toolPermissions';
 import { addEdits } from './pendingEdits';
 import { recordAiChange } from './aiHistory';
+import { currentPlan, createPlan, approvePlan, updateStepStatus, parsePlanSteps, PLAN_SYSTEM_PROMPT } from './agentPlan';
 import { log } from '../logging';
 
 // ── Agent state ──
@@ -148,6 +149,138 @@ export function stopAgent() {
     invoke('ai_chat_cancel', { sessionId: currentSessionId }).catch(() => {});
   }
   agentRunning.set(false);
+}
+
+// ── Plan mode ──
+
+/**
+ * Run the agent in plan mode: first ask for a plan, then execute after approval.
+ * The plan is shown as a checklist in chat. User approves → executePlan() runs.
+ */
+export async function runAgentWithPlan(userRequest: string): Promise<void> {
+  cancelRequested = false;
+  agentRunning.set(true);
+  agentStep.set(0);
+
+  const root = get(projectRoot) || '';
+
+  chatMessages.update(msgs => [...msgs, { role: 'user', content: userRequest }]);
+
+  const projectContext = await buildProjectContext(userRequest).catch(() => '');
+  const systemContent = buildSystemPrompt(projectContext) + '\n\n' + PLAN_SYSTEM_PROMPT;
+
+  const messages = [
+    { role: 'system', content: systemContent },
+    ...get(chatMessages).map(m => ({ role: m.role, content: m.content })),
+  ];
+
+  // Stream the plan response (no tools — just text)
+  const result = await streamAgentTurn(messages, root);
+
+  if (cancelRequested || !result.content) {
+    agentRunning.set(false);
+    return;
+  }
+
+  // Parse the plan from the response
+  const steps = parsePlanSteps(result.content);
+  if (steps.length > 0) {
+    createPlan(steps);
+  }
+
+  // Pause — user reviews the plan in PlanView, then calls executePlan()
+  agentRunning.set(false);
+  scheduleSaveConversation();
+}
+
+/**
+ * Execute the approved plan. Called after user reviews and approves.
+ */
+export async function executePlan(): Promise<void> {
+  const plan = get(currentPlan);
+  if (!plan || !plan.approved) return;
+
+  cancelRequested = false;
+  agentRunning.set(true);
+
+  const root = get(projectRoot) || '';
+  const projectContext = await buildProjectContext('').catch(() => '');
+  const systemContent = buildSystemPrompt(projectContext);
+
+  const pendingSteps = plan.steps.filter(s => s.status === 'pending');
+
+  for (let i = 0; i < pendingSteps.length; i++) {
+    if (cancelRequested) break;
+    const step = pendingSteps[i];
+    agentStep.set(i + 1);
+    updateStepStatus(step.id, 'running');
+
+    // Ask the model to execute this specific step
+    chatMessages.update(msgs => [...msgs, {
+      role: 'user' as const,
+      content: `Execute step ${i + 1}: ${step.description}`,
+    }]);
+
+    const messages = [
+      { role: 'system', content: systemContent },
+      ...get(chatMessages).map(m => ({ role: m.role, content: m.content })),
+    ];
+
+    const result = await streamAgentTurn(messages, root);
+
+    if (cancelRequested) {
+      updateStepStatus(step.id, 'failed');
+      break;
+    }
+
+    // Process tool calls from this step
+    if (result.toolCalls) {
+      for (const toolCall of result.toolCalls) {
+        if (cancelRequested) break;
+        const args = parseToolArgs(toolCall.function.arguments);
+        const permission = checkPermission(toolCall.function.name as any, args, get(agentAutoApprove));
+
+        if (permission === 'deny') {
+          chatMessages.update(msgs => [...msgs, {
+            role: 'user' as const,
+            content: `[🚫 ${getBlockReason(toolCall.function.name as any, args)}]`,
+          }]);
+          continue;
+        }
+
+        if (permission === 'ask' && toolCall.function.name === 'edit_file') {
+          const toolResult = await dispatchTool(toolCall, {
+            projectRoot: root,
+            onEdit: (path, startLine, endLine, newContent) => {
+              addEdits([{
+                id: `plan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                filePath: path, startLine, endLine,
+                originalCode: '', newCode: newContent, status: 'pending',
+              }]);
+            },
+          });
+          chatMessages.update(msgs => [...msgs, { role: 'user' as const, content: `[Tool: ${toolCall.function.name}] ${toolResult.content}` }]);
+          continue;
+        }
+
+        if (permission === 'allow') {
+          const toolResult = await dispatchTool(toolCall, {
+            projectRoot: root,
+            onEdit: (path, startLine, endLine, newContent) => {
+              recordAiChange(path, `Edit lines ${startLine}-${endLine}`, '', newContent);
+            },
+          });
+          chatMessages.update(msgs => [...msgs, { role: 'user' as const, content: `[Tool: ${toolCall.function.name}] ${toolResult.content}` }]);
+        }
+      }
+    }
+
+    updateStepStatus(step.id, cancelRequested ? 'failed' : 'done');
+  }
+
+  agentRunning.set(false);
+  agentStep.set(0);
+  scheduleSaveConversation();
 }
 
 // ── Streaming turn ──
