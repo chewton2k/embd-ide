@@ -9,6 +9,7 @@
   import { FolderOpen, Folder, ChevronRight, Link2 } from 'lucide-svelte';
   import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview, createFileSignal, createFolderSignal } from '../../modules';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
+  import { beginGitBranchRequest, getLatestGitBranchRequestId, updateGitBranch } from '../../modules/git/branchUpdate';
   import { log } from '../../modules/logging';
   import { exists } from '@tauri-apps/plugin-fs';
   import Button from '../ui/button/Button.svelte';
@@ -233,24 +234,24 @@
     return true;
   }
 
-  async function fetchGitStatus() {
-    if (!rootPath) return;
+  async function fetchGitStatus(preserveBranchOnNull: boolean = true) {
+    const requestRoot = rootPath;
+    if (!requestRoot) return;
+    const branchRequestId = beginGitBranchRequest();
+    let nextSharedStatus: Record<string, string> = {};
     let newFileStatus: Map<string, string>;
     let newFolderStatus: Map<string, string>;
     let newIgnored: Set<string>;
     try {
-      const status = await invoke<Record<string, string>>('get_git_status', { path: rootPath });
-      // Skip reactive update if status unchanged (avoids full tree re-render)
-      if (!recordsEqual(status, $sharedGitStatus)) {
-        sharedGitStatus.set(status);
-      }
+      const status = await invoke<Record<string, string>>('get_git_status', { path: requestRoot });
+      nextSharedStatus = status;
       newFileStatus = new Map(Object.entries(status));
       // Compute folder statuses
       const folders = new Map<string, string>();
       const priority: Record<string, number> = { M: 3, U: 2, A: 1, S: 1, D: 2 };
       for (const [filePath, code] of newFileStatus) {
         let dir = filePath.substring(0, filePath.lastIndexOf('/'));
-        while (dir.length >= (rootPath?.length ?? 0)) {
+        while (dir.length >= requestRoot.length) {
           const existing = folders.get(dir);
           if (!existing || (priority[code] ?? 0) > (priority[existing] ?? 0)) {
             folders.set(dir, code);
@@ -260,25 +261,23 @@
       }
       newFolderStatus = folders;
     } catch (_) {
-      sharedGitStatus.set({});
       newFileStatus = new Map();
       newFolderStatus = new Map();
     }
     // Fetch remote status (files changed on upstream after git fetch)
+    let nextSharedRemoteStatus: Record<string, string> = {};
     let newRemoteFileStatus: Map<string, string>;
     let newRemoteFolderStatus: Map<string, string>;
     try {
-      const remoteStatus = await invoke<Record<string, string>>('get_git_remote_status', { path: rootPath });
-      if (!recordsEqual(remoteStatus, $sharedGitRemoteStatus)) {
-        sharedGitRemoteStatus.set(remoteStatus);
-      }
+      const remoteStatus = await invoke<Record<string, string>>('get_git_remote_status', { path: requestRoot });
+      nextSharedRemoteStatus = remoteStatus;
       newRemoteFileStatus = new Map(Object.entries(remoteStatus));
       // Compute folder propagation for remote status
       const remoteFolders = new Map<string, string>();
       const remotePriority: Record<string, number> = { M: 3, A: 2, D: 1 };
       for (const [filePath, code] of newRemoteFileStatus) {
         let dir = filePath.substring(0, filePath.lastIndexOf('/'));
-        while (dir.length >= (rootPath?.length ?? 0)) {
+        while (dir.length >= requestRoot.length) {
           const existing = remoteFolders.get(dir);
           if (!existing || (remotePriority[code] ?? 0) > (remotePriority[existing] ?? 0)) {
             remoteFolders.set(dir, code);
@@ -288,31 +287,44 @@
       }
       newRemoteFolderStatus = remoteFolders;
     } catch (_) {
-      sharedGitRemoteStatus.set({});
       newRemoteFileStatus = new Map();
       newRemoteFolderStatus = new Map();
     }
     // Fetch gitignored paths
     try {
-      const ignored = await invoke<string[]>('get_git_ignored', { path: rootPath });
+      const ignored = await invoke<string[]>('get_git_ignored', { path: requestRoot });
       newIgnored = new Set(ignored);
     } catch (_) {
       newIgnored = new Set();
     }
+    let branch: string | null = null;
+    try {
+      branch = await invoke<string | null>('get_git_branch', { path: requestRoot });
+    } catch (_) {
+      // Keep the last known branch on transient errors (e.g. git lock)
+    }
+    if (rootPath !== requestRoot) return;
     // Batch all reactive updates together to avoid multiple re-renders
+    if (!recordsEqual(nextSharedStatus, $sharedGitStatus)) {
+      sharedGitStatus.set(nextSharedStatus);
+    }
+    if (!recordsEqual(nextSharedRemoteStatus, $sharedGitRemoteStatus)) {
+      sharedGitRemoteStatus.set(nextSharedRemoteStatus);
+    }
     gitFileStatus = newFileStatus;
     gitFolderStatus = newFolderStatus;
     gitRemoteFileStatus = newRemoteFileStatus;
     gitRemoteFolderStatus = newRemoteFolderStatus;
     gitIgnoredPaths = newIgnored;
     rebuildIgnoredPrefixes();
-    // Also refresh branch name (eliminates separate poll in App.svelte)
-    try {
-      const branch = await invoke<string | null>('get_git_branch', { path: rootPath });
-      gitBranch.set(branch);
-    } catch (_) {
-      // Keep the last known branch on transient errors (e.g. git lock)
-    }
+    updateGitBranch({
+      branch,
+      preserveOnNull: preserveBranchOnNull,
+      requestProjectRoot: requestRoot,
+      activeProjectRoot: rootPath,
+      requestId: branchRequestId,
+      latestRequestId: getLatestGitBranchRequestId(),
+    });
   }
 
   // Pre-computed set of ignored directory prefixes (with trailing /) for O(depth) lookup
@@ -431,7 +443,7 @@
     showPreview.set(false);
     expandedDirs = new Set([rootPath]);
     await loadDirectory(rootPath);
-    await fetchGitStatus();
+    await fetchGitStatus(false);
     startWatching(rootPath);
     startGitPolling();
 

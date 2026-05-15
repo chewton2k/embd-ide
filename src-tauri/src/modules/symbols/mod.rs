@@ -106,7 +106,7 @@ fn extract_single(node: Node, source: &str, ext: &str) -> Option<Symbol> {
     Some(Symbol { name, kind: kind_str.to_string(), start_line, end_line, body })
 }
 
-fn normalize_kind(kind: &str, ext: &str) -> &'static str {
+fn normalize_kind(kind: &str, _ext: &str) -> &'static str {
     match kind {
         "function_declaration" | "function_item" | "function_definition" | "arrow_function" => "function",
         "class_declaration" | "class_definition" => "class",

@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { ask } from '@tauri-apps/plugin-dialog';
   import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh, sharedGitStatus, addFile } from '../../modules';
+  import { beginGitBranchRequest, getLatestGitBranchRequestId, updateGitBranch } from '../../modules/git/branchUpdate';
   import { log } from '../../modules/logging';
 
   interface GitFile {
@@ -117,8 +118,16 @@
       });
       showBranchDropdown = false;
       // Refresh branch name and status
+      const branchRequestId = beginGitBranchRequest();
       const newBranch = await invoke<string | null>('get_git_branch', { path: root });
-      gitBranch.set(newBranch ?? null);
+      updateGitBranch({
+        branch: newBranch,
+        preserveOnNull: true,
+        requestProjectRoot: root,
+        activeProjectRoot: $projectRoot,
+        requestId: branchRequestId,
+        latestRequestId: getLatestGitBranchRequestId(),
+      });
       await fetchStatusFromBackend();
       if (showHistory) await fetchHistory();
     } catch (e) {
