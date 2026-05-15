@@ -16,6 +16,7 @@ import { checkPermission, getBlockReason, type PermissionLevel } from './toolPer
 import { addEdits } from './pendingEdits';
 import { recordAiChange } from './aiHistory';
 import { currentPlan, createPlan, approvePlan, updateStepStatus, parsePlanSteps, PLAN_SYSTEM_PROMPT } from './agentPlan';
+import { createCheckpoint } from './checkpoints';
 import { log } from '../logging';
 
 // ── Agent state ──
@@ -37,6 +38,9 @@ export async function runAgent(userRequest: string): Promise<void> {
 
   const maxSteps = get(agentMaxSteps);
   const root = get(projectRoot) || '';
+
+  // Create checkpoint before agent makes any changes
+  await createCheckpoint(`Agent: ${userRequest.slice(0, 60)}`);
 
   // Add user message
   chatMessages.update(msgs => [...msgs, { role: 'user', content: userRequest }]);
@@ -204,6 +208,10 @@ export async function executePlan(): Promise<void> {
   agentRunning.set(true);
 
   const root = get(projectRoot) || '';
+
+  // Create checkpoint before executing plan
+  await createCheckpoint(`Plan: ${plan.steps[0]?.description.slice(0, 50) || 'agent plan'}`);
+
   const projectContext = await buildProjectContext('').catch(() => '');
   const systemContent = buildSystemPrompt(projectContext);
 

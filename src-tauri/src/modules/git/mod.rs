@@ -1099,6 +1099,178 @@ pub fn git_resolve_conflict(
     Ok(())
 }
 
+// ── Checkpoints (agent undo) ──
+
+#[derive(Serialize, Clone)]
+pub struct Checkpoint {
+    pub id: String,
+    pub message: String,
+    pub timestamp: i64,
+}
+
+/// Create a checkpoint by committing all current changes to a hidden ref.
+/// This allows "undo agent run" by restoring to this point.
+#[tauri::command]
+pub fn git_create_checkpoint(
+    repo_path: String,
+    message: String,
+    state: tauri::State<'_, ProjectRootState>,
+) -> Result<String, String> {
+    let repo = validate_repo_path(&repo_path, &state)?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let checkpoint_id = format!("leo-checkpoint-{}", timestamp);
+
+    // Stage all changes (including untracked)
+    let add_out = Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git add: {}", e))?;
+    if !add_out.status.success() {
+        // Nothing to stage is fine — we'll still create the tree
+    }
+
+    // Create a tree object from the current index
+    let tree_out = Command::new("git")
+        .args(["write-tree"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git write-tree: {}", e))?;
+    if !tree_out.status.success() {
+        return Err("Failed to write tree for checkpoint".into());
+    }
+    let tree_sha = String::from_utf8_lossy(&tree_out.stdout).trim().to_string();
+
+    // Get current HEAD for parent
+    let head_out = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git rev-parse: {}", e))?;
+    let parent_arg = if head_out.status.success() {
+        let head = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
+        vec!["-p".to_string(), head]
+    } else {
+        vec![] // Initial commit — no parent
+    };
+
+    // Create commit object
+    let mut commit_args = vec!["commit-tree".to_string(), tree_sha];
+    commit_args.extend(parent_arg);
+    commit_args.extend(["-m".to_string(), message.clone()]);
+
+    let commit_out = Command::new("git")
+        .args(&commit_args)
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git commit-tree: {}", e))?;
+    if !commit_out.status.success() {
+        return Err("Failed to create checkpoint commit".into());
+    }
+    let commit_sha = String::from_utf8_lossy(&commit_out.stdout).trim().to_string();
+
+    // Store as a hidden ref
+    let ref_name = format!("refs/leo/checkpoints/{}", checkpoint_id);
+    let update_out = Command::new("git")
+        .args(["update-ref", &ref_name, &commit_sha])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git update-ref: {}", e))?;
+    if !update_out.status.success() {
+        return Err("Failed to store checkpoint ref".into());
+    }
+
+    // Reset index back to HEAD (don't leave staged changes from our add -A)
+    let _ = Command::new("git")
+        .args(["reset", "HEAD"])
+        .current_dir(&repo)
+        .output();
+
+    Ok(checkpoint_id)
+}
+
+/// Restore a checkpoint by checking out its tree.
+#[tauri::command]
+pub fn git_restore_checkpoint(
+    repo_path: String,
+    checkpoint_id: String,
+    state: tauri::State<'_, ProjectRootState>,
+) -> Result<(), String> {
+    let repo = validate_repo_path(&repo_path, &state)?;
+
+    // Validate checkpoint_id format
+    if !checkpoint_id.starts_with("leo-checkpoint-") {
+        return Err("Invalid checkpoint ID".into());
+    }
+
+    let ref_name = format!("refs/leo/checkpoints/{}", checkpoint_id);
+
+    // Verify the ref exists
+    let verify_out = Command::new("git")
+        .args(["rev-parse", "--verify", &ref_name])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git rev-parse: {}", e))?;
+    if !verify_out.status.success() {
+        return Err(format!("Checkpoint '{}' not found", checkpoint_id));
+    }
+    let commit_sha = String::from_utf8_lossy(&verify_out.stdout).trim().to_string();
+
+    // Checkout the tree from that commit (overwrites working directory)
+    let checkout_out = Command::new("git")
+        .args(["checkout", &commit_sha, "--", "."])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git checkout: {}", e))?;
+    if !checkout_out.status.success() {
+        let stderr = String::from_utf8_lossy(&checkout_out.stderr);
+        return Err(format!("Failed to restore checkpoint: {}", stderr));
+    }
+
+    Ok(())
+}
+
+/// List all checkpoints for a repo.
+#[tauri::command]
+pub fn git_list_checkpoints(
+    repo_path: String,
+    state: tauri::State<'_, ProjectRootState>,
+) -> Result<Vec<Checkpoint>, String> {
+    let repo = validate_repo_path(&repo_path, &state)?;
+
+    // List refs under refs/leo/checkpoints/
+    let out = Command::new("git")
+        .args(["for-each-ref", "--format=%(refname:short) %(subject) %(creatordate:unix)", "refs/leo/checkpoints/"])
+        .current_dir(&repo)
+        .output()
+        .map_err(|e| format!("git for-each-ref: {}", e))?;
+
+    if !out.status.success() {
+        return Ok(vec![]);
+    }
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut checkpoints: Vec<Checkpoint> = Vec::new();
+
+    for line in stdout.lines() {
+        let parts: Vec<&str> = line.splitn(3, ' ').collect();
+        if parts.len() < 2 { continue; }
+        let ref_short = parts[0]; // e.g. "leo/checkpoints/leo-checkpoint-1234"
+        let id = ref_short.rsplit('/').next().unwrap_or(ref_short).to_string();
+        let message = if parts.len() > 1 { parts[1..parts.len()-1].join(" ") } else { String::new() };
+        let timestamp = parts.last().and_then(|t| t.parse::<i64>().ok()).unwrap_or(0);
+
+        checkpoints.push(Checkpoint { id, message, timestamp });
+    }
+
+    // Sort newest first
+    checkpoints.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(checkpoints)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

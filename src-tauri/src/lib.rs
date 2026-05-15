@@ -63,6 +63,9 @@ pub fn run() {
             git::git_list_branches,
             git::git_checkout_branch,
             git::git_resolve_conflict,
+            git::git_create_checkpoint,
+            git::git_restore_checkpoint,
+            git::git_list_checkpoints,
             // Shell
             shell::spawn_terminal,
             shell::write_terminal,
