@@ -92,8 +92,8 @@
     </div>
     <div class="card-body">
       <p class="hint" style="margin-bottom: 8px;">Use a cheap/fast model for autocomplete and a strong model for edits.</p>
-      <div class="routing-field" data-setting="ghost-text-model">
-        <span class="field-label">Autocomplete model</span>
+      <label class="input-row" data-setting="ghost-text-model">
+        <span>Autocomplete model</span>
         <select class="select" value={$ghostTextModel} onchange={(e) => ghostTextModel.set((e.currentTarget as HTMLSelectElement).value)}>
           <option value="">Use default</option>
           <optgroup label="Anthropic">
@@ -115,9 +115,9 @@
             <option value="qwen2.5-coder">Qwen 2.5 Coder</option>
           </optgroup>
         </select>
-      </div>
-      <div class="routing-field" data-setting="edit-model">
-        <span class="field-label">Edit model (Cmd+K)</span>
+      </label>
+      <label class="input-row" data-setting="edit-model">
+        <span>Edit model (Cmd+K)</span>
         <select class="select" value={$editModel} onchange={(e) => editModel.set((e.currentTarget as HTMLSelectElement).value)}>
           <option value="">Use default</option>
           <optgroup label="Anthropic">
@@ -139,7 +139,7 @@
             <option value="deepseek-coder-v2">DeepSeek Coder V2</option>
           </optgroup>
         </select>
-      </div>
+      </label>
     </div>
   </div>
 
@@ -343,20 +343,19 @@
   .text-input::placeholder { color: var(--text-muted); }
 
   .select {
-    width: 100%; padding: 8px 12px; border-radius: 6px;
-    background: var(--bg-secondary); color: var(--text-primary);
-    border: 1px solid var(--border); font-size: 13px;
-    cursor: pointer; appearance: auto;
+    width: 200px;
+    padding: 5px 8px;
+    font-size: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+    cursor: pointer;
   }
-  .select:focus { border-color: var(--accent); outline: none; }
-
-  .routing-field {
-    display: flex; flex-direction: column; gap: 6px;
-  }
-  .routing-field + .routing-field { margin-top: 12px; }
-  .field-label {
-    font-size: 12px; font-weight: 500; color: var(--text-secondary);
-  }
+  .select:focus { border-color: var(--accent); }
+  .select optgroup { font-weight: 600; color: var(--text-muted); }
+  .select option { font-weight: 400; color: var(--text-primary); }
 
   .perm-grid { display: flex; flex-direction: column; gap: 6px; }
   .perm-row {
