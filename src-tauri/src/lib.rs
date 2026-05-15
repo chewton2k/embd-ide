@@ -1,6 +1,6 @@
 mod modules;
 
-use modules::{ai, fs, git, graph, knowledge, log as app_log, session, shell};
+use modules::{ai, fs, git, graph, knowledge, log as app_log, session, shell, symbols};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -98,6 +98,9 @@ pub fn run() {
             knowledge::knowledge_delete_project,
             knowledge::knowledge_delete_by_hash,
             knowledge::knowledge_delete_all_projects,
+            // Symbols
+            symbols::symbols_extract,
+            symbols::symbols_get_body,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

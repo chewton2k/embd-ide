@@ -6,3 +6,4 @@ pub mod knowledge;
 pub mod log;
 pub mod session;
 pub mod shell;
+pub mod symbols;
