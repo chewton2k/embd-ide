@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ghostTextEnabled, ghostTextDelay, agentMaxStepsConfig, agentAutoApproveConfig } from '../../modules';
+  import { ghostTextEnabled, ghostTextDelay, agentMaxStepsConfig, agentAutoApproveConfig, ghostTextModel, editModel } from '../../modules';
   import SectionHeader from '../components/SectionHeader.svelte';
 </script>
 
@@ -51,6 +51,26 @@
         </button>
       </label>
       <p class="hint">When enabled, the agent applies code changes without asking. Use with caution.</p>
+    </div>
+  </div>
+
+  <!-- Model Routing -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Model Routing</div>
+    </div>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom: 8px;">Use a cheap/fast model for autocomplete and a strong model for edits. Leave empty to use the default model.</p>
+      <label class="input-row" data-setting="ghost-text-model">
+        <span>Autocomplete model</span>
+        <input class="text-input" type="text" value={$ghostTextModel} placeholder="(use default)" spellcheck="false"
+          onchange={(e) => ghostTextModel.set((e.currentTarget as HTMLInputElement).value.trim())} />
+      </label>
+      <label class="input-row" data-setting="edit-model">
+        <span>Edit model (Cmd+K)</span>
+        <input class="text-input" type="text" value={$editModel} placeholder="(use default)" spellcheck="false"
+          onchange={(e) => editModel.set((e.currentTarget as HTMLInputElement).value.trim())} />
+      </label>
     </div>
   </div>
 
@@ -198,4 +218,27 @@
     margin: 0;
     line-height: 1.5;
   }
+
+  .input-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--text-primary);
+    gap: 12px;
+    padding: 4px 0;
+  }
+
+  .text-input {
+    width: 200px;
+    padding: 5px 10px;
+    font-size: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+  }
+  .text-input:focus { border-color: var(--accent); }
+  .text-input::placeholder { color: var(--text-muted); }
 </style>

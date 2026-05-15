@@ -90,6 +90,8 @@ export const SETTINGS_ENTRIES: SettingsEntry[] = [
   { anchor: 'inline-completion-delay', tab: 'agents', group: 'Inline completions', label: 'Inline completion delay', keywords: 'ghost text trigger debounce timeout' },
   { anchor: 'agent-max-steps',       tab: 'agents', group: 'Agent mode', label: 'Agent max steps',        keywords: 'iterations loop limit tool calls' },
   { anchor: 'agent-auto-approve',    tab: 'agents', group: 'Agent mode', label: 'Auto-approve edits',     keywords: 'agent yolo approval confirm changes' },
+  { anchor: 'ghost-text-model',      tab: 'agents', group: 'Model routing', label: 'Autocomplete model',    keywords: 'ghost text model cheap fast local routing' },
+  { anchor: 'edit-model',            tab: 'agents', group: 'Model routing', label: 'Edit model',            keywords: 'inline edit cmd-k model strong routing' },
 
   // ── Knowledge ──
   { anchor: 'knowledge-index',       tab: 'knowledge', group: 'Knowledge', label: 'Knowledge index',      keywords: 'reindex database files project memory' },

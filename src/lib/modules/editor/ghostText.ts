@@ -3,6 +3,7 @@ import { StateField, StateEffect } from '@codemirror/state';
 import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
 import { aiProvider, aiModel } from '../ai/ai';
+import { ghostTextModel } from '../settings/settings';
 
 // ── Effects ──
 
@@ -88,7 +89,7 @@ async function requestCompletion(view: EditorView) {
       request: {
         prompt: `Complete the code at the cursor position (█). Return ONLY the completion text, nothing else. No explanation, no markdown, just the raw code that should be inserted at the cursor.\n\nCode:\n${context}`,
         context: null,
-        model: get(aiModel),
+        model: get(ghostTextModel) || get(aiModel),
         provider: get(aiProvider),
       },
     });

@@ -28,5 +28,7 @@ hiddenPatterns.subscribe(patterns => {
 // AI preferences
 export const ghostTextEnabled = persistedBool('leo-ghost-text-enabled', true);
 export const ghostTextDelay = persistedNumber('leo-ghost-text-delay', 450);
+export const ghostTextModel = persistedString('leo-ghost-text-model', '');
+export const editModel = persistedString('leo-edit-model', '');
 export const agentMaxStepsConfig = persistedNumber('leo-agent-max-steps', 10);
 export const agentAutoApproveConfig = persistedBool('leo-agent-auto-approve', false);

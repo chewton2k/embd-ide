@@ -10,6 +10,7 @@ import { get, writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { aiProvider, aiModel } from './ai';
+import { editModel } from '../settings/settings';
 import { activeFilePath } from '../explorer/files';
 
 // ── Types ──
@@ -102,7 +103,7 @@ export async function startInlineEdit(request: InlineEditRequest): Promise<Inlin
             { role: 'system', content: 'You are a code editor. Output only code, no explanations.' },
             { role: 'user', content: prompt },
           ],
-          model: get(aiModel),
+          model: get(editModel) || get(aiModel),
           provider: get(aiProvider),
           session_id: sessionId,
         },

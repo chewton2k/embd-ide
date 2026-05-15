@@ -1,5 +1,5 @@
 // ── Cross-window settings sync ───────────────────────────────────
-import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorVimMode, terminalFontSize, hiddenPatterns } from './settings/settings';
+import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorVimMode, terminalFontSize, hiddenPatterns, ghostTextModel, editModel } from './settings/settings';
 import { appearanceMode, editorTheme, uiFontSize, uiDensity } from './ui/ui';
 import { maxRecentProjects, maxTabs } from './explorer/files';
 import { aiProvider, aiModel, type AiProvider } from './ai/ai';
@@ -27,6 +27,8 @@ const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
   'leo-max-tabs':            { set: v => maxTabs.set(parseInt(v || '9', 10)) },
   'leo-ai-provider':         { set: v => aiProvider.set((v as AiProvider) || 'openrouter') },
   'leo-ai-model':            { set: v => aiModel.set(v || 'openrouter/auto') },
+  'leo-ghost-text-model':    { set: v => ghostTextModel.set(v || '') },
+  'leo-edit-model':          { set: v => editModel.set(v || '') },
 };
 
 if (typeof window !== 'undefined') {
