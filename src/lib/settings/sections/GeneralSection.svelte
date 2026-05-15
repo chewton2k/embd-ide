@@ -2,7 +2,7 @@
   import {
     appearanceMode, editorTheme, uiFontSize, uiDensity,
     editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers,
-    editorShowErrorLens,
+    editorShowErrorLens, editorVimMode,
     previewUrl,
     autosaveEnabled, autosaveDelay,
     maxRecentProjects, maxTabs,
@@ -41,7 +41,7 @@
   const EXPORT_KEYS = [
     'leo-autosave', 'leo-autosave-delay',
     'leo-editor-font-size', 'leo-editor-tab-size', 'leo-editor-word-wrap', 'leo-editor-line-numbers',
-    'leo-editor-show-error-lens',
+    'leo-editor-show-error-lens', 'leo-editor-vim-mode',
     'leo-terminal-font-size',
     'leo-terminal-mode', 'leo-terminal-panel-height',
     'leo-appearance', 'leo-editor-theme',
@@ -192,6 +192,15 @@
           <div class="row-help">Inline syntax-error hints next to lines (JS, TS, C-family).</div>
         </div>
         <button class="toggle" class:active={$editorShowErrorLens} onclick={() => editorShowErrorLens.update(v => !v)} aria-label="Toggle error lens">
+          <span class="track"><span class="thumb"></span></span>
+        </button>
+      </div>
+      <div class="row" data-setting="editor-vim-mode">
+        <div class="row-info">
+          <div class="row-label">Vim mode</div>
+          <div class="row-help">Enable Vim keybindings in the editor.</div>
+        </div>
+        <button class="toggle" class:active={$editorVimMode} onclick={() => editorVimMode.update(v => !v)} aria-label="Toggle vim mode">
           <span class="track"><span class="thumb"></span></span>
         </button>
       </div>

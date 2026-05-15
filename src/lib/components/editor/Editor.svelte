@@ -7,7 +7,7 @@
   import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection, gutter, GutterMarker, ViewPlugin, Decoration, WidgetType } from '@codemirror/view';
   import type { DecorationSet, ViewUpdate } from '@codemirror/view';
   import { EditorState, Compartment, RangeSetBuilder, Transaction } from '@codemirror/state';
-  import { defaultKeymap, indentWithTab, history, historyKeymap, cursorDocStart, cursorDocEnd, cursorLineBoundaryForward, cursorLineBoundaryBackward, selectDocStart, selectDocEnd, selectLineBoundaryForward, selectLineBoundaryBackward, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, selectCharLeft, selectCharRight, selectLineUp, selectLineDown, deleteLine, cursorPageDown, cursorPageUp } from '@codemirror/commands';
+  import { defaultKeymap, indentWithTab, history, historyKeymap, cursorDocStart, cursorDocEnd, cursorLineBoundaryForward, cursorLineBoundaryBackward, selectDocStart, selectDocEnd, selectLineBoundaryForward, selectLineBoundaryBackward, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, selectCharLeft, selectCharRight, selectLineUp, selectLineDown, deleteLine, cursorPageDown, cursorPageUp, toggleComment, moveLineUp, moveLineDown, copyLineDown, indentMore, indentLess, insertBlankLine, cursorMatchingBracket } from '@codemirror/commands';
   import { javascript } from '@codemirror/lang-javascript';
   import { python } from '@codemirror/lang-python';
   import { html } from '@codemirror/lang-html';
@@ -116,10 +116,11 @@
   }
   import { bracketMatching, indentOnInput, foldGutter, foldKeymap, syntaxTree, ensureSyntaxTree } from '@codemirror/language';
   import { autocompletion, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
-  import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor } from '@codemirror/search';
+  import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, SearchQuery, getSearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, closeSearchPanel, SearchCursor, selectNextOccurrence } from '@codemirror/search';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
-  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules';
+  import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorVimMode, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules';
+  import { vim } from '@replit/codemirror-vim';
   import type { EditorThemeId } from '../../modules/theme';
 
   let { filePath }: { filePath: string } = $props();
@@ -213,6 +214,7 @@
   const lineNumbersComp = new Compartment();
   const errorLensComp = new Compartment();
   const themeComp = new Compartment();
+  const vimComp = new Compartment();
 
   async function updateGitGutter(path: string) {
     if (!view) return;
@@ -907,6 +909,7 @@
         wordWrapComp.of(get(editorWordWrap) ? EditorView.lineWrapping : []),
         gitGutterComp.of([]),
         errorLensComp.of(hasErrorLens(path) && get(editorShowErrorLens) ? buildErrorLensPlugin() : []),
+        vimComp.of(get(editorVimMode) ? vim() : []),
         keymap.of([
           ...closeBracketsKeymap,
           ...defaultKeymap,
@@ -915,6 +918,17 @@
           ...foldKeymap,
           indentWithTab,
           { key: 'Mod-s', run: () => { saveFile(path); return true; } },
+          // Common IDE shortcuts (VSCode/Zed/Xcode conventions)
+          { key: 'Mod-/', run: toggleComment },
+          { key: 'Mod-Shift-k', run: deleteLine },
+          { key: 'Alt-ArrowUp', run: moveLineUp },
+          { key: 'Alt-ArrowDown', run: moveLineDown },
+          { key: 'Mod-Shift-d', run: copyLineDown },
+          { key: 'Mod-d', run: selectNextOccurrence },
+          { key: 'Mod-]', run: indentMore },
+          { key: 'Mod-[', run: indentLess },
+          { key: 'Mod-Enter', run: insertBlankLine },
+          { key: 'Mod-Shift-\\', run: cursorMatchingBracket },
           // Emacs navigation
           { key: 'Ctrl-a', run: cursorLineBoundaryBackward, shift: selectLineBoundaryBackward },
           { key: 'Ctrl-e', run: cursorLineBoundaryForward, shift: selectLineBoundaryForward },
@@ -1099,6 +1113,13 @@
     const theme = $editorTheme;
     if (view) {
       view.dispatch({ effects: themeComp.reconfigure(buildEditorTheme(theme)) });
+    }
+  });
+
+  $effect(() => {
+    const enabled = $editorVimMode;
+    if (view) {
+      view.dispatch({ effects: vimComp.reconfigure(enabled ? vim() : []) });
     }
   });
 

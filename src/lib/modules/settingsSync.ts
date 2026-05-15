@@ -1,5 +1,5 @@
 // ── Cross-window settings sync ───────────────────────────────────
-import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, terminalFontSize, hiddenPatterns } from './settings/settings';
+import { autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorVimMode, terminalFontSize, hiddenPatterns } from './settings/settings';
 import { appearanceMode, editorTheme, uiFontSize, uiDensity } from './ui/ui';
 import { maxRecentProjects, maxTabs } from './explorer/files';
 import { aiProvider, aiModel, type AiProvider } from './ai/ai';
@@ -14,6 +14,7 @@ const SETTINGS_SYNC: Record<string, { set: (v: string | null) => void }> = {
   'leo-editor-word-wrap':    { set: v => editorWordWrap.set(v === 'true') },
   'leo-editor-line-numbers': { set: v => editorLineNumbers.set(v !== 'false') },
   'leo-editor-show-error-lens': { set: v => editorShowErrorLens.set(v !== 'false') },
+  'leo-editor-vim-mode':     { set: v => editorVimMode.set(v === 'true') },
   'leo-terminal-font-size':  { set: v => terminalFontSize.set(parseInt(v || '13', 10)) },
   'leo-terminal-mode':       { set: v => terminalMode.set((v as TerminalMode) || 'tab') },
   'leo-terminal-panel-height': { set: v => terminalPanelHeight.set(parseInt(v || '260', 10)) },

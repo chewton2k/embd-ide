@@ -53,6 +53,7 @@
     "@crabnebula/tauri-plugin-drag": "^2.1.0",
     "@iconify-json/vscode-icons": "^1.2.49",
     "@iconify/svelte": "^5.2.1",
+    "@replit/codemirror-vim": "6.2.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-shell": "^2.3.5",

@@ -8,6 +8,7 @@ export const editorTabSize = persistedNumber('leo-editor-tab-size', 2);
 export const editorWordWrap = persistedBool('leo-editor-word-wrap', false);
 export const editorLineNumbers = persistedBoolDefaultTrue('leo-editor-line-numbers');
 export const editorShowErrorLens = persistedBoolDefaultTrue('leo-editor-show-error-lens');
+export const editorVimMode = persistedBool('leo-editor-vim-mode', false);
 export const terminalFontSize = persistedNumber('leo-terminal-font-size', 13);
 export const previewUrl = persistedString('leo-preview-url', 'http://localhost:3000');
 
