@@ -94,18 +94,6 @@
     <button
       type="button"
       class="title-btn"
-      class:active={$showTerminal}
-      onclick={toggleTerminal}
-      title="Toggle terminal (Ctrl+`)"
-      aria-label="Toggle terminal"
-      aria-pressed={$showTerminal}
-    >
-      <TerminalSquare size={14} />
-    </button>
-
-    <button
-      type="button"
-      class="title-btn"
       class:active={$showGit}
       onclick={toggleGitPanel}
       title="Source Control (Cmd+G)"

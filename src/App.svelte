@@ -545,24 +545,17 @@
       {/if}
     </div>
     <div class="statusbar-right">
-      {#if $terminalMode === 'panel'}
-        <!--
-          Bottom-right status-bar button to toggle the docked terminal
-          panel. Only rendered in panel mode; tab-mode users still have
-          Ctrl+` plus the top tab bar to open terminals.
-        -->
-        <button
-          class="statusbar-terminal-btn"
-          class:active={$showTerminal}
-          onclick={toggleTerminal}
-          title="Toggle terminal (Ctrl+`)"
-          aria-label="Toggle terminal panel"
-          aria-pressed={$showTerminal}
-        >
-          <TerminalSquare size={12} />
-          <span>Terminal</span>
-        </button>
-      {/if}
+      <button
+        class="statusbar-terminal-btn"
+        class:active={$showTerminal}
+        onclick={toggleTerminal}
+        title="Toggle terminal (Ctrl+`)"
+        aria-label="Toggle terminal panel"
+        aria-pressed={$showTerminal}
+      >
+        <TerminalSquare size={12} />
+        <span>Terminal</span>
+      </button>
       {#if $activeFile}
         <span class="save-indicator" class:saved={!$activeFileModified} class:unsaved={$activeFileModified}>
           {#if $activeFileModified}

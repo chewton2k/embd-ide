@@ -188,12 +188,6 @@
       <button type="button" class="toolbar-btn" title="Search files (⌘O)" onclick={() => onSearchFiles?.()}>
         <Search size={13} />
       </button>
-      <button type="button" class="toolbar-btn" title="New file" onclick={() => onNewFile?.()}>
-        <FilePlus2 size={13} />
-      </button>
-      <button type="button" class="toolbar-btn" title="New folder" onclick={() => onNewFolder?.()}>
-        <FolderPlus size={13} />
-      </button>
     </div>
   {/if}
 
