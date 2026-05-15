@@ -121,6 +121,8 @@
   import DOMPurify from 'dompurify';
   import { updateFileContent, markFileSaved, autosaveEnabled, autosaveDelay, editorFontSize, editorTabSize, editorWordWrap, editorLineNumbers, editorShowErrorLens, editorVimMode, editorTheme, projectRoot, openFiles, registerFileRenameCallback, triggerSearchInFile, openPreviewSignal, activeFilePath } from '../../modules';
   import { vim } from '@replit/codemirror-vim';
+  import { startInlineEdit, cancelInlineEdit, type InlineEditRequest } from '../../modules/ai/inlineEdit';
+  import InlineEditPopover from './InlineEditPopover.svelte';
   import type { EditorThemeId } from '../../modules/theme';
 
   let { filePath }: { filePath: string } = $props();
@@ -206,6 +208,13 @@
   let isMarkdown = $derived(/\.(md|mdx|markdown)$/i.test(filePath));
   let showPreview = $state(true);
   let previewHtml = $state('');
+
+  // Inline edit (Cmd+K)
+  let inlineEditVisible = $state(false);
+  let inlineEditTop = $state(0);
+  let inlineEditLeft = $state(0);
+  let inlineEditWidth = $state(320);
+  let inlineEditSelection: { from: number; to: number; startLine: number; endLine: number; text: string } | null = null;
 
   // Compartments for dynamic reconfiguration
   const fontSizeComp = new Compartment();
@@ -881,6 +890,65 @@
     }
   }
 
+  // ── Inline Edit (Cmd+K) ──
+
+  function openInlineEdit(v: EditorView) {
+    const sel = v.state.selection.main;
+    if (sel.empty) return; // Require a selection
+
+    const startLine = v.state.doc.lineAt(sel.from).number;
+    const endLine = v.state.doc.lineAt(sel.to).number;
+    const text = v.state.sliceDoc(sel.from, sel.to);
+
+    // Position the popover above the selection start
+    const coords = v.coordsAtPos(sel.from);
+    if (!coords) return;
+    const editorRect = editorContainer.getBoundingClientRect();
+
+    inlineEditSelection = { from: sel.from, to: sel.to, startLine, endLine, text };
+    inlineEditTop = coords.top - editorRect.top;
+    inlineEditLeft = coords.left - editorRect.left;
+    inlineEditWidth = Math.min(500, editorRect.width - 40);
+    inlineEditVisible = true;
+  }
+
+  function closeInlineEdit() {
+    inlineEditVisible = false;
+    inlineEditSelection = null;
+    cancelInlineEdit();
+  }
+
+  async function handleInlineEditSubmit(instruction: string) {
+    if (!inlineEditSelection || !view) return;
+
+    const request: InlineEditRequest = {
+      selectedCode: inlineEditSelection.text,
+      instruction,
+      filePath,
+      startLine: inlineEditSelection.startLine,
+      endLine: inlineEditSelection.endLine,
+    };
+
+    const result = await startInlineEdit(request);
+
+    if (result.success && result.newCode) {
+      // Apply as a pending edit via the diff extension
+      const edit = {
+        id: `inline-${Date.now()}`,
+        filePath,
+        startLine: inlineEditSelection.startLine,
+        endLine: inlineEditSelection.endLine,
+        originalCode: inlineEditSelection.text,
+        newCode: result.newCode,
+        status: 'pending' as const,
+      };
+      view.dispatch({ effects: addDiffEffect.of([edit]) });
+    }
+
+    inlineEditVisible = false;
+    inlineEditSelection = null;
+  }
+
   function buildState(content: string, path: string): EditorState {
     const lang = getLanguage(path);
     return EditorState.create({
@@ -918,6 +986,8 @@
           ...foldKeymap,
           indentWithTab,
           { key: 'Mod-s', run: () => { saveFile(path); return true; } },
+          // Inline edit (Cmd+K)
+          { key: 'Mod-k', run: (v) => { openInlineEdit(v); return true; } },
           // Common IDE shortcuts (VSCode/Zed/Xcode conventions)
           { key: 'Mod-/', run: toggleComment },
           { key: 'Mod-Shift-k', run: deleteLine },
@@ -1317,6 +1387,15 @@
 <div class="editor-root" class:md-split={isMarkdown && showPreview}>
   <div class="editor-pane">
     <div class="editor-wrapper" bind:this={editorContainer}></div>
+    {#if inlineEditVisible}
+      <InlineEditPopover
+        top={inlineEditTop}
+        left={inlineEditLeft}
+        width={inlineEditWidth}
+        onSubmit={handleInlineEditSubmit}
+        onCancel={closeInlineEdit}
+      />
+    {/if}
     {#if isMarkdown && !showPreview}
       <button class="md-open-preview" onclick={() => showPreview = true} title="Open preview">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
