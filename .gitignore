@@ -31,3 +31,5 @@ CLAUDE.md
 todo.md
 docs/
 scripts/bump-version.sh
+tests/
+scripts/test.sh
