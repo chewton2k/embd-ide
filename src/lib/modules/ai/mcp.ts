@@ -145,18 +145,26 @@ async function discoverTools(server: McpServerConfig): Promise<McpTool[]> {
 
 async function discoverToolsStdio(server: McpServerConfig): Promise<McpTool[]> {
   // Send initialize + tools/list via the backend's run_command_capture
-  // The MCP protocol uses JSON-RPC 2.0 over stdin/stdout
+  // Uses stdin piping via the shell's heredoc to avoid injection
   const initRequest = JSON.stringify({
     jsonrpc: '2.0', id: 1, method: 'initialize',
     params: { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'leo-ide', version: '0.2.0' } },
   });
   const listRequest = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
-  const input = `${initRequest}\n${listRequest}\n`;
+
+  // Validate command doesn't contain shell metacharacters
+  const cmd = server.command || '';
+  if (!cmd || /[;&|`$(){}]/.test(cmd)) {
+    log.warn(`MCP server command rejected (unsafe characters): ${cmd}`);
+    return [];
+  }
 
   try {
+    // Use printf with %s to safely pass data without shell interpretation
+    const escapedPayload = `${initRequest}\n${listRequest}\n`.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const result = await invoke<{ stdout: string; stderr: string; exit_code: number }>(
       'run_command_capture',
-      { command: `echo '${input.replace(/'/g, "\\'")}' | ${server.command}`, cwd: '.', timeoutMs: 10000 },
+      { command: `printf "%s" "${escapedPayload}" | ${cmd}`, cwd: '.', timeoutMs: 10000 },
     );
 
     // Parse JSON-RPC responses from stdout
@@ -265,9 +273,14 @@ export async function invokeMcpTool(fullName: string, args: Record<string, unkno
   });
 
   if (server.transport === 'stdio' && server.command) {
+    const cmd = server.command;
+    if (/[;&|`$(){}]/.test(cmd)) {
+      throw new Error('MCP server command contains unsafe characters');
+    }
+    const escapedRequest = request.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const result = await invoke<{ stdout: string; stderr: string; exit_code: number }>(
       'run_command_capture',
-      { command: `echo '${request.replace(/'/g, "\\'")}' | ${server.command}`, cwd: '.', timeoutMs: 30000 },
+      { command: `printf "%s" "${escapedRequest}" | ${cmd}`, cwd: '.', timeoutMs: 30000 },
     );
     const lines = result.stdout.split('\n').filter(l => l.trim());
     for (const line of lines) {

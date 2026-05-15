@@ -73,48 +73,51 @@ export async function startInlineEdit(request: InlineEditRequest): Promise<Inlin
 
   const prompt = buildInlineEditPrompt(request.selectedCode, request.instruction, request.filePath);
 
-  return new Promise<InlineEditResult>(async (resolve) => {
-    // Listen for stream chunks
-    if (streamUnlisten) { streamUnlisten(); streamUnlisten = null; }
+  // Set up listener BEFORE invoking to avoid race
+  let resolvePromise: (result: InlineEditResult) => void;
+  const resultPromise = new Promise<InlineEditResult>((resolve) => { resolvePromise = resolve; });
 
-    streamUnlisten = await listen<{ session_id: string; delta: string; done: boolean }>(
-      'ai-stream-chunk',
-      (event) => {
-        if (event.payload.session_id !== sessionId) return;
+  if (streamUnlisten) { streamUnlisten(); streamUnlisten = null; }
 
-        if (event.payload.done) {
-          inlineEditStreaming.set(false);
-          currentSessionId = null;
-          if (streamUnlisten) { streamUnlisten(); streamUnlisten = null; }
-          const finalCode = cleanResponse(get(inlineEditResponse));
-          resolve({ newCode: finalCode, success: true });
-          return;
-        }
+  streamUnlisten = await listen<{ session_id: string; delta: string; done: boolean }>(
+    'ai-stream-chunk',
+    (event) => {
+      if (event.payload.session_id !== sessionId) return;
 
-        inlineEditResponse.update(r => r + event.payload.delta);
+      if (event.payload.done) {
+        inlineEditStreaming.set(false);
+        currentSessionId = null;
+        if (streamUnlisten) { streamUnlisten(); streamUnlisten = null; }
+        const finalCode = cleanResponse(get(inlineEditResponse));
+        resolvePromise({ newCode: finalCode, success: true });
+        return;
       }
-    ) as unknown as () => void;
 
-    // Start streaming
-    try {
-      await invoke('ai_chat_stream', {
-        request: {
-          messages: [
-            { role: 'system', content: 'You are a code editor. Output only code, no explanations.' },
-            { role: 'user', content: prompt },
-          ],
-          model: get(editModel) || get(aiModel),
-          provider: get(aiProvider),
-          session_id: sessionId,
-        },
-      });
-    } catch (e) {
-      inlineEditStreaming.set(false);
-      currentSessionId = null;
-      if (streamUnlisten) { streamUnlisten(); streamUnlisten = null; }
-      resolve({ newCode: '', success: false });
+      inlineEditResponse.update(r => r + event.payload.delta);
     }
-  });
+  ) as unknown as () => void;
+
+  // Start streaming — if this throws, clean up and resolve with failure
+  try {
+    await invoke('ai_chat_stream', {
+      request: {
+        messages: [
+          { role: 'system', content: 'You are a code editor. Output only code, no explanations.' },
+          { role: 'user', content: prompt },
+        ],
+        model: get(editModel) || get(aiModel),
+        provider: get(aiProvider),
+        session_id: sessionId,
+      },
+    });
+  } catch (e) {
+    inlineEditStreaming.set(false);
+    currentSessionId = null;
+    if (streamUnlisten) { streamUnlisten(); streamUnlisten = null; }
+    return { newCode: '', success: false };
+  }
+
+  return resultPromise;
 }
 
 export function cancelInlineEdit() {

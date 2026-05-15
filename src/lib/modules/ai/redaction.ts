@@ -28,6 +28,8 @@ export const DEFAULT_REDACTION_RULES: RedactionRule[] = [
   { name: 'Private Key Block', pattern: /-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA )?PRIVATE KEY-----/g, replacement: '[REDACTED:PRIVATE_KEY]' },
   { name: 'Connection String Password', pattern: /(?<=:\/\/[^:]+:)[^@\s]{8,}(?=@)/g, replacement: '[REDACTED:PASSWORD]' },
   { name: 'Env File Values', pattern: /(?<=^[A-Z_]+=)['"]?(?!sk-|ghp_|ghs_|xox[baprs]-|AKIA|\[REDACTED)[^\s'"]{16,}['"]?/gm, replacement: '[REDACTED:ENV_VALUE]' },
+  { name: 'Env File Values (lowercase)', pattern: /(?<=^[a-z][a-z_]*=)['"]?(?!sk-|ghp_|ghs_|xox[baprs]-|AKIA|\[REDACTED)[^\s'"]{16,}['"]?/gm, replacement: '[REDACTED:ENV_VALUE]' },
+  { name: 'Env File Values (export)', pattern: /(?<=^export\s+[A-Za-z_]+=)['"]?(?!sk-|ghp_|ghs_|xox[baprs]-|AKIA|\[REDACTED)[^\s'"]{16,}['"]?/gm, replacement: '[REDACTED:ENV_VALUE]' },
 ];
 
 // ── Redaction ──

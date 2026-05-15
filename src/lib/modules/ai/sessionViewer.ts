@@ -38,6 +38,7 @@ export const activeSessionId = writable<string | null>(null);
 
 const STORAGE_KEY = 'leo-agent-sessions';
 const MAX_SESSIONS = 50;
+const MAX_EVENTS_PER_SESSION = 200;
 
 function loadSessions(): AgentSession[] {
   try {
@@ -96,7 +97,9 @@ export function recordEvent(sessionId: string, type: SessionEventType, data: Rec
     data,
   };
   sessions.update(s => s.map(sess =>
-    sess.id === sessionId ? { ...sess, events: [...sess.events, event] } : sess
+    sess.id === sessionId
+      ? { ...sess, events: [...sess.events, event].slice(-MAX_EVENTS_PER_SESSION) }
+      : sess
   ));
 }
 

@@ -150,7 +150,7 @@ export const ALL_TOOL_NAMES: ToolName[] = ['read_file', 'edit_file', 'run_comman
 export interface DispatchContext {
   projectRoot: string;
   /** Called when an edit is proposed (for pending-edit flow) */
-  onEdit?: (path: string, startLine: number, endLine: number, newContent: string) => void;
+  onEdit?: (path: string, startLine: number, endLine: number, newContent: string, originalCode: string) => void;
   /** Called when a command needs approval */
   onCommandBlocked?: (command: string) => void;
 }
@@ -215,15 +215,18 @@ async function executeTool(
       if (isNaN(startLine) || isNaN(endLine)) {
         throw new Error('start_line and end_line must be numbers');
       }
+      // Always read the file to get original code for diff display
+      const fileContent = await invoke<string>('read_file_content', { path });
+      const fileLines = fileContent.split('\n');
+      const originalCode = fileLines.slice(startLine - 1, endLine).join('\n');
+
       if (ctx.onEdit) {
-        ctx.onEdit(path, startLine, endLine, args.new_content);
+        ctx.onEdit(path, startLine, endLine, args.new_content, originalCode);
         return `Edit proposed for ${args.path} lines ${startLine}-${endLine}. Waiting for approval.`;
       }
       // Auto-apply mode
-      const content = await invoke<string>('read_file_content', { path });
-      const lines = content.split('\n');
-      const before = lines.slice(0, startLine - 1);
-      const after = lines.slice(endLine);
+      const before = fileLines.slice(0, startLine - 1);
+      const after = fileLines.slice(endLine);
       const newContent = [...before, ...args.new_content.split('\n'), ...after].join('\n');
       await invoke('write_file_content', { path, content: newContent });
       return `Applied edit to ${args.path} lines ${startLine}-${endLine}.`;
@@ -313,11 +316,19 @@ async function executeTool(
 
 function resolvePath(relativePath: string, projectRoot: string): string {
   if (!relativePath) throw new Error('path is required');
-  if (relativePath.startsWith('/')) return relativePath;
-  const resolved = `${projectRoot}/${relativePath}`;
-  // Basic traversal check
-  if (resolved.includes('/../') || resolved.endsWith('/..')) {
-    throw new Error('Path traversal not allowed');
+  // Resolve to absolute
+  const resolved = relativePath.startsWith('/') ? relativePath : `${projectRoot}/${relativePath}`;
+  // Normalize: collapse /./, resolve /../ segments
+  const parts: string[] = [];
+  for (const seg of resolved.split('/')) {
+    if (seg === '.' || seg === '') continue;
+    if (seg === '..') { parts.pop(); continue; }
+    parts.push(seg);
   }
-  return resolved;
+  const canonical = '/' + parts.join('/');
+  // Verify the canonical path is within the project root
+  if (!canonical.startsWith(projectRoot)) {
+    throw new Error('Path traversal not allowed: resolved path is outside project root');
+  }
+  return canonical;
 }

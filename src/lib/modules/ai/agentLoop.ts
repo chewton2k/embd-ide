@@ -33,6 +33,9 @@ let currentSessionId: string | null = null;
 // ── Public API ──
 
 export async function runAgent(userRequest: string): Promise<void> {
+  // Guard against concurrent runs
+  if (get(agentRunning)) return;
+
   cancelRequested = false;
   agentRunning.set(true);
   agentStep.set(0);
@@ -95,13 +98,13 @@ export async function runAgent(userRequest: string): Promise<void> {
         if (toolCall.function.name === 'edit_file') {
           const toolResult = await dispatchTool(toolCall, {
             projectRoot: root,
-            onEdit: (path, startLine, endLine, newContent) => {
+            onEdit: (path, startLine, endLine, newContent, originalCode) => {
               addEdits([{
                 id: `agent-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 filePath: path,
                 startLine,
                 endLine,
-                originalCode: '',
+                originalCode,
                 newCode: newContent,
                 status: 'pending',
               }]);
@@ -273,11 +276,11 @@ export async function executePlan(): Promise<void> {
         if (permission === 'ask' && toolCall.function.name === 'edit_file') {
           const toolResult = await dispatchTool(toolCall, {
             projectRoot: root,
-            onEdit: (path, startLine, endLine, newContent) => {
+            onEdit: (path, startLine, endLine, newContent, originalCode) => {
               addEdits([{
                 id: `plan-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 filePath: path, startLine, endLine,
-                originalCode: '', newCode: newContent, status: 'pending',
+                originalCode, newCode: newContent, status: 'pending',
               }]);
             },
           });
@@ -319,77 +322,78 @@ async function streamAgentTurn(
   const sessionId = `agent-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   currentSessionId = sessionId;
 
-  return new Promise<AgentTurnResult>(async (resolve) => {
-    let content = '';
-    let toolCalls: ToolCall[] = [];
-    let unlisten: (() => void) | null = null;
+  let content = '';
+  let toolCalls: ToolCall[] = [];
+  let resolvePromise: (result: AgentTurnResult) => void;
+  const resultPromise = new Promise<AgentTurnResult>((resolve) => { resolvePromise = resolve; });
 
-    // Add empty assistant message to stream into
-    chatMessages.update(msgs => [...msgs, { role: 'assistant', content: '' }]);
+  // Add empty assistant message to stream into
+  chatMessages.update(msgs => [...msgs, { role: 'assistant', content: '' }]);
 
-    unlisten = await listen<{
-      session_id: string;
-      delta: string;
-      done: boolean;
-      tool_calls?: ToolCall[];
-    }>('ai-stream-chunk', (event) => {
-      if (event.payload.session_id !== sessionId) return;
+  let unlisten: (() => void) | null = null;
+  unlisten = await listen<{
+    session_id: string;
+    delta: string;
+    done: boolean;
+    tool_calls?: ToolCall[];
+  }>('ai-stream-chunk', (event) => {
+    if (event.payload.session_id !== sessionId) return;
 
-      if (event.payload.done) {
-        if (unlisten) { unlisten(); unlisten = null; }
-        resolve({ content, toolCalls: toolCalls.length > 0 ? toolCalls : null });
-        return;
-      }
+    if (event.payload.done) {
+      if (unlisten) { unlisten(); unlisten = null; }
+      resolvePromise({ content, toolCalls: toolCalls.length > 0 ? toolCalls : null });
+      return;
+    }
 
-      // Accumulate tool calls if present
-      if (event.payload.tool_calls) {
-        for (const tc of event.payload.tool_calls) {
-          const existing = toolCalls.find(t => t.id === tc.id);
-          if (existing) {
-            // Append to arguments (streamed incrementally)
-            existing.function.arguments += tc.function.arguments;
-          } else {
-            toolCalls.push({ ...tc });
-          }
+    // Accumulate tool calls if present
+    if (event.payload.tool_calls) {
+      for (const tc of event.payload.tool_calls) {
+        const existing = toolCalls.find(t => t.id === tc.id);
+        if (existing) {
+          existing.function.arguments += tc.function.arguments;
+        } else {
+          toolCalls.push({ ...tc });
         }
       }
+    }
 
-      // Accumulate text content
-      if (event.payload.delta) {
-        content += event.payload.delta;
-        chatMessages.update(msgs => {
-          const last = msgs[msgs.length - 1];
-          if (last && last.role === 'assistant') {
-            return [...msgs.slice(0, -1), { ...last, content }];
-          }
-          return msgs;
-        });
-      }
-    }) as unknown as () => void;
-
-    // Start streaming with tools
-    try {
-      await invoke('ai_chat_stream', {
-        request: {
-          messages,
-          model: get(aiModel),
-          provider: get(aiProvider),
-          session_id: sessionId,
-          tools: TOOL_SCHEMAS,
-        },
-      });
-    } catch (e) {
-      if (unlisten) { unlisten(); unlisten = null; }
+    // Accumulate text content
+    if (event.payload.delta) {
+      content += event.payload.delta;
       chatMessages.update(msgs => {
         const last = msgs[msgs.length - 1];
-        if (last && last.role === 'assistant' && last.content === '') {
-          return [...msgs.slice(0, -1), { ...last, content: `Agent error: ${e}` }];
+        if (last && last.role === 'assistant') {
+          return [...msgs.slice(0, -1), { ...last, content }];
         }
         return msgs;
       });
-      resolve({ content: '', toolCalls: null });
     }
-  });
+  }) as unknown as () => void;
+
+  // Start streaming with tools — if this throws, clean up
+  try {
+    await invoke('ai_chat_stream', {
+      request: {
+        messages,
+        model: get(aiModel),
+        provider: get(aiProvider),
+        session_id: sessionId,
+        tools: TOOL_SCHEMAS,
+      },
+    });
+  } catch (e) {
+    if (unlisten) { unlisten(); unlisten = null; }
+    chatMessages.update(msgs => {
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === 'assistant' && last.content === '') {
+        return [...msgs.slice(0, -1), { ...last, content: `Agent error: ${e}` }];
+      }
+      return msgs;
+    });
+    return { content: '', toolCalls: null };
+  }
+
+  return resultPromise;
 }
 
 // ── System prompt ──
