@@ -311,7 +311,7 @@
       const branch = await invoke<string | null>('get_git_branch', { path: rootPath });
       gitBranch.set(branch);
     } catch (_) {
-      gitBranch.set(null);
+      // Keep the last known branch on transient errors (e.g. git lock)
     }
   }
 
@@ -441,17 +441,21 @@
         const project = await findRecentProject(path);
         if (project && project.session.open_files.length > 0) {
           for (const file of project.session.open_files) {
-            const fileExists = await exists(file.path);
-            if (!fileExists) continue;
+            try {
+              const fileExists = await exists(file.path);
+              if (!fileExists) continue;
+            } catch { continue; } // Skip files blocked by scope permissions
             const name = file.path.split(/[/\\]/).pop() || file.path;
             addFile(file.path, name);
             if (file.pinned) togglePin(file.path);
           }
           if (project.session.active_file) {
-            const activeExists = await exists(project.session.active_file);
-            if (activeExists) {
-              activeFilePath.set(project.session.active_file);
-            }
+            try {
+              const activeExists = await exists(project.session.active_file);
+              if (activeExists) {
+                activeFilePath.set(project.session.active_file);
+              }
+            } catch { /* scope permission — skip */ }
           }
         }
       } catch (e) {
