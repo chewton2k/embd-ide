@@ -51,7 +51,11 @@ function saveSessions(list: AgentSession[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(list.slice(0, MAX_SESSIONS)));
 }
 
-sessions.subscribe(saveSessions);
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+sessions.subscribe((list) => {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => saveSessions(list), 500);
+});
 
 // ── Session lifecycle ──
 

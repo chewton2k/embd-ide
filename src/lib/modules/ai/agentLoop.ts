@@ -81,7 +81,7 @@ export async function runAgent(userRequest: string): Promise<void> {
     const allMessages = get(chatMessages);
     const messages = [
       { role: 'system', content: systemContent },
-      ...allMessages.map(m => ({ role: m.role, content: m.content })),
+      ...allMessages.map(m => ({ role: m.role, content: m.content, ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}) })),
     ];
 
     // Stream the agent's response
@@ -215,7 +215,7 @@ export async function runAgentWithPlan(userRequest: string): Promise<void> {
 
   const messages = [
     { role: 'system', content: systemContent },
-    ...get(chatMessages).map(m => ({ role: m.role, content: m.content })),
+    ...get(chatMessages).map(m => ({ role: m.role, content: m.content, ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}) })),
   ];
 
   // Stream the plan response (no tools — just text)
@@ -271,7 +271,7 @@ export async function executePlan(): Promise<void> {
 
     const messages = [
       { role: 'system', content: systemContent },
-      ...get(chatMessages).map(m => ({ role: m.role, content: m.content })),
+      ...get(chatMessages).map(m => ({ role: m.role, content: m.content, ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}) })),
     ];
 
     const result = await streamAgentTurn(messages, root);

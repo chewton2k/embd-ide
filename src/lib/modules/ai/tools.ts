@@ -326,8 +326,8 @@ function resolvePath(relativePath: string, projectRoot: string): string {
     parts.push(seg);
   }
   const canonical = '/' + parts.join('/');
-  // Verify the canonical path is within the project root
-  if (!canonical.startsWith(projectRoot)) {
+  // Verify the canonical path is within the project root (exact match or subpath)
+  if (canonical !== projectRoot && !canonical.startsWith(projectRoot + '/')) {
     throw new Error('Path traversal not allowed: resolved path is outside project root');
   }
   return canonical;
