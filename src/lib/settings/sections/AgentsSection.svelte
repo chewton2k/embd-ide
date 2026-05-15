@@ -74,7 +74,43 @@
     </div>
   </div>
 
-  <!-- Placeholder for custom agents -->
+  <!-- Permission Scopes -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-title">Tool Permissions</div>
+    </div>
+    <div class="card-body">
+      <p class="hint" style="margin-bottom: 8px;">Control which tools the agent can use without asking.</p>
+      <div class="perm-grid">
+        <div class="perm-row">
+          <span class="perm-tool">📖 Read files</span>
+          <span class="perm-level allow">Always allow</span>
+        </div>
+        <div class="perm-row">
+          <span class="perm-tool">🔍 Search / Grep</span>
+          <span class="perm-level allow">Always allow</span>
+        </div>
+        <div class="perm-row">
+          <span class="perm-tool">📁 List directories</span>
+          <span class="perm-level allow">Always allow</span>
+        </div>
+        <div class="perm-row">
+          <span class="perm-tool">✏️ Edit files</span>
+          <span class="perm-level ask">Ask first</span>
+        </div>
+        <div class="perm-row">
+          <span class="perm-tool">⚡ Run commands</span>
+          <span class="perm-level ask">Ask first</span>
+        </div>
+        <div class="perm-row">
+          <span class="perm-tool">🚫 Dangerous commands</span>
+          <span class="perm-level deny">Always block</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Agents -->
   <div class="card muted">
     <div class="card-head">
       <div class="card-title">Custom Agents</div>
@@ -241,4 +277,19 @@
   }
   .text-input:focus { border-color: var(--accent); }
   .text-input::placeholder { color: var(--text-muted); }
+
+  .perm-grid { display: flex; flex-direction: column; gap: 6px; }
+  .perm-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border-radius: 6px;
+    background: var(--bg-secondary); font-size: 12px;
+  }
+  .perm-tool { color: var(--text-primary); }
+  .perm-level {
+    font-size: 10.5px; font-weight: 600; padding: 2px 8px;
+    border-radius: 8px; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .perm-level.allow { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+  .perm-level.ask { background: color-mix(in srgb, var(--warning, #f0a030) 15%, transparent); color: var(--warning, #f0a030); }
+  .perm-level.deny { background: color-mix(in srgb, var(--error) 15%, transparent); color: var(--error); }
 </style>
