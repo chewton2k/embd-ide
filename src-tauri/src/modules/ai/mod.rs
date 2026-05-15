@@ -230,6 +230,8 @@ pub fn get_provider_key(provider: String) -> Result<String, String> {
 pub struct ChatMessageInput {
     pub role: String,
     pub content: String,
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -293,8 +295,8 @@ pub async fn ai_chat(request: AiRequest) -> Result<String, String> {
     };
 
     let messages = vec![
-        ChatMessageInput { role: "system".into(), content: SYSTEM_PROMPT.into() },
-        ChatMessageInput { role: "user".into(), content: user_content },
+        ChatMessageInput { role: "system".into(), content: SYSTEM_PROMPT.into(), tool_call_id: None },
+        ChatMessageInput { role: "user".into(), content: user_content, tool_call_id: None },
     ];
 
     let model = request.model.unwrap_or_else(|| default_model(&provider));
@@ -460,6 +462,17 @@ async fn stream_response(
     Ok(())
 }
 
+/// Serialize a message to JSON, including tool_call_id for tool-role messages.
+fn serialize_message(m: &ChatMessageInput) -> Value {
+    let mut msg = json!({"role": m.role, "content": m.content});
+    if m.role == "tool" {
+        if let Some(ref id) = m.tool_call_id {
+            msg["tool_call_id"] = json!(id);
+        }
+    }
+    msg
+}
+
 fn build_stream_request(
     provider: &str,
     api_key: &str,
@@ -477,7 +490,7 @@ fn build_stream_request(
             ];
             // Separate system message
             let system = messages.iter().find(|m| m.role == "system").map(|m| m.content.clone()).unwrap_or_default();
-            let msgs: Vec<Value> = messages.iter().filter(|m| m.role != "system").map(|m| json!({"role": m.role, "content": m.content})).collect();
+            let msgs: Vec<Value> = messages.iter().filter(|m| m.role != "system").map(|m| serialize_message(m)).collect();
             let mut body = json!({
                 "model": model,
                 "max_tokens": 4096,
@@ -522,7 +535,7 @@ fn build_stream_request(
                     ("content-type".into(), "application/json".into()),
                 ]
             };
-            let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
+            let msgs: Vec<Value> = messages.iter().map(|m| serialize_message(m)).collect();
             let token_field = if provider == "openai" { "max_completion_tokens" } else { "max_tokens" };
             let mut body = json!({
                 "model": model,
@@ -633,7 +646,7 @@ async fn call_blocking(provider: &str, api_key: &str, model: &str, messages: &[C
     match provider {
         "anthropic" => {
             let system = messages.iter().find(|m| m.role == "system").map(|m| m.content.clone()).unwrap_or_default();
-            let msgs: Vec<Value> = messages.iter().filter(|m| m.role != "system").map(|m| json!({"role": m.role, "content": m.content})).collect();
+            let msgs: Vec<Value> = messages.iter().filter(|m| m.role != "system").map(|m| serialize_message(m)).collect();
             let body = json!({ "model": model, "max_tokens": 4096, "system": system, "messages": msgs });
             let client = http_client();
             let response = client.post("https://api.anthropic.com/v1/messages")
@@ -658,7 +671,7 @@ async fn call_blocking(provider: &str, api_key: &str, model: &str, messages: &[C
                 "openai" => "https://api.openai.com/v1/chat/completions",
                 _ => "https://openrouter.ai/api/v1/chat/completions",
             };
-            let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
+            let msgs: Vec<Value> = messages.iter().map(|m| serialize_message(m)).collect();
             let token_field = if provider == "openai" { "max_completion_tokens" } else { "max_tokens" };
             let body = json!({ "model": model, token_field: 4096, "messages": msgs });
             let client = http_client();

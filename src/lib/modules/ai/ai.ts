@@ -12,8 +12,9 @@ import { log } from '../logging';
 import { isTerminalPath, isPreviewPath, isDiagramPath } from '../terminal/shell';
 
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  tool_call_id?: string;
 }
 
 export const chatMessages = writable<ChatMessage[]>([]);
@@ -133,6 +134,7 @@ export async function sendStreamingMessage(userContent: string, fileContexts?: {
     ...allMessages.map(m => ({
       role: m.role,
       content: m === userMsg && contextPrefix ? contextPrefix + m.content : m.content,
+      ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
     })),
   ];
 

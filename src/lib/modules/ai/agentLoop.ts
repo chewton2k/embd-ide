@@ -30,6 +30,27 @@ export const agentAutoApprove = writable(false);
 let cancelRequested = false;
 let currentSessionId: string | null = null;
 
+// ── Streaming batch helper (rAF) ──
+
+let pendingFlush: number | null = null;
+let pendingContent: string = '';
+
+function scheduleStreamFlush(content: string) {
+  pendingContent = content;
+  if (pendingFlush !== null) return; // already scheduled
+  pendingFlush = requestAnimationFrame(() => {
+    pendingFlush = null;
+    const c = pendingContent;
+    chatMessages.update(msgs => {
+      const last = msgs[msgs.length - 1];
+      if (last && last.role === 'assistant') {
+        return [...msgs.slice(0, -1), { ...last, content: c }];
+      }
+      return msgs;
+    });
+  });
+}
+
 // ── Public API ──
 
 export async function runAgent(userRequest: string): Promise<void> {
@@ -111,8 +132,9 @@ export async function runAgent(userRequest: string): Promise<void> {
             },
           });
           chatMessages.update(msgs => [...msgs, {
-            role: 'user' as const,
-            content: `[Tool: ${toolCall.function.name}] ${toolResult.content}`,
+            role: 'tool' as const,
+            tool_call_id: toolCall.id,
+            content: toolResult.content,
           }]);
           blocked = true; // Pause for approval
           continue;
@@ -137,8 +159,9 @@ export async function runAgent(userRequest: string): Promise<void> {
       });
 
       chatMessages.update(msgs => [...msgs, {
-        role: 'user' as const,
-        content: `[Tool: ${toolCall.function.name}] ${toolResult.content}`,
+        role: 'tool' as const,
+        tool_call_id: toolCall.id,
+        content: toolResult.content,
       }]);
     }
 
@@ -284,7 +307,7 @@ export async function executePlan(): Promise<void> {
               }]);
             },
           });
-          chatMessages.update(msgs => [...msgs, { role: 'user' as const, content: `[Tool: ${toolCall.function.name}] ${toolResult.content}` }]);
+          chatMessages.update(msgs => [...msgs, { role: 'tool' as const, tool_call_id: toolCall.id, content: toolResult.content }]);
           continue;
         }
 
@@ -295,7 +318,7 @@ export async function executePlan(): Promise<void> {
               recordAiChange(path, `Edit lines ${startLine}-${endLine}`, '', newContent);
             },
           });
-          chatMessages.update(msgs => [...msgs, { role: 'user' as const, content: `[Tool: ${toolCall.function.name}] ${toolResult.content}` }]);
+          chatMessages.update(msgs => [...msgs, { role: 'tool' as const, tool_call_id: toolCall.id, content: toolResult.content }]);
         }
       }
     }
@@ -360,13 +383,7 @@ async function streamAgentTurn(
     // Accumulate text content
     if (event.payload.delta) {
       content += event.payload.delta;
-      chatMessages.update(msgs => {
-        const last = msgs[msgs.length - 1];
-        if (last && last.role === 'assistant') {
-          return [...msgs.slice(0, -1), { ...last, content }];
-        }
-        return msgs;
-      });
+      scheduleStreamFlush(content);
     }
   }) as unknown as () => void;
 

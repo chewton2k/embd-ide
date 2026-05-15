@@ -20,6 +20,22 @@ export interface ToolPermission {
   level: PermissionLevel;
 }
 
+// ── Command allowlist ──
+
+/**
+ * Commands that are always safe to run without prompting.
+ * Matches by prefix — e.g. "npm" allows "npm test", "npm run check", etc.
+ */
+const COMMAND_ALLOWLIST: string[] = [
+  'npm test', 'npm run', 'npx tsc', 'npx eslint', 'npx prettier',
+  'cargo test', 'cargo check', 'cargo build', 'cargo clippy',
+  'go test', 'go build', 'go vet',
+  'python -m pytest', 'python -m py_compile', 'python -m mypy',
+  'git status', 'git diff', 'git log', 'git branch',
+  'ls', 'cat', 'head', 'tail', 'wc', 'find', 'grep',
+  'echo', 'pwd', 'which', 'env',
+];
+
 // ── Default permission policy ──
 
 const DEFAULT_PERMISSIONS: Record<ToolName, PermissionLevel> = {
@@ -71,8 +87,14 @@ export function checkPermission(
 
   const base = DEFAULT_PERMISSIONS[tool] ?? 'ask';
 
-  // Auto-approve mode bypasses 'ask' (but never bypasses 'deny')
-  if (autoApprove && base === 'ask') return 'allow';
+  // Auto-approve mode: allowlisted commands run freely, dangerous still blocked
+  if (autoApprove && base === 'ask') {
+    // Even in auto-approve, only allowlisted commands run without any check
+    if (tool === 'run_command' && args.command && !isAllowlistedCommand(args.command)) {
+      return 'ask'; // non-allowlisted commands still prompt in auto-approve
+    }
+    return 'allow';
+  }
 
   return base;
 }
@@ -82,6 +104,15 @@ export function checkPermission(
  */
 export function isDangerousCommand(command: string): boolean {
   return DANGEROUS_COMMAND_PATTERNS.some(p => p.test(command));
+}
+
+/**
+ * Check if a command is in the safe allowlist.
+ * Matches by prefix — "npm test" allows "npm test --coverage".
+ */
+export function isAllowlistedCommand(command: string): boolean {
+  const trimmed = command.trim();
+  return COMMAND_ALLOWLIST.some(prefix => trimmed.startsWith(prefix));
 }
 
 /**
