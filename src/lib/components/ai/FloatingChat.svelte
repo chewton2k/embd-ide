@@ -17,6 +17,11 @@
     createProseRenderer,
   } from '../../modules';
   import { showChat, activeFile } from '../../modules';
+  import { runAgentWithPlan, agentRunning, stopAgent } from '../../modules/ai/agentLoop';
+  import { currentPlan } from '../../modules/ai/agentPlan';
+  import { restoreCheckpoint, checkpoints, refreshCheckpoints } from '../../modules/ai/checkpoints';
+  import { parseMentions, resolveMentions, formatMentionsContext } from '../../modules/ai/mentions';
+  import PlanView from './PlanView.svelte';
   import {
     truncate, basename,
     type ChatBlock,
@@ -216,6 +221,34 @@
     scrollToBottom();
   }
 
+  async function sendAsAgent() {
+    const trimmed = input.trim();
+    if (!trimmed || $agentRunning) return;
+
+    // Parse @-mentions from the message
+    const { mentions, cleanMessage } = parseMentions(trimmed);
+    let finalMessage = cleanMessage || trimmed;
+    if (mentions.length > 0) {
+      const resolved = await resolveMentions(mentions);
+      if (resolved.length > 0) {
+        finalMessage += '\n' + formatMentionsContext(resolved);
+      }
+    }
+
+    input = '';
+    autoSizeInput();
+    await runAgentWithPlan(finalMessage);
+    scrollToBottom();
+  }
+
+  async function undoLastAgent() {
+    await refreshCheckpoints();
+    const list = get(checkpoints);
+    if (list.length > 0) {
+      await restoreCheckpoint(list[0].id);
+    }
+  }
+
   function scrollToBottom() {
     requestAnimationFrame(() => {
       if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -345,6 +378,9 @@
         <span>Leo AI</span>
       </div>
       <div class="title-actions">
+        <button class="icon-btn" onclick={undoLastAgent} title="Undo last agent run" aria-label="Undo last agent run">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6.69 3L3 13"/></svg>
+        </button>
         <button class="icon-btn" onclick={newConversation} title="New chat" aria-label="New chat">
           <Plus size={13} />
         </button>
@@ -497,6 +533,12 @@
         </div>
       {/if}
 
+      {#if $currentPlan}
+        <div style="padding: 0 12px;">
+          <PlanView />
+        </div>
+      {/if}
+
       <!-- Composer -->
       <div class="composer">
         <div class="composer-input">
@@ -545,11 +587,14 @@
             </div>
           </div>
           <div class="composer-right">
-            {#if $isStreaming}
-              <button class="send-btn stop" onclick={cancelStream} title="Stop" aria-label="Stop generating">
+            {#if $isStreaming || $agentRunning}
+              <button class="send-btn stop" onclick={() => { cancelStream(); stopAgent(); }} title="Stop" aria-label="Stop generating">
                 <Square size={11} />
               </button>
             {:else}
+              <button class="agent-btn" onclick={sendAsAgent} disabled={!input.trim()} title="Run as agent (with plan)" aria-label="Run as agent">
+                <Play size={10} />
+              </button>
               <button class="send-btn" onclick={send} disabled={!input.trim()} title="Send" aria-label="Send message">
                 <Send size={12} />
               </button>
@@ -1086,6 +1131,16 @@
   }
   .send-btn:hover:not(:disabled) { opacity: 0.92; }
   .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .agent-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 6px;
+    background: var(--bg-surface); color: var(--text-secondary);
+    border: 1px solid var(--border); cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .agent-btn:hover:not(:disabled) { background: var(--border); color: var(--text-primary); border-color: var(--accent); }
+  .agent-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .send-btn.stop { background: #d04545; }
 
   /* Resize handle */
