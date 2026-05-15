@@ -91,16 +91,54 @@
       <div class="card-title">Model Routing</div>
     </div>
     <div class="card-body">
-      <p class="hint" style="margin-bottom: 8px;">Use a cheap/fast model for autocomplete and a strong model for edits. Leave empty to use the default model.</p>
+      <p class="hint" style="margin-bottom: 8px;">Use a cheap/fast model for autocomplete and a strong model for edits.</p>
       <label class="input-row" data-setting="ghost-text-model">
         <span>Autocomplete model</span>
-        <input class="text-input" type="text" value={$ghostTextModel} placeholder="(use default)" spellcheck="false"
-          onchange={(e) => ghostTextModel.set((e.currentTarget as HTMLInputElement).value.trim())} />
+        <select class="select" value={$ghostTextModel} onchange={(e) => ghostTextModel.set((e.currentTarget as HTMLSelectElement).value)}>
+          <option value="">Use default</option>
+          <optgroup label="Anthropic">
+            <option value="claude-haiku-4-5">Claude Haiku 4.5 — Fast & cheap</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
+          </optgroup>
+          <optgroup label="OpenAI">
+            <option value="gpt-5-mini">GPT-5 mini — Fast & cheap</option>
+            <option value="o4-mini">o4-mini — Fast reasoning</option>
+          </optgroup>
+          <optgroup label="OpenRouter">
+            <option value="openrouter/auto">Auto</option>
+            <option value="deepseek/deepseek-v3.1">DeepSeek V3.1 — Strong & cheap</option>
+          </optgroup>
+          <optgroup label="Local">
+            <option value="llama3">Llama 3</option>
+            <option value="codellama">Code Llama</option>
+            <option value="mistral">Mistral</option>
+            <option value="qwen2.5-coder">Qwen 2.5 Coder</option>
+          </optgroup>
+        </select>
       </label>
       <label class="input-row" data-setting="edit-model">
         <span>Edit model (Cmd+K)</span>
-        <input class="text-input" type="text" value={$editModel} placeholder="(use default)" spellcheck="false"
-          onchange={(e) => editModel.set((e.currentTarget as HTMLInputElement).value.trim())} />
+        <select class="select" value={$editModel} onchange={(e) => editModel.set((e.currentTarget as HTMLSelectElement).value)}>
+          <option value="">Use default</option>
+          <optgroup label="Anthropic">
+            <option value="claude-opus-4-7">Claude Opus 4.7 — Most capable</option>
+            <option value="claude-sonnet-4-6">Claude Sonnet 4.6 — Best for coding</option>
+          </optgroup>
+          <optgroup label="OpenAI">
+            <option value="gpt-5">GPT-5 — Flagship</option>
+            <option value="o3">o3 — Deep reasoning</option>
+          </optgroup>
+          <optgroup label="OpenRouter">
+            <option value="openrouter/auto">Auto</option>
+            <option value="anthropic/claude-sonnet-4.6">Claude Sonnet 4.6 (via OR)</option>
+            <option value="openai/gpt-5">GPT-5 (via OR)</option>
+          </optgroup>
+          <optgroup label="Local">
+            <option value="llama3">Llama 3</option>
+            <option value="codellama">Code Llama</option>
+            <option value="deepseek-coder-v2">DeepSeek Coder V2</option>
+          </optgroup>
+        </select>
       </label>
     </div>
   </div>
@@ -303,6 +341,21 @@
   }
   .text-input:focus { border-color: var(--accent); }
   .text-input::placeholder { color: var(--text-muted); }
+
+  .select {
+    width: 200px;
+    padding: 5px 8px;
+    font-size: 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+    cursor: pointer;
+  }
+  .select:focus { border-color: var(--accent); }
+  .select optgroup { font-weight: 600; color: var(--text-muted); }
+  .select option { font-weight: 400; color: var(--text-primary); }
 
   .perm-grid { display: flex; flex-direction: column; gap: 6px; }
   .perm-row {
