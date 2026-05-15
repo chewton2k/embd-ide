@@ -17,6 +17,7 @@ import { addEdits } from './pendingEdits';
 import { recordAiChange } from './aiHistory';
 import { currentPlan, createPlan, approvePlan, updateStepStatus, parsePlanSteps, PLAN_SYSTEM_PROMPT } from './agentPlan';
 import { createCheckpoint } from './checkpoints';
+import { runVerify, formatVerifyErrors } from './selfVerify';
 import { log } from '../logging';
 
 // ── Agent state ──
@@ -139,6 +140,19 @@ export async function runAgent(userRequest: string): Promise<void> {
     }
 
     if (blocked) break; // Pause agent for user action
+
+    // Self-verify: run type-checker after edits (if any edit_file calls were made)
+    const hadEdits = result.toolCalls?.some(tc => tc.function.name === 'edit_file');
+    if (hadEdits && get(agentAutoApprove)) {
+      const verifyResult = await runVerify(root);
+      if (verifyResult && !verifyResult.success) {
+        chatMessages.update(msgs => [...msgs, {
+          role: 'user' as const,
+          content: formatVerifyErrors(verifyResult),
+        }]);
+        // Continue the loop — the model will see the errors and try to fix them
+      }
+    }
   }
 
   agentRunning.set(false);

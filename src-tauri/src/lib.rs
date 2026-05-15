@@ -71,6 +71,7 @@ pub fn run() {
             shell::write_terminal,
             shell::kill_terminal,
             shell::resize_terminal,
+            shell::run_command_capture,
             // AI
             ai::set_api_key,
             ai::set_provider_key,

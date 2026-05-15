@@ -217,3 +217,53 @@ pub fn resize_terminal(
         .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+// ── Command capture (for agent tool-calling and self-verify) ──
+
+#[derive(Serialize)]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+}
+
+/// Run a shell command and capture its output (stdout, stderr, exit code).
+/// Used by the agent's run_command tool and self-verify loop.
+/// Enforces a timeout to prevent runaway processes.
+#[tauri::command]
+pub async fn run_command_capture(
+    command: String,
+    cwd: String,
+    timeout_ms: u64,
+    state: tauri::State<'_, ProjectRootState>,
+) -> Result<CommandOutput, String> {
+    // Validate cwd is within project root
+    let root = state.blocking_read();
+    let root = root.as_ref().ok_or("No project is open")?;
+    let cwd_path = std::fs::canonicalize(&cwd).map_err(|e| format!("Invalid cwd: {}", e))?;
+    if !cwd_path.starts_with(root) {
+        return Err("Access denied: cwd is outside the project directory".into());
+    }
+
+    // Spawn the command via sh -c (cross-platform shell execution)
+    let child = tokio::process::Command::new("sh")
+        .args(["-c", &command])
+        .current_dir(&cwd_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn command: {}", e))?;
+
+    // Wait with timeout
+    let timeout = std::time::Duration::from_millis(timeout_ms.max(1000).min(120_000));
+    let output = tokio::time::timeout(timeout, child.wait_with_output())
+        .await
+        .map_err(|_| format!("Command timed out after {}ms", timeout_ms))?
+        .map_err(|e| format!("Command failed: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let exit_code = output.status.code().unwrap_or(-1);
+
+    Ok(CommandOutput { stdout, stderr, exit_code })
+}
