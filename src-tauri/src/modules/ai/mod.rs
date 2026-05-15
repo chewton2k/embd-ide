@@ -281,7 +281,11 @@ impl AiState {
 #[tauri::command]
 pub async fn ai_chat(request: AiRequest) -> Result<String, String> {
     let provider = request.provider.clone().unwrap_or_else(|| "openrouter".to_string()).to_lowercase();
-    let api_key = get_key(&provider)?.ok_or_else(|| format!("No API key configured for {}.", display_provider(&provider)))?;
+    let api_key = if provider == "local" {
+        get_key(&provider)?.unwrap_or_else(|| "http://localhost:11434".to_string())
+    } else {
+        get_key(&provider)?.ok_or_else(|| format!("No API key configured for {}.", display_provider(&provider)))?
+    };
 
     let user_content = match &request.context {
         Some(ctx) if !ctx.is_empty() => format!("Code context:\n```\n{}\n```\n\n{}", ctx, request.prompt),
@@ -306,7 +310,11 @@ pub async fn ai_chat_stream(
     state: tauri::State<'_, Arc<AiState>>,
 ) -> Result<(), String> {
     let provider = request.provider.clone().unwrap_or_else(|| "openrouter".to_string()).to_lowercase();
-    let api_key = get_key(&provider)?.ok_or_else(|| format!("No API key configured for {}.", display_provider(&provider)))?;
+    let api_key = if provider == "local" {
+        get_key(&provider)?.unwrap_or_else(|| "http://localhost:11434".to_string())
+    } else {
+        get_key(&provider)?.ok_or_else(|| format!("No API key configured for {}.", display_provider(&provider)))?
+    };
     let model = request.model.unwrap_or_else(|| default_model(&provider));
     let session_id = request.session_id.clone();
     let tools = request.tools.clone();
@@ -496,15 +504,24 @@ fn build_stream_request(
             Ok((url, headers, body.to_string()))
         }
         _ => {
-            // OpenAI-compatible (OpenRouter, OpenAI)
+            // OpenAI-compatible (OpenRouter, OpenAI, Local)
             let url = match provider {
                 "openai" => "https://api.openai.com/v1/chat/completions".to_string(),
+                "local" => {
+                    // For local provider, the api_key field stores the base URL
+                    let base = api_key.trim_end_matches('/');
+                    format!("{}/v1/chat/completions", base)
+                }
                 _ => "https://openrouter.ai/api/v1/chat/completions".to_string(),
             };
-            let headers = vec![
-                ("Authorization".into(), format!("Bearer {}", api_key)),
-                ("content-type".into(), "application/json".into()),
-            ];
+            let headers = if provider == "local" {
+                vec![("content-type".into(), "application/json".into())]
+            } else {
+                vec![
+                    ("Authorization".into(), format!("Bearer {}", api_key)),
+                    ("content-type".into(), "application/json".into()),
+                ]
+            };
             let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
             let token_field = if provider == "openai" { "max_completion_tokens" } else { "max_tokens" };
             let mut body = json!({
@@ -665,6 +682,7 @@ fn default_model(provider: &str) -> String {
     match provider {
         "openai" => "gpt-4o-mini".into(),
         "anthropic" => "claude-sonnet-4-20250514".into(),
+        "local" => "llama3".into(),
         _ => "openrouter/auto".into(),
     }
 }
@@ -674,6 +692,7 @@ fn display_provider(p: &str) -> &str {
         "openrouter" => "OpenRouter",
         "openai" => "OpenAI",
         "anthropic" => "Anthropic",
+        "local" => "Local (Ollama/LM Studio)",
         _ => p,
     }
 }

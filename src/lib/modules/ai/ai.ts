@@ -20,7 +20,7 @@ export const chatMessages = writable<ChatMessage[]>([]);
 export const isStreaming = writable<boolean>(false);
 export const attachedFiles = writable<{ path: string; name: string }[]>([]);
 
-export type AiProvider = 'openrouter' | 'openai' | 'anthropic';
+export type AiProvider = 'openrouter' | 'openai' | 'anthropic' | 'local';
 
 export const apiKey = writable<string>('');
 export const openaiApiKey = writable<string>('');

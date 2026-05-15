@@ -1,5 +1,8 @@
 <script lang="ts">
   import { apiKey, openaiApiKey, anthropicApiKey, aiModel, aiProvider, type AiProvider } from '../../modules';
+  import { writable } from 'svelte/store';
+
+  const localBaseUrl = writable<string>('');
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
@@ -65,15 +68,31 @@
         { id: 'meta-llama/llama-4-maverick',        label: 'Llama 4 Maverick',     hint: 'Open weights' },
       ],
     },
+    {
+      id: 'local' as AiProvider,
+      label: 'Local (Ollama / LM Studio)',
+      placeholder: 'http://localhost:11434',
+      keyPrefix: 'http',
+      docsUrl: 'https://ollama.com/download',
+      store: localBaseUrl,
+      models: [
+        { id: 'llama3',                label: 'Llama 3',              hint: 'General purpose' },
+        { id: 'codellama',             label: 'Code Llama',           hint: 'Code generation' },
+        { id: 'mistral',               label: 'Mistral',              hint: 'Fast & capable' },
+        { id: 'deepseek-coder-v2',     label: 'DeepSeek Coder V2',   hint: 'Code specialist' },
+        { id: 'qwen2.5-coder',        label: 'Qwen 2.5 Coder',      hint: 'Strong coding' },
+      ],
+    },
   ];
 
   const configured = $derived<Record<AiProvider, boolean>>({
     openrouter: $apiKey.trim().length > 0,
     openai:     $openaiApiKey.trim().length > 0,
     anthropic:  $anthropicApiKey.trim().length > 0,
+    local:      true, // Local provider is always "configured" (uses default URL)
   });
   const configuredCount = $derived(
-    (configured.openrouter ? 1 : 0) + (configured.openai ? 1 : 0) + (configured.anthropic ? 1 : 0)
+    (configured.openrouter ? 1 : 0) + (configured.openai ? 1 : 0) + (configured.anthropic ? 1 : 0) + (configured.local ? 1 : 0)
   );
 
   function providerOf(modelId: string): Provider | null {
@@ -208,7 +227,7 @@
             placeholder={p.placeholder}
             keyPrefix={p.keyPrefix}
             docsUrl={p.docsUrl}
-            currentKey={p.id === 'openrouter' ? $apiKey : p.id === 'openai' ? $openaiApiKey : $anthropicApiKey}
+            currentKey={p.id === 'openrouter' ? $apiKey : p.id === 'openai' ? $openaiApiKey : p.id === 'local' ? $localBaseUrl : $anthropicApiKey}
             onSave={(v) => saveKey(p, v)}
             onClear={() => clearKey(p)}
           />
