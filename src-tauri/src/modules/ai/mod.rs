@@ -246,6 +246,7 @@ pub struct AiStreamRequest {
     pub model: Option<String>,
     pub provider: Option<String>,
     pub session_id: String,
+    pub tools: Option<Value>,
 }
 
 #[derive(Serialize, Clone)]
@@ -253,6 +254,8 @@ pub struct StreamChunk {
     pub session_id: String,
     pub delta: String,
     pub done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Value>,
 }
 
 const SYSTEM_PROMPT: &str = "You are an AI coding assistant embedded in a lightweight IDE called leo. \
@@ -306,6 +309,7 @@ pub async fn ai_chat_stream(
     let api_key = get_key(&provider)?.ok_or_else(|| format!("No API key configured for {}.", display_provider(&provider)))?;
     let model = request.model.unwrap_or_else(|| default_model(&provider));
     let session_id = request.session_id.clone();
+    let tools = request.tools.clone();
 
     // Set up cancellation
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
@@ -318,7 +322,7 @@ pub async fn ai_chat_stream(
     let sid = session_id.clone();
 
     tokio::spawn(async move {
-        let result = stream_response(&provider, &api_key, &model, &request.messages, &app, &sid, cancel_rx).await;
+        let result = stream_response(&provider, &api_key, &model, &request.messages, &tools, &app, &sid, cancel_rx).await;
 
         // Clean up cancel token
         {
@@ -329,11 +333,11 @@ pub async fn ai_chat_stream(
         // Emit done or error
         match result {
             Ok(()) => {
-                let _ = app.emit("ai-stream-chunk", StreamChunk { session_id: sid, delta: String::new(), done: true });
+                let _ = app.emit("ai-stream-chunk", StreamChunk { session_id: sid, delta: String::new(), done: true, tool_calls: None });
             }
             Err(e) => {
-                let _ = app.emit("ai-stream-chunk", StreamChunk { session_id: sid.clone(), delta: format!("Error: {}", e), done: false });
-                let _ = app.emit("ai-stream-chunk", StreamChunk { session_id: sid, delta: String::new(), done: true });
+                let _ = app.emit("ai-stream-chunk", StreamChunk { session_id: sid.clone(), delta: format!("Error: {}", e), done: false, tool_calls: None });
+                let _ = app.emit("ai-stream-chunk", StreamChunk { session_id: sid, delta: String::new(), done: true, tool_calls: None });
             }
         }
     });
@@ -360,11 +364,12 @@ async fn stream_response(
     api_key: &str,
     model: &str,
     messages: &[ChatMessageInput],
+    tools: &Option<Value>,
     app: &AppHandle,
     session_id: &str,
     mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
-    let (url, headers, body) = build_stream_request(provider, api_key, model, messages)?;
+    let (url, headers, body) = build_stream_request(provider, api_key, model, messages, tools)?;
 
     let client = http_client_streaming();
     let mut req = client.post(&url);
@@ -414,11 +419,14 @@ async fn stream_response(
 
                                 if let Ok(parsed) = serde_json::from_str::<Value>(data) {
                                     let delta = extract_stream_delta(&parsed, provider);
-                                    if !delta.is_empty() {
+                                    let tool_calls = extract_tool_calls(&parsed, provider);
+
+                                    if !delta.is_empty() || tool_calls.is_some() {
                                         let _ = app.emit("ai-stream-chunk", StreamChunk {
                                             session_id: session_id.to_string(),
                                             delta,
                                             done: false,
+                                            tool_calls,
                                         });
                                     }
 
@@ -449,6 +457,7 @@ fn build_stream_request(
     api_key: &str,
     model: &str,
     messages: &[ChatMessageInput],
+    tools: &Option<Value>,
 ) -> Result<(String, Vec<(String, String)>, String), String> {
     match provider {
         "anthropic" => {
@@ -461,13 +470,29 @@ fn build_stream_request(
             // Separate system message
             let system = messages.iter().find(|m| m.role == "system").map(|m| m.content.clone()).unwrap_or_default();
             let msgs: Vec<Value> = messages.iter().filter(|m| m.role != "system").map(|m| json!({"role": m.role, "content": m.content})).collect();
-            let body = json!({
+            let mut body = json!({
                 "model": model,
                 "max_tokens": 4096,
                 "stream": true,
                 "system": system,
                 "messages": msgs,
             });
+            // Add tools if provided (convert from OpenAI format to Anthropic format)
+            if let Some(tools_val) = tools {
+                if let Some(tools_arr) = tools_val.as_array() {
+                    let anthropic_tools: Vec<Value> = tools_arr.iter().filter_map(|t| {
+                        let func = t.get("function")?;
+                        Some(json!({
+                            "name": func.get("name")?,
+                            "description": func.get("description")?,
+                            "input_schema": func.get("parameters")?
+                        }))
+                    }).collect();
+                    if !anthropic_tools.is_empty() {
+                        body["tools"] = json!(anthropic_tools);
+                    }
+                }
+            }
             Ok((url, headers, body.to_string()))
         }
         _ => {
@@ -482,12 +507,16 @@ fn build_stream_request(
             ];
             let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
             let token_field = if provider == "openai" { "max_completion_tokens" } else { "max_tokens" };
-            let body = json!({
+            let mut body = json!({
                 "model": model,
                 token_field: 4096,
                 "stream": true,
                 "messages": msgs,
             });
+            // Add tools if provided (already in OpenAI format)
+            if let Some(tools_val) = tools {
+                body["tools"] = tools_val.clone();
+            }
             Ok((url, headers, body.to_string()))
         }
     }
@@ -512,6 +541,56 @@ fn extract_stream_delta(parsed: &Value, provider: &str) -> String {
                 .and_then(|c| c.as_str())
                 .unwrap_or("")
                 .to_string()
+        }
+    }
+}
+
+fn extract_tool_calls(parsed: &Value, provider: &str) -> Option<Value> {
+    match provider {
+        "anthropic" => {
+            // Anthropic tool use: {"type":"content_block_start","content_block":{"type":"tool_use","id":"...","name":"...","input":{}}}
+            // or {"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"..."}}
+            let event_type = parsed.get("type").and_then(|t| t.as_str())?;
+            match event_type {
+                "content_block_start" => {
+                    let block = parsed.get("content_block")?;
+                    if block.get("type").and_then(|t| t.as_str()) == Some("tool_use") {
+                        let id = block.get("id")?.as_str()?;
+                        let name = block.get("name")?.as_str()?;
+                        Some(json!([{
+                            "id": id,
+                            "type": "function",
+                            "function": { "name": name, "arguments": "" }
+                        }]))
+                    } else {
+                        None
+                    }
+                }
+                "content_block_delta" => {
+                    let delta = parsed.get("delta")?;
+                    if delta.get("type").and_then(|t| t.as_str()) == Some("input_json_delta") {
+                        let partial = delta.get("partial_json").and_then(|p| p.as_str()).unwrap_or("");
+                        // We need the block index to correlate — use a placeholder id
+                        let idx = parsed.get("index").and_then(|i| i.as_u64()).unwrap_or(0);
+                        Some(json!([{
+                            "id": format!("anthropic-{}", idx),
+                            "type": "function",
+                            "function": { "name": "", "arguments": partial }
+                        }]))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => {
+            // OpenAI: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"...","type":"function","function":{"name":"...","arguments":"..."}}]}}]}
+            parsed.get("choices")
+                .and_then(|c| c.get(0))
+                .and_then(|c| c.get("delta"))
+                .and_then(|d| d.get("tool_calls"))
+                .cloned()
         }
     }
 }
