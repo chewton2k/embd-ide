@@ -1,6 +1,37 @@
 <script lang="ts">
   import { ghostTextEnabled, ghostTextDelay, agentMaxStepsConfig, agentAutoApproveConfig, ghostTextModel, editModel } from '../../modules';
   import SectionHeader from '../components/SectionHeader.svelte';
+
+  type PermLevel = 'allow' | 'ask' | 'deny';
+  interface ToolPerm { id: string; label: string; icon: string; level: PermLevel; locked?: boolean }
+
+  const STORAGE_KEY = 'leo-tool-permissions';
+
+  function loadPerms(): Record<string, PermLevel> {
+    try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : {}; }
+    catch { return {}; }
+  }
+
+  const defaults: Record<string, PermLevel> = {
+    read_file: 'allow', search: 'allow', list_dir: 'allow',
+    edit_file: 'ask', run_command: 'ask', dangerous: 'deny',
+  };
+
+  let perms = $state<Record<string, PermLevel>>({ ...defaults, ...loadPerms() });
+
+  function setLevel(id: string, level: PermLevel) {
+    perms = { ...perms, [id]: level };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(perms));
+  }
+
+  const tools: ToolPerm[] = [
+    { id: 'read_file', label: 'Read files', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6', level: perms.read_file },
+    { id: 'search', label: 'Search / Grep', icon: 'M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z M21 21l-4.3-4.3', level: perms.search },
+    { id: 'list_dir', label: 'List directories', icon: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z', level: perms.list_dir },
+    { id: 'edit_file', label: 'Edit files', icon: 'M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z', level: perms.edit_file },
+    { id: 'run_command', label: 'Run commands', icon: 'M4 17l6-6-6-6 M12 19h8', level: perms.run_command },
+    { id: 'dangerous', label: 'Dangerous commands', icon: 'M12 9v4 M12 17h.01 M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', level: perms.dangerous, locked: true },
+  ];
 </script>
 
 <div class="root">
@@ -82,30 +113,25 @@
     <div class="card-body">
       <p class="hint" style="margin-bottom: 8px;">Control which tools the agent can use without asking.</p>
       <div class="perm-grid">
-        <div class="perm-row">
-          <span class="perm-tool">📖 Read files</span>
-          <span class="perm-level allow">Always allow</span>
-        </div>
-        <div class="perm-row">
-          <span class="perm-tool">🔍 Search / Grep</span>
-          <span class="perm-level allow">Always allow</span>
-        </div>
-        <div class="perm-row">
-          <span class="perm-tool">📁 List directories</span>
-          <span class="perm-level allow">Always allow</span>
-        </div>
-        <div class="perm-row">
-          <span class="perm-tool">✏️ Edit files</span>
-          <span class="perm-level ask">Ask first</span>
-        </div>
-        <div class="perm-row">
-          <span class="perm-tool">⚡ Run commands</span>
-          <span class="perm-level ask">Ask first</span>
-        </div>
-        <div class="perm-row">
-          <span class="perm-tool">🚫 Dangerous commands</span>
-          <span class="perm-level deny">Always block</span>
-        </div>
+        {#each tools as tool (tool.id)}
+          <div class="perm-row">
+            <span class="perm-tool">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+                <path d={tool.icon} />
+              </svg>
+              {tool.label}
+            </span>
+            {#if tool.locked}
+              <span class="perm-level deny">Always block</span>
+            {:else}
+              <div class="perm-pills">
+                <button class="perm-pill" class:active={perms[tool.id] === 'allow'} onclick={() => setLevel(tool.id, 'allow')}>Allow</button>
+                <button class="perm-pill" class:active={perms[tool.id] === 'ask'} onclick={() => setLevel(tool.id, 'ask')}>Ask</button>
+                <button class="perm-pill" class:active={perms[tool.id] === 'deny'} onclick={() => setLevel(tool.id, 'deny')}>Block</button>
+              </div>
+            {/if}
+          </div>
+        {/each}
       </div>
     </div>
   </div>
@@ -284,12 +310,20 @@
     padding: 6px 10px; border-radius: 6px;
     background: var(--bg-secondary); font-size: 12px;
   }
-  .perm-tool { color: var(--text-primary); }
+  .perm-tool { display: flex; align-items: center; gap: 8px; color: var(--text-primary); }
+  .perm-tool svg { color: var(--text-muted); flex-shrink: 0; }
+  .perm-pills { display: flex; gap: 2px; }
+  .perm-pill {
+    padding: 3px 8px; border-radius: 4px; border: none;
+    font-size: 10.5px; font-weight: 600; cursor: pointer;
+    background: transparent; color: var(--text-muted);
+    transition: background 0.12s, color 0.12s;
+  }
+  .perm-pill:hover { background: var(--bg-surface); color: var(--text-primary); }
+  .perm-pill.active { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); }
   .perm-level {
     font-size: 10.5px; font-weight: 600; padding: 2px 8px;
     border-radius: 8px; text-transform: uppercase; letter-spacing: 0.3px;
   }
-  .perm-level.allow { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
-  .perm-level.ask { background: color-mix(in srgb, var(--warning, #f0a030) 15%, transparent); color: var(--warning, #f0a030); }
   .perm-level.deny { background: color-mix(in srgb, var(--error) 15%, transparent); color: var(--error); }
 </style>
