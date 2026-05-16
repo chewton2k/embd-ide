@@ -30,8 +30,9 @@
   import { tags } from '@lezer/highlight';
   import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
   import { aiDiffExtension, addDiffEffect, clearDiffEffect } from '../../modules/editor/aiDiffExtension';
+  import { bindAiDiffResolve } from '../../modules/editor/aiDiffEvents';
   import { ghostTextExtension } from '../../modules/editor/ghostText';
-  import { pendingEdits } from '../../modules/ai/pendingEdits';
+  import { pendingEdits, approveEdit, rejectEdit } from '../../modules/ai/pendingEdits';
   import { log } from '../../modules/logging';
 
   function buildEditorTheme(id: EditorThemeId): import('@codemirror/state').Extension {
@@ -1231,9 +1232,11 @@
   }
 
   let unregisterRenameCallback: (() => void) | null = null;
+  let unbindDiffResolve: (() => void) | null = null;
 
   onMount(() => {
     window.addEventListener('keydown', handleGlobalKeydown);
+    unbindDiffResolve = bindAiDiffResolve(editorContainer, handleDiffResolve);
 
     // Register rename callback to update cache keys
     unregisterRenameCallback = registerFileRenameCallback((oldPath, newPath) => {
@@ -1252,6 +1255,12 @@
       }
     });
   });
+
+  // Handle accept/reject from the inline diff controls
+  function handleDiffResolve({ id, action }: { id: string; action: 'approve' | 'reject' }) {
+    if (action === 'approve') approveEdit(id);
+    else rejectEdit(id);
+  }
 
   // Sync pending AI edits into the editor's diff field
   const unsubPendingEdits = pendingEdits.subscribe((allEdits) => {
@@ -1276,6 +1285,7 @@
 
   onDestroy(() => {
     unsubPendingEdits();
+    unbindDiffResolve?.();
     window.removeEventListener('keydown', handleGlobalKeydown);
     if (unregisterRenameCallback) unregisterRenameCallback();
     stopWatching();

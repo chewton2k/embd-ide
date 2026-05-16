@@ -3,11 +3,36 @@ import { invoke } from '@tauri-apps/api/core';
 import type { EditProposal } from './editParser';
 import { projectRoot } from '../git/git';
 import { activeFilePath } from '../explorer/files';
+import { getFileContent, reloadFileContent } from '../explorer/files';
 import { recordAiChange } from './aiHistory';
 import { log } from '../logging';
 
 /** Map of filePath → EditProposal[] for all pending edits across files. */
 export const pendingEdits = writable<Record<string, EditProposal[]>>({});
+
+function applyEditToContent(content: string, edit: EditProposal): string {
+  const lines = content.split('\n');
+  const before = lines.slice(0, edit.startLine - 1);
+  const after = lines.slice(edit.endLine);
+  const newLines = edit.newCode.split('\n');
+  return [...before, ...newLines, ...after].join('\n');
+}
+
+function removeApprovedEdits(filePath: string, approvedIds: Set<string>) {
+  pendingEdits.update(current => {
+    const updated = { ...current };
+    const remaining = (updated[filePath] || []).filter(e => !approvedIds.has(e.id));
+    if (remaining.length > 0) updated[filePath] = remaining;
+    else delete updated[filePath];
+    return updated;
+  });
+}
+
+async function loadEditableContent(filePath: string): Promise<string> {
+  const cached = getFileContent(filePath);
+  if (cached !== null) return cached;
+  return invoke<string>('read_file_content', { path: filePath });
+}
 
 /** Resolve a relative file path from an edit to an absolute path.
  *  Validates the result stays within the project root. */
@@ -73,27 +98,17 @@ export async function approveEdit(editId: string) {
     if (!edit) continue;
 
     try {
-      const content = await invoke<string>('read_file_content', { path: filePath });
-      const lines = content.split('\n');
-
-      const before = lines.slice(0, edit.startLine - 1);
-      const after = lines.slice(edit.endLine);
-      const newLines = edit.newCode.split('\n');
-      const newContent = [...before, ...newLines, ...after].join('\n');
+      const content = await loadEditableContent(filePath);
+      const newContent = applyEditToContent(content, edit);
 
       recordAiChange(filePath, `Edit lines ${edit.startLine}-${edit.endLine}`, content, newContent);
       await invoke('write_file_content', { path: filePath, content: newContent });
+      reloadFileContent(filePath, newContent);
+      removeApprovedEdits(filePath, new Set([editId]));
+      return;
     } catch (e) {
       log.error('Failed to apply edit', e);
     }
-
-    // Remove from pending
-    pendingEdits.update(current => {
-      const updated = { ...current };
-      updated[filePath] = edits.filter(e => e.id !== editId);
-      if (updated[filePath].length === 0) delete updated[filePath];
-      return updated;
-    });
     return;
   }
 }
@@ -119,22 +134,19 @@ export async function approveAll() {
     // Sort descending by startLine so we apply from bottom to top
     const sorted = [...edits].sort((a, b) => b.startLine - a.startLine);
     try {
-      let content = await invoke<string>('read_file_content', { path: filePath });
+      let content = await loadEditableContent(filePath);
       for (const edit of sorted) {
-        const lines = content.split('\n');
-        const before = lines.slice(0, edit.startLine - 1);
-        const after = lines.slice(edit.endLine);
-        const newLines = edit.newCode.split('\n');
-        const newContent = [...before, ...newLines, ...after].join('\n');
+        const newContent = applyEditToContent(content, edit);
         recordAiChange(filePath, `Edit lines ${edit.startLine}-${edit.endLine}`, content, newContent);
         content = newContent;
       }
       await invoke('write_file_content', { path: filePath, content });
+      reloadFileContent(filePath, content);
+      removeApprovedEdits(filePath, new Set(edits.map(edit => edit.id)));
     } catch (e) {
       log.error('Failed to apply edits to ' + filePath, e);
     }
   }
-  pendingEdits.set({});
 }
 
 /** Reject all pending edits. */

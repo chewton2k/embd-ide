@@ -4,6 +4,16 @@ import App from './App.svelte'
 import SettingsWindow from './lib/settings/SettingsWindow.svelte'
 import { log } from './lib/modules/logging'
 
+// Apply theme class before first paint to prevent white/black flash.
+// This runs synchronously before mount so the CSS variables resolve immediately.
+;(function applyInitialTheme() {
+  const mode = localStorage.getItem('leo-appearance') || 'system'
+  const cls = mode === 'light' ? 'light'
+            : mode === 'dark' ? 'dark'
+            : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  document.documentElement.classList.add(cls)
+})()
+
 const target = document.getElementById('app')!
 const isSettings = window.location.hash.startsWith('#settings')
 

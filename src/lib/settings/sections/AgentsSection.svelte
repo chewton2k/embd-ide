@@ -24,14 +24,14 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(perms));
   }
 
-  const tools: ToolPerm[] = [
+  const tools = $derived<ToolPerm[]>([
     { id: 'read_file', label: 'Read files', icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z M14 2v6h6', level: perms.read_file },
     { id: 'search', label: 'Search / Grep', icon: 'M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16Z M21 21l-4.3-4.3', level: perms.search },
     { id: 'list_dir', label: 'List directories', icon: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z', level: perms.list_dir },
     { id: 'edit_file', label: 'Edit files', icon: 'M12 20h9 M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z', level: perms.edit_file },
     { id: 'run_command', label: 'Run commands', icon: 'M4 17l6-6-6-6 M12 19h8', level: perms.run_command },
     { id: 'dangerous', label: 'Dangerous commands', icon: 'M12 9v4 M12 17h.01 M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', level: perms.dangerous, locked: true },
-  ];
+  ]);
 </script>
 
 <div class="root">
@@ -328,19 +328,6 @@
     gap: 12px;
     padding: 4px 0;
   }
-
-  .text-input {
-    width: 200px;
-    padding: 5px 10px;
-    font-size: 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-primary);
-    outline: none;
-  }
-  .text-input:focus { border-color: var(--accent); }
-  .text-input::placeholder { color: var(--text-muted); }
 
   .select {
     width: 200px;

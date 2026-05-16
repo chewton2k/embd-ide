@@ -1,8 +1,14 @@
 <script lang="ts">
   import Icon from '@iconify/svelte';
   import { TerminalSquare, Plus, FolderOpen, Eye, RefreshCw, GitBranch } from 'lucide-svelte';
-  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalTabs, activeTerminalTabId, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, terminalTabIdFromPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode } from '../../modules';
-  import { triggerFileTreeRefresh } from '../../modules';
+  import { openFiles, activeFilePath, closeFile, togglePin, pinnedFiles, unpinnedFiles, sharedGitStatus, terminalTabs, activeTerminalTabId, killTerminalSignal, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, showPreview, showTerminal, terminalPath, terminalTabIdFromPath, createTerminalSignal, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, triggerFileTreeRefresh } from '../../modules';
+  let refreshSpinning = $state(false);
+
+  function handleRefresh() {
+    triggerFileTreeRefresh();
+    refreshSpinning = true;
+    setTimeout(() => { refreshSpinning = false; }, 600);
+  }
   import { getFileIconName } from '../../modules/explorer';
 
   let tabsBar: HTMLDivElement | undefined = $state();
@@ -171,8 +177,8 @@
   {/if}
 
   <div class="tab-actions">
-    <button type="button" class="tab-action-btn" onclick={() => triggerFileTreeRefresh()} title="Reload file tree" aria-label="Reload file tree">
-      <RefreshCw size={12} />
+    <button type="button" class="tab-action-btn" onclick={handleRefresh} title="Reload file tree" aria-label="Reload file tree">
+      <RefreshCw size={12} class={refreshSpinning ? 'spin-once' : ''} />
     </button>
     <button type="button" class="tab-action-btn" bind:this={addBtnEl} onclick={openAddMenu} title="New tab" aria-label="New tab" aria-expanded={addMenuOpen}>
       <Plus size={13} />
@@ -305,6 +311,15 @@
     cursor: pointer;
   }
   .tab-action-btn:hover { background: var(--bg-surface); color: var(--text-primary); }
+
+  :global(.spin-once) {
+    animation: spin-bounce 0.6s ease-in-out;
+  }
+  @keyframes spin-bounce {
+    0% { transform: rotate(0deg); }
+    50% { transform: rotate(200deg); }
+    100% { transform: rotate(0deg); }
+  }
 
   .tab-add-menu {
     position: fixed;

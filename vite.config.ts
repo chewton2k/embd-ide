@@ -36,6 +36,8 @@ export default defineConfig({
 
           // CodeMirror — editor surface (large, always loaded with editor)
           if (id.includes('@codemirror') ||
+              id.includes('@lezer') ||
+              id.includes('@replit/codemirror-vim') ||
               id.includes('codemirror-lang-prolog') ||
               id.includes('codemirror-lang-scheme')) {
             return 'vendor-codemirror';

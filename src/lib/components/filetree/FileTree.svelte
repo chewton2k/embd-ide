@@ -1167,6 +1167,7 @@
   }
 
   let unsubTreeRefresh: (() => void) | null = null;
+  let refreshFlash = $state(false);
 
   onMount(() => {
     window.addEventListener('mouseup', handleGlobalMouseUp);
@@ -1176,6 +1177,8 @@
     let first = true;
     unsubTreeRefresh = fileTreeRefreshTrigger.subscribe(() => {
       if (first) { first = false; return; }
+      refreshFlash = true;
+      setTimeout(() => { refreshFlash = false; }, 1000);
       refreshTree();
     });
 
@@ -1197,7 +1200,7 @@
   });
 </script>
 
-<div class="file-tree">
+<div class="file-tree" class:refresh-flash={refreshFlash}>
   {#if !rootPath}
     <div class="no-folder">
       <FolderOpen class="no-folder-icon" />
@@ -1458,6 +1461,15 @@
     overflow-y: auto;
     overflow-x: hidden;
     padding-bottom: 12px;
+  }
+
+  .file-tree.refresh-flash {
+    animation: tree-flash 1s ease-out;
+  }
+  @keyframes tree-flash {
+    0% { opacity: 1; }
+    40% { opacity: 0.15; }
+    100% { opacity: 1; }
   }
 
   /* Empty state */
