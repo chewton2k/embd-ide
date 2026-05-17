@@ -1,15 +1,43 @@
 <script lang="ts">
-  import { Check, X, RotateCcw } from 'lucide-svelte';
-  import { pendingEdits, approveEdit, rejectEdit, approveAll, rejectAll } from '../../modules/ai/pendingEdits';
+  import { Check, X, AlertTriangle } from 'lucide-svelte';
+  import { pendingEdits, approveAll, rejectAll } from '../../modules/ai/pendingEdits';
 
-  let editCount = $derived(Object.values($pendingEdits).flat().filter(e => e.status === 'pending').length);
-  let fileCount = $derived(Object.keys($pendingEdits).filter(k => $pendingEdits[k].some(e => e.status === 'pending')).length);
+  // Single pass over the store: count pending, files, and stale in
+  // one traversal so we don't repeatedly flat()/filter() on every
+  // store update.
+  let summary = $derived.by(() => {
+    let edits = 0;
+    let files = 0;
+    let stale = 0;
+    for (const bucket of Object.values($pendingEdits)) {
+      let bucketHasPending = false;
+      for (const e of bucket) {
+        if (e.status !== 'pending') continue;
+        edits += 1;
+        if (e.stale) stale += 1;
+        bucketHasPending = true;
+      }
+      if (bucketHasPending) files += 1;
+    }
+    return { edits, files, stale };
+  });
 </script>
 
-{#if editCount > 0}
+{#if summary.edits > 0}
   <div class="diff-toolbar">
     <span class="diff-info">
-      ✦ {editCount} edit{editCount > 1 ? 's' : ''} pending in {fileCount} file{fileCount > 1 ? 's' : ''}
+      ✦ {summary.edits} edit{summary.edits > 1 ? 's' : ''} pending in {summary.files} file{summary.files > 1 ? 's' : ''}
+      {#if summary.stale > 0}
+        <span
+          class="stale-badge"
+          role="status"
+          aria-label="{summary.stale} edit{summary.stale > 1 ? 's' : ''} {summary.stale > 1 ? 'have' : 'has'} drifted from the proposal's original content; accepting will overwrite local changes"
+          title="The live content under {summary.stale > 1 ? 'these' : 'this'} edit{summary.stale > 1 ? 's' : ''} has changed since the proposal was generated. Accepting will overwrite those changes."
+        >
+          <AlertTriangle size={11} aria-hidden="true" />
+          {summary.stale} stale
+        </span>
+      {/if}
     </span>
     <div class="diff-actions">
       <button class="diff-btn approve" onclick={approveAll}>
@@ -35,8 +63,25 @@
   }
 
   .diff-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     color: var(--accent, #4a9eff);
     font-weight: 500;
+  }
+
+  .stale-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #ffcc66;
+    background: rgba(240, 160, 32, 0.15);
+    border: 1px solid rgba(240, 160, 32, 0.4);
+    cursor: help;
   }
 
   .diff-actions {

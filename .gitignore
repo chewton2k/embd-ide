@@ -31,5 +31,10 @@ CLAUDE.md
 todo.md
 docs/
 scripts/bump-version.sh
-tests/
+# `tests/` was previously gitignored, which silently kept the entire
+# unit-test suite out of CI. Re-enable tracking. If you want to keep
+# scratch test files locally, place them outside `tests/unit/` and
+# `tests/setup.ts` / `tests/mocks/`, or add a more specific ignore.
+!tests/
+!tests/**
 scripts/test.sh

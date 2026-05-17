@@ -6,6 +6,26 @@ export interface EditProposal {
   originalCode: string;
   newCode: string;
   status: 'pending' | 'approved' | 'rejected';
+  /**
+   * Optional staleness marker. `true` means the live document content
+   * at `[startLine, endLine]` no longer matches `originalCode` —
+   * approving would silently overwrite content the user (or another
+   * source) changed since the proposal was generated.
+   *
+   * Computed by `reanchorEditsForChanges` (keystroke path) when the
+   * change touched the edit's range. Cleared by
+   * `reanchorEditsForContent` (wholesale-replacement path) on a
+   * successful unique-match re-anchor (which by construction proves
+   * the originalCode is present at the new line range).
+   *
+   * Default `false` / `undefined`. Producers (`tools.ts edit_file`,
+   * Cmd+K inline edit, `parseAiEdits`) should not set this directly;
+   * it's a derived UI signal. The diff widget renders stale edits
+   * with a warning indicator; `approveEdit` logs a warn before
+   * applying a stale edit (still allows the apply — the user
+   * remains the authority on their data).
+   */
+  stale?: boolean;
 }
 
 const EDIT_BLOCK_RE = /```edit:([^:\n]+):(\d+)-(\d+)\n([\s\S]*?)```/g;

@@ -29,10 +29,12 @@
   import { oneDark } from '@codemirror/theme-one-dark';
   import { tags } from '@lezer/highlight';
   import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
-  import { aiDiffExtension, addDiffEffect, clearDiffEffect } from '../../modules/editor/aiDiffExtension';
+  import { aiDiffExtension, addDiffEffect, clearDiffEffect, aiDiffField } from '../../modules/editor/aiDiffExtension';
+  import { reanchorEditsForChanges, reanchorEditsForContent, projectEditsForDiffField } from '../../modules/editor/aiDiffAnchoring';
+  import { shouldDispatchVersionUpdate } from '../../modules/editor/versionGate';
   import { bindAiDiffResolve } from '../../modules/editor/aiDiffEvents';
   import { ghostTextExtension } from '../../modules/editor/ghostText';
-  import { pendingEdits, approveEdit, rejectEdit } from '../../modules/ai/pendingEdits';
+  import { pendingEdits, approveEdit, rejectEdit, addEdits } from '../../modules/ai/pendingEdits';
   import { log } from '../../modules/logging';
 
   function buildEditorTheme(id: EditorThemeId): import('@codemirror/state').Extension {
@@ -195,6 +197,13 @@
   // Per-file undo/redo: cache EditorState keyed by file path
   const stateCache = new Map<string, EditorState>();
   let currentFilePath: string | null = null;
+
+  // Per-path counter of the highest `openFiles` version we've already
+  // pushed into the editor doc. Without this, the version $effect
+  // re-fires on every openFiles change (e.g. the modified-flag flip
+  // on the first keystroke after an AI accept) and reverts the
+  // user's typing back to the post-accept content.
+  const lastHandledVersion = new Map<string, number>();
 
   // File watcher for external changes
   let unwatchFn: UnwatchFn | null = null;
@@ -802,6 +811,12 @@
       markFileSaved(path);
       updatePreview(diskContent);
       updateGitGutter(path);
+      // Re-anchor pending edits via content search. mapPos is useless
+      // here — we replaced the entire document — so we look up each
+      // edit's `originalCode` as a line-aligned run in the new content.
+      // Edits whose original content vanished (or appears multiple
+      // times) are dropped; the user can re-request from the AI.
+      reanchorPendingEditsForExternalContent(path, diskContent);
     } catch {
       // File might have been deleted
     }
@@ -829,6 +844,9 @@
         view = new EditorView({ state: cached, parent: editorContainer });
       }
       currentFilePath = path;
+      // Project pendingEdits onto the (possibly fresh) CM state — the
+      // store didn't change but the projection target did.
+      syncDiffFieldFromPendingEdits(get(pendingEdits));
       // The cached state captured the error-lens compartment at creation time,
       // which may now be stale (user toggled the setting, or different language).
       // Re-apply based on the current setting + file type.
@@ -863,6 +881,11 @@
             markFileSaved(path);
             updatePreview(diskContent);
             updateGitGutter(path);
+            // doc.lines may have changed — re-anchor pending edits
+            // against the new content via line-aligned search before
+            // re-projecting onto the CM diff field.
+            reanchorPendingEditsForExternalContent(path, diskContent);
+            syncDiffFieldFromPendingEdits(get(pendingEdits));
           }
         }
       } catch {
@@ -875,6 +898,7 @@
         savedContentCache.set(path, content);
         createEditor(content, path);
         currentFilePath = path;
+        syncDiffFieldFromPendingEdits(get(pendingEdits));
         updatePreview(content);
         updateGitGutter(path);
         startWatching(path);
@@ -887,6 +911,10 @@
           createEditor(`// Error loading file: ${e}`, path);
         }
         currentFilePath = path;
+        // The error-stub document has no real content, so any pending
+        // edits will fail the line-range filter and clear the field.
+        // Calling the sync keeps the invariant explicit.
+        syncDiffFieldFromPendingEdits(get(pendingEdits));
       }
     }
   }
@@ -933,9 +961,20 @@
     const result = await startInlineEdit(request);
 
     if (result.success && result.newCode) {
-      // Apply as a pending edit via the diff extension
+      // Apply as a pending edit. Route through `addEdits` (the canonical
+      // `pendingEdits` store) rather than dispatching `addDiffEffect`
+      // directly to CM. The Editor's `pendingEdits.subscribe` below
+      // projects pendingEdits onto the CM diff field, and the inline
+      // Accept/Reject buttons resolve through `approveEdit` / `rejectEdit`
+      // which consult that same store. Bypassing the store here would
+      // make the Accept button a silent no-op (the original bug).
+      //
+      // `trusted: true` because the path is the user's currently-open
+      // file (the Editor's `filePath` prop). The default untrusted
+      // mode would silently drop the edit if the file lives outside
+      // the project root (e.g. a recent file opened from a dialog).
       const edit = {
-        id: `inline-${Date.now()}`,
+        id: `inline-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         filePath,
         startLine: inlineEditSelection.startLine,
         endLine: inlineEditSelection.endLine,
@@ -943,7 +982,7 @@
         newCode: result.newCode,
         status: 'pending' as const,
       };
-      view.dispatch({ effects: addDiffEffect.of([edit]) });
+      addEdits([edit], { trusted: true });
     }
 
     inlineEditVisible = false;
@@ -1092,6 +1131,48 @@
             updateFileContent(path, content);
             scheduleAutosave(path);
             updatePreview(content);
+            // Re-anchor any pending AI edits' line numbers so they
+            // track typing. Capture references from the (immutable)
+            // ViewUpdate up front, then defer the store mutation to a
+            // microtask: dispatching from inside an updateListener
+            // would re-enter CM's transaction pipeline. By the time
+            // the microtask runs the store still reflects pre-update
+            // line numbers (only docChanged transactions reach this
+            // branch and only one editor mutates this path's edits),
+            // so the captured `oldDoc` is the right anchor.
+            const oldDoc = update.startState.doc;
+            const newDoc = update.state.doc;
+            const changes = update.changes;
+            queueMicrotask(() => {
+              const all = get(pendingEdits);
+              const fileEdits = all[path];
+              if (!fileEdits || fileEdits.length === 0) return;
+              const reanchored = reanchorEditsForChanges(fileEdits, oldDoc, newDoc, changes);
+              // Reference-equality fast path: if every edit object is
+              // unchanged AND no edit was dropped, skip the store
+              // update to avoid a spurious subscriber notification.
+              const unchanged = reanchored.length === fileEdits.length
+                && reanchored.every((e, i) => e === fileEdits[i]);
+              if (unchanged) return;
+              pendingEdits.update(current => {
+                // Staleness guard: if the bucket changed between our
+                // `get(pendingEdits)` and this update callback (e.g.
+                // a concurrent addEdits / removeApprovedEdits / rekey
+                // landed during the microtask gap), `reanchored` was
+                // computed from a stale snapshot. Bail and let the
+                // next docChanged re-anchor against the fresh state.
+                // Single-threaded JS makes this race impossible
+                // *today*, but the guard is cheap and prevents a
+                // future async refactor from silently corrupting line
+                // numbers.
+                if (current[path] !== fileEdits) return current;
+                if (reanchored.length === 0) {
+                  const { [path]: _, ...rest } = current;
+                  return rest;
+                }
+                return { ...current, [path]: reanchored };
+              });
+            });
           }
         }),
         EditorView.theme({
@@ -1250,8 +1331,24 @@
         savedContentCache.delete(oldPath);
         savedContentCache.set(newPath, savedContent);
       }
+      const versionHandled = lastHandledVersion.get(oldPath);
+      if (versionHandled !== undefined) {
+        lastHandledVersion.delete(oldPath);
+        lastHandledVersion.set(newPath, versionHandled);
+      }
       if (currentFilePath === oldPath) {
         currentFilePath = newPath;
+        // Keep the invariant: every `currentFilePath` assignment is
+        // followed by a sync. By the time this runs, the rename
+        // callback registered in `pendingEdits.ts` (registered earlier
+        // at module load) has already moved the bucket from `oldPath`
+        // to `newPath`. The store-emit it triggered ran the
+        // pendingEdits.subscribe with stale `currentFilePath = oldPath`,
+        // dispatching `clearDiffEffect`. This sync re-projects with the
+        // updated path and, if there are pending edits for the new
+        // file, dispatches `addDiffEffect`. Both updates land within
+        // the same synchronous tick, so there's no visible flicker.
+        syncDiffFieldFromPendingEdits(get(pendingEdits));
       }
     });
   });
@@ -1262,25 +1359,65 @@
     else rejectEdit(id);
   }
 
-  // Sync pending AI edits into the editor's diff field
-  const unsubPendingEdits = pendingEdits.subscribe((allEdits) => {
+  /**
+   * Project the canonical `pendingEdits` onto the CM `aiDiffField`
+   * for the file currently in `view`. Sole writer of `addDiffEffect`
+   * / `clearDiffEffect`. The pure `projectEditsForDiffField` helper
+   * decides whether to dispatch, clear, or skip — the skip path
+   * prevents no-op store notifications from cascading into CM
+   * decoration recomputation.
+   */
+  function syncDiffFieldFromPendingEdits(allEdits: Record<string, import('../../modules/ai/editParser').EditProposal[]>) {
     if (!view) return;
-    const filePath = currentFilePath;
-    if (!filePath) { view.dispatch({ effects: clearDiffEffect.of(undefined) }); return; }
-    const fileEdits = allEdits[filePath];
-    if (fileEdits && fileEdits.length > 0) {
-      // Filter out edits with invalid line numbers
-      const validEdits = fileEdits.filter(e =>
-        e.startLine >= 1 && e.endLine <= view!.state.doc.lines
-      );
-      if (validEdits.length > 0) {
-        view.dispatch({ effects: addDiffEffect.of(validEdits) });
-      } else {
-        view.dispatch({ effects: clearDiffEffect.of(undefined) });
-      }
-    } else {
+    const path = currentFilePath;
+    const current = view.state.field(aiDiffField);
+    const fileEdits = path ? allEdits[path] : undefined;
+    const projection = projectEditsForDiffField(fileEdits, current, view.state.doc.lines);
+    if (projection.kind === 'unchanged') return;
+    if (projection.kind === 'clear') {
       view.dispatch({ effects: clearDiffEffect.of(undefined) });
+      return;
     }
+    view.dispatch({ effects: addDiffEffect.of(projection.edits) });
+  }
+
+  /**
+   * Re-anchor pending edits for `filePath` against a fresh content
+   * snapshot using line-aligned content search. Called after wholesale
+   * document replacements (file watcher reload, post-conflict disk
+   * read), where mapPos through a `from: 0, to: doc.length` change
+   * would map every old position to the boundary and corrupt the
+   * line numbers.
+   *
+   * Pure-helper resolution rules: unique line-aligned occurrence
+   * of `originalCode` re-anchors; zero or multiple occurrences drop
+   * the edit (better lost than mis-applied).
+   */
+  function reanchorPendingEditsForExternalContent(filePath: string, newContent: string) {
+    const all = get(pendingEdits);
+    const fileEdits = all[filePath];
+    if (!fileEdits || fileEdits.length === 0) return;
+    const reanchored = reanchorEditsForContent(fileEdits, newContent);
+    const unchanged = reanchored.length === fileEdits.length
+      && reanchored.every((e, i) => e === fileEdits[i]);
+    if (unchanged) return;
+    pendingEdits.update(current => {
+      // Staleness guard — if another update interleaved between our
+      // get() and this callback, bail. Same rationale as the
+      // keystroke re-anchor.
+      if (current[filePath] !== fileEdits) return current;
+      if (reanchored.length === 0) {
+        const { [filePath]: _, ...rest } = current;
+        return rest;
+      }
+      return { ...current, [filePath]: reanchored };
+    });
+  }
+
+  // Sync pending AI edits into the editor's diff field whenever the
+  // pendingEdits store changes.
+  const unsubPendingEdits = pendingEdits.subscribe((allEdits) => {
+    syncDiffFieldFromPendingEdits(allEdits);
   });
 
   onDestroy(() => {
@@ -1311,30 +1448,37 @@
     }
   });
 
-  // React to store version changes (e.g. git discard) — force editor to match store content
+  // React to store version changes (e.g. AI accept, file-watcher
+  // reload, git discard). Gated per-path by `lastHandledVersion` so
+  // we only dispatch on a fresh version bump — not on every openFiles
+  // store update (the modified-flag flip on the first keystroke would
+  // otherwise revert the user's typing).
   $effect(() => {
-    const files = $openFiles; // subscribe to changes
-    const path = currentFilePath; // read fresh value, not closure-captured filePath
+    const files = $openFiles;
+    const path = currentFilePath;
     if (!view || !path) return;
     const file = files.find(f => f.path === path);
-    if (!file || file.version === 0) return;
-    // version > 0 means an external reload happened — push content into editor
+    if (!shouldDispatchVersionUpdate(file, lastHandledVersion.get(path) ?? 0)) return;
+    // Only commit lastHandled AFTER we've actually dispatched. If the
+    // currentFilePath !== filePath guard below skips the dispatch, we
+    // leave lastHandled untouched so the *next* run on the right tab
+    // can still react to this version.
     if (currentFilePath === filePath) {
       const editorContent = view.state.doc.toString();
-      if (editorContent !== file.content) {
+      if (editorContent !== file!.content) {
         ignoreNextDocChange = true;
-        const cursorPos = Math.min(view.state.selection.main.head, file.content.length);
+        const cursorPos = Math.min(view.state.selection.main.head, file!.content.length);
         view.dispatch({
-          changes: { from: 0, to: view.state.doc.length, insert: file.content },
+          changes: { from: 0, to: view.state.doc.length, insert: file!.content },
           selection: { anchor: cursorPos },
           annotations: Transaction.addToHistory.of(false),
         });
       }
-      savedContentCache.set(filePath, file.content);
-      // Clear the cached state so it doesn't hold stale content
+      savedContentCache.set(filePath, file!.content);
       stateCache.delete(filePath);
-      updatePreview(file.content);
+      updatePreview(file!.content);
       updateGitGutter(filePath);
+      lastHandledVersion.set(path, file!.version);
     }
   });
 
@@ -1342,12 +1486,23 @@
   $effect(() => {
     const files = $openFiles;
     const openPaths = new Set(files.map(f => f.path));
-    for (const cachedPath of stateCache.keys()) {
-      if (!openPaths.has(cachedPath)) {
-        stateCache.delete(cachedPath);
-        savedContentCache.delete(cachedPath);
+    const purge = (keys: IterableIterator<string>) => {
+      for (const key of keys) {
+        if (!openPaths.has(key)) {
+          stateCache.delete(key);
+          savedContentCache.delete(key);
+          lastHandledVersion.delete(key);
+        }
       }
-    }
+    };
+    // Union of all per-path cache keys; a file may have entries in
+    // some maps but not others (e.g. a freshly-opened file with a
+    // version bump but no edited state yet).
+    const allKeys = new Set<string>();
+    for (const k of stateCache.keys()) allKeys.add(k);
+    for (const k of savedContentCache.keys()) allKeys.add(k);
+    for (const k of lastHandledVersion.keys()) allKeys.add(k);
+    purge(allKeys.values());
   });
 
   // Open search panel when triggerSearchInFile store increments
