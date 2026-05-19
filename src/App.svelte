@@ -418,8 +418,8 @@
               Kept in the DOM (visibility:hidden when unfocused) so PTY
               sessions survive tab switches within tab mode.
             -->
-            {#if $terminalMode === 'tab' && $showTerminal}
-              <div class="terminal-tab-slot" class:focused={$showTerminal && isTerminalPath($activeFilePath)}>
+            {#if $terminalMode === 'tab'}
+              <div class="terminal-tab-slot" class:focused={$showTerminal && isTerminalPath($activeFilePath)} style:display={$showTerminal ? '' : 'none'}>
                 <Terminal />
               </div>
             {/if}
