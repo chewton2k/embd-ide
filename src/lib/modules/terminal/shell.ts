@@ -25,6 +25,7 @@ export const terminalPanelHeight = persistedNumber('leo-terminal-panel-height', 
 export const TERMINAL_SENTINEL_PREFIX = '__terminal__';
 export const PREVIEW_PATH = '__preview__';
 export const DIAGRAM_PREFIX = '__diagram__:';
+export const DIFF_PREFIX = '__diff__:';
 
 // Legacy single-terminal path, kept so stored sessions that reference it
 // still parse as "a terminal path" via `isTerminalPath`. New code should
@@ -41,6 +42,18 @@ export function isPreviewPath(path: string | null): boolean {
 
 export function isDiagramPath(path: string | null): boolean {
   return !!path?.startsWith(DIAGRAM_PREFIX);
+}
+
+export function isDiffPath(path: string | null): boolean {
+  return !!path?.startsWith(DIFF_PREFIX);
+}
+
+export function diffPath(filePath: string): string {
+  return `${DIFF_PREFIX}${filePath}`;
+}
+
+export function getDiffFilePath(path: string): string {
+  return path.slice(DIFF_PREFIX.length);
 }
 
 export function diagramPath(filePath: string): string {

@@ -9,7 +9,7 @@
    * an "Open Folder" button to switch the workspace root.
    */
   import Tabs from '../tabs/Tabs.svelte';
-  import { SplitSquareVertical, PanelLeft, FolderOpen, ChevronDown, Search, FilePlus2, FolderPlus } from 'lucide-svelte';
+  import { Grid2x2, SplitSquareVertical, PanelLeft, FolderOpen, ChevronDown, Search, FilePlus2, FolderPlus } from 'lucide-svelte';
   import {
     showTerminal, activeFilePath, panesInActiveTab,
     activeTerminalTabId, splitTerminalSignal, collapseTerminalSplitsSignal,
@@ -184,14 +184,10 @@
 
   <!-- File actions -->
   {#if $projectRoot}
-    <div class="file-actions">
+  <div class="split-btn-container" bind:this={splitBtnEl}>
       <button type="button" class="toolbar-btn" title="Search files (⌘O)" onclick={() => onSearchFiles?.()}>
         <Search size={13} />
       </button>
-    </div>
-  {/if}
-
-  <div class="split-btn-container" bind:this={splitBtnEl}>
     <button
       type="button"
       class="toolbar-btn split-btn"
@@ -201,7 +197,7 @@
       aria-label={splitActive ? 'Collapse splits' : 'Split terminal'}
       aria-pressed={splitActive}
     >
-      <SplitSquareVertical size={14} />
+      <Grid2x2 size={13} />
     </button>
 
     {#if splitMenuOpen && splitMenuPos}
@@ -221,6 +217,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 
   <div class="tabs-wrapper">
     <Tabs />
@@ -379,20 +376,13 @@
 
   /* ── Tabs + split ─────────────────────────────────────────────── */
 
-  .file-actions {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 0 6px;
-    height: 100%;
-    border-right: 1px solid var(--border);
-  }
 
   .tabs-wrapper {
     flex: 1;
     min-width: 0;
     height: 100%;
     overflow: hidden;
+    padding-left: 8px;
   }
 
   .tabs-wrapper :global(.tabs-bar) {
@@ -423,12 +413,13 @@
     position: relative;
     display: flex;
     align-items: center;
+    gap: 2px;
+    padding: 0 4px;
     height: 100%;
     border-right: 1px solid var(--border);
   }
   .split-btn {
-    padding: 0 10px;
-    border-radius: 0;
+    padding: 0 8px;
     height: 100%;
   }
 

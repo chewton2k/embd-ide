@@ -1,5 +1,5 @@
 :root {
-  --font-display: "Cormorant Garamond", Georgia, serif;
+  --font-display: "Spectral", Georgia, serif;
   --font-ui:
     "IBM Plex Sans",
     -apple-system, BlinkMacSystemFont,
@@ -13,52 +13,60 @@
 
 /* ── Dark mode (default) ──────────────────────────────────────── */
 :root.dark {
-  --bg-primary: #0E0E10;
-  --bg-secondary: #0E0E10;
-  --bg-tertiary: #0a0a0b;
-  --bg-surface: #1a1a1c;
+  --bg-primary: #15121A;
+  --bg-secondary: #1C1825;
+  --bg-tertiary: #15121A;
+  --bg-surface: #241E2E;
   --text-primary: #E8E2D5;
-  --text-secondary: #b8b3a8;
-  --text-muted: #6e6a62;
-  --accent: #0E0E10;
-  --accent-hover: #1a1a1c;
-  --border: #1f1f22;
-  --success: #4ec9b0;
-  --warning: #dcdcaa;
-  --error: #f14c4c;
-  --tab-active: #0E0E10;
-  --tab-inactive: #0E0E10;
-  --diff-add: #4ec9b0;
-  --diff-del: #f14c4c;
+  --text-secondary: #A8A09C;
+  --text-muted: #6A6359;
+  --accent: #1C1825;
+  --accent-hover: #2E2638;
+  --border: #2E2638;
+  --success: #8EA88A;
+  --warning: #D4A85A;
+  --error: #C95A4A;
+  --tab-active: #15121A;
+  --tab-inactive: #1C1825;
+  --diff-add: #6A8A5E;
+  --diff-del: #A8514A;
   --git-graph-accent: #E8E2D5;
-  --git-notification: #4ec9b0;
+  --git-notification: #8EA88A;
   --statusbar-text: #E8E2D5;
   --settings-icon: #B34B3C;
+  --cursor: #D4AE8A;
+  --gutter: #6A6080;
+  --selection: #2E2638;
+  --line-highlight: #241E2E;
 }
 
 /* ── Light mode ───────────────────────────────────────────────── */
 :root.light {
-  --bg-primary: #E8E2D5;
-  --bg-secondary: #E8E2D5;
-  --bg-tertiary: #ddd7ca;
-  --bg-surface: #d4cfc3;
-  --text-primary: #0E0E10;
-  --text-secondary: #2a2a2c;
-  --text-muted: #5c5a55;
-  --accent: #E8E2D5;
-  --accent-hover: #ddd7ca;
-  --border: #ccc7bb;
-  --success: #1a7f37;
-  --warning: #9a6700;
-  --error: #cf222e;
-  --tab-active: #E8E2D5;
-  --tab-inactive: #E8E2D5;
-  --diff-add: #1a7f37;
-  --diff-del: #cf222e;
-  --git-graph-accent: #0E0E10;
-  --git-notification: #1a7f37;
-  --statusbar-text: #0E0E10;
-  --settings-icon: #B34B3C;
+  --bg-primary: #F5EFE2;
+  --bg-secondary: #EDE5D2;
+  --bg-tertiary: #F5EFE2;
+  --bg-surface: #E2D8C1;
+  --text-primary: #2A2018;
+  --text-secondary: #5E5346;
+  --text-muted: #8A7E6A;
+  --accent: #EDE5D2;
+  --accent-hover: #D6C8A8;
+  --border: #D6C8A8;
+  --success: #4A6B3E;
+  --warning: #8A5E1C;
+  --error: #A83A2C;
+  --tab-active: #F5EFE2;
+  --tab-inactive: #EDE5D2;
+  --diff-add: #4A6B3E;
+  --diff-del: #8A3A2C;
+  --git-graph-accent: #2A2018;
+  --git-notification: #4A6B3E;
+  --statusbar-text: #2A2018;
+  --settings-icon: #A83A2C;
+  --cursor: #4A2640;
+  --gutter: #B0A48A;
+  --selection: #D6C8A8;
+  --line-highlight: #E2D8C1;
 }
 
 * {

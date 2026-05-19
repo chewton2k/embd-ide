@@ -35,6 +35,7 @@ pub fn run() {
             fs::write_file_content,
             fs::read_file_binary,
             fs::get_home_dir,
+            fs::create_project_dir,
             fs::create_file,
             fs::create_folder,
             fs::delete_entries,
@@ -69,6 +70,7 @@ pub fn run() {
             git::git_create_checkpoint,
             git::git_restore_checkpoint,
             git::git_list_checkpoints,
+            git::git_clone,
             // Shell
             shell::spawn_terminal,
             shell::write_terminal,

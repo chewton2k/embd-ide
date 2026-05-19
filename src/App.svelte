@@ -1,10 +1,11 @@
 <script lang="ts">
   import FileTree from './lib/components/filetree/FileTree.svelte';
-  import { Sparkles, TerminalSquare } from 'lucide-svelte';
+  import { Sparkles, TerminalSquare, FolderOpen, Plus, GitBranch } from 'lucide-svelte';
   import Editor from './lib/components/editor/Editor.svelte';
   import FileViewer from './lib/components/file-viewer/FileViewer.svelte';
   import JSONViewer from './lib/components/file-viewer/JSONViewer.svelte';
   import MergeEditor from './lib/components/merge/MergeEditor.svelte';
+  import DiffViewer from './lib/components/diff/DiffViewer.svelte';
   import Toolbar from './lib/components/toolbar/Toolbar.svelte';
   import TitleBar from './lib/components/toolbar/TitleBar.svelte';
   import Terminal from './lib/components/shell/Terminal.svelte';
@@ -19,7 +20,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { exists } from '@tauri-apps/plugin-fs';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
-  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal, breadcrumbSegmentsFor, createPanelResizer, type PanelTarget } from './lib/modules';
+  import { openFiles, activeFile, activeFilePath, activeFileModified, addFile, autosaveEnabled, projectRoot, gitBranch, showSettings, showTerminal, showPreview, isTerminalPath, isPreviewPath, isDiagramPath, isDiffPath, getDiffFilePath, getDiagramFilePath, PREVIEW_PATH, terminalTabs, activeTerminalTabId, createTerminalSignal, appearanceMode, uiFontSize, uiDensity, apiKey, openaiApiKey, anthropicApiKey, sharedGitStatus, nextTab, prevTab, showChat, showGit, toggleChatPanel, toggleGitPanel, fileTreeNavTarget, terminalPath, openFileSearchSignal, openDiagramSearchSignal, openDiagrams, diagramPath, terminalMode, saveConversationNow, createFileSignal, createFolderSignal, breadcrumbSegmentsFor, createPanelResizer, type PanelTarget } from './lib/modules';
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { log } from './lib/modules/logging';
   import { isMac, isFullscreen, installWindowChromeWatchers, openSettingsWindow } from './lib/modules/ui';
@@ -73,6 +74,41 @@
     const selected = await openDialog({ directory: true, multiple: false });
     if (selected && openFolderByPath) {
       await openFolderByPath(selected as string);
+    }
+  }
+
+  async function newProjectDialog() {
+    const parentDir = await openDialog({ directory: true, multiple: false, title: 'Choose location for new project' });
+    if (!parentDir) return;
+    const name = window.prompt('Project name:');
+    if (!name || !name.trim()) return;
+    const projectPath = `${parentDir}/${name.trim()}`;
+    try {
+      await invoke('create_project_dir', { path: projectPath });
+      if (openFolderByPath) await openFolderByPath(projectPath);
+    } catch (e) {
+      showToast({ level: 'error', message: `Failed to create project: ${e}` });
+    }
+  }
+
+  let clonePaletteOpen = $state(false);
+
+  async function cloneRepoDialog() {
+    clonePaletteOpen = true;
+  }
+
+  async function handleCloneSubmit(url: string) {
+    clonePaletteOpen = false;
+    const parentDir = await openDialog({ directory: true, multiple: false, title: 'Choose where to clone' });
+    if (!parentDir) return;
+    try {
+      const repoName = url.split('/').pop()?.replace(/\.git$/, '') || 'repo';
+      showToast({ level: 'info', message: `Cloning ${repoName}...` });
+      await invoke('git_clone', { url, dest: parentDir as string });
+      const projectPath = `${parentDir}/${repoName}`;
+      if (openFolderByPath) await openFolderByPath(projectPath);
+    } catch (e) {
+      showToast({ level: 'error', message: `Clone failed: ${e}` });
     }
   }
 
@@ -489,7 +525,9 @@
             {/if}
             <!-- File editor — hidden while a terminal or preview tab is focused -->
             {#if !($showTerminal && isTerminalPath($activeFilePath)) && !isPreviewPath($activeFilePath) && !isDiagramPath($activeFilePath)}
-              {#if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
+              {#if $activeFile && isDiffPath($activeFilePath)}
+                <DiffViewer filePath={getDiffFilePath($activeFilePath ?? '')} />
+              {:else if $activeFile && $sharedGitStatus[$activeFile] === 'C'}
                 <MergeEditor filePath={$activeFile} />
               {:else if $activeFile && isJsonFile($activeFile)}
                 <JSONViewer filePath={$activeFile} />
@@ -499,14 +537,22 @@
                 <Editor filePath={$activeFile} />
               {:else}
                 <div class="welcome">
+                  <img src="/leo.png" alt="leo" class="welcome-logo" />
                   <h3> [  W E L C O M E ] </h3>
                   {#if recentProjects.length > 0}
                     <div class="recent-projects">
-                      <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent</p>
+                      <div class="recent-header-row">
+                        <span class="recent-header">RECENT</span>
+                        <span class="recent-header-line"></span>
+                        <span class="recent-header-dot"></span>
+                      </div>
                       {#each (showAllRecent ? recentProjects : recentProjects.slice(0, 3)) as project}
                         <button class="recent-item" onclick={(e: MouseEvent) => { if (e.metaKey || e.ctrlKey) { openFolderInNewWindow(project.path); } else { openRecentProject(project); } }}>
-                          <span class="recent-name">{project.name}</span>
-                          <span class="recent-path">{project.path}</span>
+                          <FolderOpen size={16} class="recent-folder-icon" />
+                          <div class="recent-item-text">
+                            <span class="recent-name">{project.name}</span>
+                            <span class="recent-path">{project.path}</span>
+                          </div>
                         </button>
                       {/each}
                       {#if recentProjects.length > 3}
@@ -516,6 +562,20 @@
                       {/if}
                     </div>
                   {/if}
+                  <div class="welcome-actions">
+                    <button class="welcome-action-btn" onclick={openFolderDialog}>
+                      <FolderOpen size={16} />
+                      Open Folder
+                    </button>
+                    <button class="welcome-action-btn" onclick={newProjectDialog}>
+                      <Plus size={16} />
+                      New Project
+                    </button>
+                    <button class="welcome-action-btn" onclick={cloneRepoDialog}>
+                      <GitBranch size={16} />
+                      Clone Repo
+                    </button>
+                  </div>
                 </div>
               {/if}
             {/if}
@@ -544,6 +604,10 @@
 
     {#if showFileSearch}
       <FileSearch onClose={() => showFileSearch = false} />
+    {/if}
+
+    {#if clonePaletteOpen}
+      <FileSearch mode="clone" onClose={() => clonePaletteOpen = false} onSubmit={handleCloneSubmit} />
     {/if}
 
     {#if showDiagramSearch}
@@ -713,7 +777,7 @@
   }
 
   .sidebar {
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -772,40 +836,86 @@
     justify-content: center;
     height: 100%;
     color: var(--text-muted);
-    gap: 12px;
+    gap: 20px;
+    font-family: var(--font-display);
+  }
+
+  .welcome-logo {
+    width: 56px;
+    height: 56px;
+    border-radius: 11px;
   }
 
   .recent-projects {
     display: flex;
     flex-direction: column;
-    width: 340px;
-    gap: 4px;
-    margin-bottom: 12px;
-    max-height: 240px;
+    width: 460px;
+    gap: 5px;
+    max-height: 380px;
     overflow-y: auto;
+  }
+
+  .recent-header-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+
+  .recent-header {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .recent-header-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .recent-header-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--settings-icon, #B34B3C);
+    flex-shrink: 0;
   }
 
   .recent-item {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    padding: 8px 12px;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
     background: var(--bg-surface);
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 7px;
     cursor: pointer;
     text-align: left;
     transition: border-color 0.15s;
   }
 
   .recent-item:hover {
-    border-color: var(--accent);
+    border-color: var(--text-muted);
+  }
+
+  :global(.recent-folder-icon) {
+    flex-shrink: 0;
+    color: var(--text-secondary);
+  }
+
+  .recent-item-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
   }
 
   .recent-name {
     color: var(--text-primary);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
   }
 
@@ -825,10 +935,39 @@
     border-radius: 6px;
     cursor: pointer;
     transition: color 0.15s;
+    align-self: flex-start;
+    margin-top: 2px;
   }
 
   .show-more-btn:hover {
-    color: var(--accent);
+    color: var(--text-primary);
+  }
+
+  .welcome-actions {
+    display: flex;
+    gap: 8px;
+    width: 460px;
+  }
+
+  .welcome-action-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 10px 12px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+
+  .welcome-action-btn:hover {
+    border-color: var(--text-muted);
   }
 
   /* Resize handles */
@@ -894,6 +1033,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 0 12px;
+    height: 28px;
     font-size: 12px;
     font-weight: 500;
     min-width: 0;
@@ -908,6 +1048,7 @@
     min-width: 0;
     flex-shrink: 1;
     overflow: hidden;
+    height: 100%;
   }
 
   .statusbar-left {
@@ -969,11 +1110,11 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    padding: 0 7px;
-    height: 20px;
+    padding: 0 8px;
+    height: 22px;
     border-radius: 4px;
     color: inherit;
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 500;
     cursor: pointer;
     background: transparent;
@@ -995,7 +1136,7 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 10.5px;
+    font-size: 11.5px;
     min-width: 0;
     overflow: hidden;
     padding-left: 8px;
@@ -1007,7 +1148,7 @@
     gap: 4px;
     padding: 1px 0;
     white-space: nowrap;
-    font-size: 10.5px;
+    font-size: 11.5px;
     font-weight: 400;
     color: inherit;
     cursor: pointer;

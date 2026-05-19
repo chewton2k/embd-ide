@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { ask } from '@tauri-apps/plugin-dialog';
   import { projectRoot, gitBranch, activeFilePath, openFiles, reloadFileContent, closeFile, triggerFileTreeRefresh, sharedGitStatus, addFile } from '../../modules';
+  import { diffPath } from '../../modules/terminal/shell';
   import { beginGitBranchRequest, getLatestGitBranchRequestId, updateGitBranch } from '../../modules/git/branchUpdate';
   import { log } from '../../modules/logging';
 
@@ -717,6 +718,7 @@
         >
           <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
           <span class="file-name" title={file.relPath}>{file.relPath}</span>
+          <button class="file-action open-editor" onclick={(e: MouseEvent) => { e.stopPropagation(); addFile(diffPath(file.path), `${file.relPath.split('/').pop()} (Staged)`); }} title="Open Diff">↗</button>
           <button class="file-action" onclick={(e: MouseEvent) => { e.stopPropagation(); unstageFile(file); }} title="Unstage">−</button>
         </div>
       {/each}
@@ -744,6 +746,7 @@
         >
           <span class="status-badge" style="color: {statusColor(file.status)}">{statusIcon(file.status)}</span>
           <span class="file-name" title={file.relPath}>{file.relPath}</span>
+          <button class="file-action open-editor" onclick={(e: MouseEvent) => { e.stopPropagation(); addFile(diffPath(file.path), `${file.relPath.split('/').pop()} (Working Tree)`); }} title="Open Diff">↗</button>
           <button class="file-action" onclick={(e: MouseEvent) => { e.stopPropagation(); discardFile(file); }} title="Discard Changes">✕</button>
           <button class="file-action" onclick={(e: MouseEvent) => { e.stopPropagation(); stageFile(file); }} title="Stage">+</button>
         </div>

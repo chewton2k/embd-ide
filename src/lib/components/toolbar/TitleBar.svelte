@@ -222,7 +222,7 @@
     cursor: pointer;
     white-space: nowrap;
     transition: border-color 0.1s ease, color 0.1s ease;
-    min-width: 340px;
+    min-width: 500px;
     justify-content: space-between;
     -webkit-app-region: no-drag;
   }

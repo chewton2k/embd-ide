@@ -1203,8 +1203,7 @@
 <div class="file-tree" class:refresh-flash={refreshFlash}>
   {#if !rootPath}
     <div class="no-folder">
-      <FolderOpen class="no-folder-icon" />
-      <Button variant="default" size="md" class="open-folder-btn" onclick={openFolder}>Open Folder</Button>
+      <Button variant="default" size="md" class="open-folder-btn" onclick={openFolder}><FolderOpen size={14} /> Open Folder</Button>
       <p>Open a project to begin</p>
     </div>
   {:else}
@@ -1520,10 +1519,8 @@
     border-radius: 3px;
     margin: 0 3px;
     width: calc(100% - 6px);
-    /* Only transition cosmetic properties — `transition: all` was animating
-       every state class change (drag, drop-target, selected) causing
-       cascading repaints during scrolling/dragging. */
-    transition: background-color 0.1s ease, color 0.1s ease;
+    /* Only transition color for hover — background changes should be instant */
+    transition: color 0.1s ease;
     cursor: default;
     user-select: none;
   }
@@ -1532,7 +1529,7 @@
     font-weight: 600;
     border-left: 2px solid var(--settings-icon, #B34B3C);
     border-radius: 0;
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--bg-surface);
   }
 
   .tree-item:hover {
@@ -1663,14 +1660,15 @@
   }
 
   .tree-item.drop-target {
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
-    outline: 1px dashed var(--accent);
-    outline-offset: -1px;
+    background: color-mix(in srgb, var(--accent) 35%, var(--bg-surface));
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
     border-radius: 3px;
+    color: var(--text-primary);
   }
 
   .tree-item.drop-target-child {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: color-mix(in srgb, var(--accent) 15%, var(--bg-surface));
   }
 
   .tree-item.git-ignored {
@@ -1678,7 +1676,7 @@
   }
 
   .tree-content.drop-target {
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
   }
 
   :global(.drag-ghost) {

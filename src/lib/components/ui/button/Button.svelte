@@ -41,8 +41,8 @@
   }
 
   .ui-button--default {
-    background: var(--accent);
-    color: var(--bg-tertiary);
+    background: var(--bg-surface);
+    color: var(--text-primary);
   }
 
   .ui-button--default:hover {

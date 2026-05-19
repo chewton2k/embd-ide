@@ -1296,6 +1296,23 @@ pub fn git_list_checkpoints(
     Ok(checkpoints)
 }
 
+/// Clone a git repository. Does not require a project to be open.
+/// Used by the "Clone Repo" welcome screen action.
+#[tauri::command]
+pub async fn git_clone(url: String, dest: String) -> Result<(), String> {
+    let output = tokio::process::Command::new("git")
+        .args(["clone", &url])
+        .current_dir(&dest)
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run git clone: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git clone failed: {}", stderr));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -282,6 +282,13 @@ pub fn get_home_dir() -> Result<String, String> {
         .ok_or_else(|| "Could not determine home directory".to_string())
 }
 
+/// Create a directory (and parents) without requiring a project to be open.
+/// Used by the "New Project" welcome screen action.
+#[tauri::command]
+pub fn create_project_dir(path: String) -> Result<(), String> {
+    std::fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {}", e))
+}
+
 #[tauri::command]
 pub fn create_file(window: tauri::WebviewWindow, state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
     validate_path(&path, window.label(), &state)?;

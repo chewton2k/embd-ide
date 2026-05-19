@@ -2,7 +2,14 @@
   import { invoke } from '@tauri-apps/api/core';
   import { projectRoot, addFile } from '../../modules';
 
-  let { onClose, onSelect }: { onClose: () => void; onSelect?: (relPath: string) => void } = $props();
+  export type PaletteMode = 'files' | 'clone' | 'command';
+
+  let { onClose, onSelect, mode = 'files' as PaletteMode, onSubmit }: {
+    onClose: () => void;
+    onSelect?: (relPath: string) => void;
+    mode?: PaletteMode;
+    onSubmit?: (value: string) => void;
+  } = $props();
 
   let query = $state('');
   let debouncedQuery = $state('');
@@ -11,6 +18,12 @@
   let searchInput: HTMLInputElement | undefined = $state();
   let resultsList: HTMLDivElement | undefined = $state();
   let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  const placeholder = $derived(
+    mode === 'clone' ? 'Paste repository URL (e.g. https://github.com/user/repo.git)' :
+    mode === 'command' ? 'Type a command...' :
+    'Search files by name...'
+  );
 
   // Debounce the query to avoid scoring all files on every keystroke
   $effect(() => {
@@ -92,7 +105,10 @@
       scrollToSelected();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      if (filtered[selectedIndex]) {
+      if (mode !== 'files' && onSubmit && query.trim()) {
+        onSubmit(query.trim());
+        onClose();
+      } else if (filtered[selectedIndex]) {
         selectFile(filtered[selectedIndex]);
       }
     } else if (e.key === 'Escape') {
@@ -141,13 +157,14 @@
         bind:this={searchInput}
         bind:value={query}
         class="search-input"
-        placeholder="Search files by name..."
+        placeholder={placeholder}
         autocapitalize="off"
         autocomplete="off"
         spellcheck="false"
         onkeydown={handleKeydown}
       />
     </div>
+    {#if mode === 'files'}
     <div class="search-results" bind:this={resultsList}>
       {#each filtered as file, i}
         <button
@@ -164,6 +181,9 @@
         <div class="no-results">No files found</div>
       {/if}
     </div>
+    {:else}
+    <div class="no-results" style="padding: 14px;">Press Enter to confirm</div>
+    {/if}
   </div>
 </div>
 
@@ -171,31 +191,31 @@
   .search-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
     z-index: 1000;
-    display: flex;
-    justify-content: center;
-    padding-top: 15vh;
   }
 
   .search-dialog {
+    position: fixed;
+    top: var(--density-tabs-height, 36px);
+    left: 50%;
+    transform: translateX(-50%);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-top: none;
+    border-radius: 0 0 8px 8px;
     width: 500px;
-    max-height: 400px;
+    max-height: 360px;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
     overflow: hidden;
-    align-self: flex-start;
   }
 
   .search-input-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px 14px;
+    gap: 10px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border);
     color: var(--text-muted);
   }
@@ -205,37 +225,39 @@
     background: none;
     border: none;
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: 13px;
     outline: none;
-    font-family: inherit;
+    font-family: var(--font-mono);
   }
 
   .search-input::placeholder {
     color: var(--text-muted);
+    font-family: var(--font-ui);
   }
 
   .search-results {
     overflow-y: auto;
-    max-height: 340px;
-    padding: 4px 0;
+    max-height: 320px;
+    padding: 4px 6px;
   }
 
   .search-result {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
     width: 100%;
-    padding: 8px 14px;
+    padding: 6px 10px;
     text-align: left;
     cursor: pointer;
     border: none;
     background: none;
     color: var(--text-primary);
-    font-family: inherit;
+    font-family: var(--font-mono);
+    border-radius: 4px;
   }
 
   .search-result.selected {
-    background: color-mix(in srgb, var(--accent) 20%, var(--bg-surface) 80%);
+    background: var(--bg-surface);
   }
 
   .result-name {
@@ -246,14 +268,15 @@
   .result-path {
     font-size: 11px;
     color: var(--text-muted);
+    font-family: var(--font-ui);
   }
 
   .search-result :global(mark) {
-    background: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--settings-icon, #B34B3C) 25%, transparent);
     color: var(--text-primary);
     font-weight: 600;
     border-radius: 2px;
-    padding: 0 2px;
+    padding: 0 1px;
   }
 
   .no-results {
