@@ -75,8 +75,8 @@
   -->
   <div class="drag-spacer" data-tauri-drag-region aria-hidden="true"></div>
 
-  <!-- Right cluster — global toggles and quick search. -->
-  <div class="cluster cluster-right">
+  <!-- Center — search bar -->
+  <div class="cluster cluster-center">
     <div
       class="title-search"
       role="button"
@@ -90,7 +90,12 @@
       <span>Search files…</span>
       <kbd>⌘O</kbd>
     </div>
+  </div>
 
+  <div class="drag-spacer" data-tauri-drag-region aria-hidden="true"></div>
+
+  <!-- Right cluster — global toggles. -->
+  <div class="cluster cluster-right">
     <button
       type="button"
       class="title-btn"
@@ -108,7 +113,7 @@
 
     <button
       type="button"
-      class="title-btn"
+      class="title-btn settings-btn"
       class:active={$showSettings}
       onclick={() => showSettings.update(v => !v)}
       title="Settings"
@@ -157,6 +162,12 @@
     gap: 2px;
   }
 
+  .cluster-center {
+    display: flex;
+    align-items: center;
+    -webkit-app-region: no-drag;
+  }
+
   .drag-spacer {
     flex: 1;
     height: 100%;
@@ -170,7 +181,7 @@
     gap: 5px;
     padding: 4px 8px;
     border-radius: 6px;
-    color: var(--text-muted);
+    color: var(--text-secondary);
     font-size: 11px;
     background: transparent;
     cursor: pointer;
@@ -202,7 +213,7 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 3px 10px;
+    padding: 3px 14px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 14px;
@@ -211,7 +222,8 @@
     cursor: pointer;
     white-space: nowrap;
     transition: border-color 0.1s ease, color 0.1s ease;
-    margin-right: 4px;
+    min-width: 340px;
+    justify-content: space-between;
     -webkit-app-region: no-drag;
   }
   .title-search:hover {
@@ -232,5 +244,12 @@
     font-family: var(--font-ui);
     font-weight: 700;
     letter-spacing: 0.4px;
+  }
+
+  .settings-btn {
+    color: var(--settings-icon, #B34B3C);
+  }
+  .settings-btn:hover {
+    color: var(--settings-icon, #B34B3C);
   }
 </style>

@@ -366,7 +366,7 @@
     position: relative;
     transition: background 0.15s, border-color 0.15s;
   }
-  .toggle.active .track { background: var(--success); border-color: var(--success); }
+  .toggle.active .track { background: var(--settings-icon, #B34B3C); border-color: var(--settings-icon, #B34B3C); }
   .thumb {
     display: block;
     width: 14px; height: 14px;
@@ -423,7 +423,7 @@
   }
   .pill:last-child { border-right: none; }
   .pill:hover { color: var(--text-primary); background: var(--bg-surface); }
-  .pill.active { color: var(--text-primary); background: var(--bg-surface); border-color: var(--text-muted); font-weight: 600; }
+  .pill.active { color: #fff; background: var(--settings-icon, #B34B3C); border-color: var(--settings-icon, #B34B3C); font-weight: 600; }
 
   /* Theme grid */
   .appearance-grid {
@@ -454,9 +454,9 @@
   }
 
   .appearance-card.active {
-    border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
-    color: var(--accent);
+    border-color: var(--settings-icon, #B34B3C);
+    background: color-mix(in srgb, var(--settings-icon, #B34B3C) 10%, var(--bg-secondary));
+    color: var(--text-primary);
   }
 
   .appearance-card span {

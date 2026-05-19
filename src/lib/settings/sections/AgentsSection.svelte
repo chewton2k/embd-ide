@@ -254,8 +254,8 @@
     outline-offset: 2px;
   }
   .toggle.on {
-    background: var(--success);
-    border-color: var(--success);
+    background: var(--settings-icon, #B34B3C);
+    border-color: var(--settings-icon, #B34B3C);
   }
 
   .toggle-knob {
@@ -294,7 +294,7 @@
      place against the rest of the section's neutral palette. */
   .slider-group input[type="range"] {
     width: 130px;
-    accent-color: var(--accent);
+    accent-color: var(--settings-icon, #B34B3C);
     cursor: pointer;
   }
   .slider-group input[type="range"]:focus-visible {

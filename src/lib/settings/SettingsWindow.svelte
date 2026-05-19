@@ -260,6 +260,7 @@
     gap: 14px;
   }
   .sidebar-title {
+    font-family: var(--font-display);
     font-size: 16px;
     font-weight: 600;
     letter-spacing: -0.2px;
@@ -381,7 +382,7 @@
     bottom: 6px;
     width: 3px;
     border-radius: 2px;
-    background: var(--accent);
+    background: var(--settings-icon, #B34B3C);
     opacity: 0;
     transition: opacity 0.12s ease;
   }
@@ -391,8 +392,8 @@
     outline-offset: 1px;
   }
   .nav-btn.active {
-    background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
-    border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+    background: color-mix(in srgb, var(--settings-icon, #B34B3C) 12%, var(--bg-surface));
+    border-color: color-mix(in srgb, var(--settings-icon, #B34B3C) 25%, transparent);
     color: var(--text-primary);
     font-weight: 600;
   }

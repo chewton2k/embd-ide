@@ -165,9 +165,9 @@
   .pill:last-child { border-right: none; }
   .pill:hover { color: var(--text-primary); background: var(--bg-surface); }
   .pill.active {
-    color: var(--text-primary);
-    background: var(--bg-surface);
-    border-color: var(--text-muted);
+    color: #fff;
+    background: var(--settings-icon, #B34B3C);
+    border-color: var(--settings-icon, #B34B3C);
     font-weight: 600;
   }
 </style>

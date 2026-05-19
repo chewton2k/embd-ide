@@ -76,6 +76,14 @@
         { bg: '#fdf6e3', fg: '#657b83', sel: '#eee8d5', cursor: '#657b83', gutter: '#eee8d5', gutterFg: '#93a1a1', line: '#eee8d533' },
         { keyword: '#859900', string: '#2aa198', comment: '#93a1a1', function: '#268bd2', variable: '#657b83', number: '#d33682', type: '#b58900', operator: '#859900' }
       ),
+      'plum-dark': () => buildThemeExt(
+        { bg: '#15121A', fg: '#E8E2D5', sel: '#4A3A5C', cursor: '#D4AE8A', gutter: '#1C1825', gutterFg: '#6A6080', line: '#241E2E' },
+        { keyword: '#C79BBF', string: '#8EA88A', comment: '#6A6080', function: '#D4C697', variable: '#E8E2D5', number: '#C9956A', type: '#C79B78', operator: '#A8A09C' }
+      ),
+      'plum-light': () => buildThemeExt(
+        { bg: '#F5EFE2', fg: '#2A2018', sel: '#C8B890', cursor: '#4A2640', gutter: '#EDE5D2', gutterFg: '#B0A48A', line: '#E2D8C1' },
+        { keyword: '#7A3A6A', string: '#4A6B3E', comment: '#8A7E6A', function: '#7A5A14', variable: '#2A2018', number: '#8A4A1E', type: '#6E3E1A', operator: '#5E5346' }
+      ),
     };
     return themes[id]();
   }
@@ -126,6 +134,7 @@
   import { vim } from '@replit/codemirror-vim';
   import { startInlineEdit, cancelInlineEdit, type InlineEditRequest } from '../../modules/ai/inlineEdit';
   import InlineEditPopover from './InlineEditPopover.svelte';
+  import { open as openExternal } from '@tauri-apps/plugin-shell';
   import type { EditorThemeId } from '../../modules/theme';
 
   let { filePath }: { filePath: string } = $props();
@@ -1581,7 +1590,10 @@
           </svg>
         </button>
       </div>
-      <div class="md-preview-content">
+      <div class="md-preview-content" onclick={(e) => {
+        const a = (e.target as HTMLElement).closest('a');
+        if (a?.href) { e.preventDefault(); openExternal(a.href); }
+      }}>
         {@html previewHtml}
       </div>
     </div>
@@ -1604,6 +1616,8 @@
     border-right: 1px solid var(--border);
     color: var(--text-secondary);
     font-weight: 500;
+    user-select: none;
+    -webkit-user-select: none;
   }
   .editor-wrapper :global(.cm-lineNumbers .cm-gutterElement) {
     color: var(--text-muted);
@@ -1767,7 +1781,7 @@
   }
 
   .md-preview-content :global(a) {
-    color: var(--accent);
+    color: var(--settings-icon, #B34B3C);
     text-decoration: none;
   }
 
@@ -1786,7 +1800,7 @@
     padding: 2px 5px;
     border-radius: 3px;
     font-size: 0.88em;
-    color: var(--accent);
+    color: var(--settings-icon, #B34B3C);
   }
 
   .md-preview-content :global(pre) {
@@ -1807,11 +1821,11 @@
   }
 
   .md-preview-content :global(blockquote) {
-    border-left: 3px solid var(--accent);
+    border-left: 3px solid var(--settings-icon, #B34B3C);
     margin: 0 0 12px;
     padding: 4px 16px;
     color: var(--text-secondary);
-    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    background: color-mix(in srgb, var(--settings-icon, #B34B3C) 5%, transparent);
     border-radius: 0 4px 4px 0;
   }
 

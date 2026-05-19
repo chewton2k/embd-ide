@@ -10,9 +10,11 @@ export const EDITOR_THEMES = [
   'nord',
   'catppuccin-mocha',
   'rose-pine',
+  'plum-dark',
   'github-light',
   'catppuccin-latte',
   'solarized-light',
+  'plum-light',
 ] as const;
 
 export type EditorThemeId = (typeof EDITOR_THEMES)[number];
@@ -25,12 +27,14 @@ export const EDITOR_THEME_LABELS: Record<EditorThemeId, string> = {
   'nord': 'Nord',
   'catppuccin-mocha': 'Catppuccin Mocha',
   'rose-pine': 'Rosé Pine',
+  'plum-dark': 'Plum Dark',
   'github-light': 'GitHub Light',
   'catppuccin-latte': 'Catppuccin Latte',
   'solarized-light': 'Solarized Light',
+  'plum-light': 'Plum Light',
 };
 
 /** Returns true if the given editor theme is a light theme */
 export function isLightEditorTheme(id: EditorThemeId): boolean {
-  return id === 'github-light' || id === 'catppuccin-latte' || id === 'solarized-light';
+  return id === 'github-light' || id === 'catppuccin-latte' || id === 'solarized-light' || id === 'plum-light';
 }

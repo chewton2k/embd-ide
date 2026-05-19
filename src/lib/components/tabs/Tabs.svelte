@@ -259,6 +259,7 @@
     color: var(--text-primary);
     font-weight: 600;
     border-color: var(--border);
+    border-top: 2px solid var(--settings-icon, #B34B3C);
   }
   .tab.pinned { opacity: 0.9; }
   .tab.conflict { border-color: color-mix(in srgb, var(--error) 40%, var(--border)); }

@@ -447,6 +447,7 @@
                 <Editor filePath={$activeFile} />
               {:else}
                 <div class="welcome">
+                  <p> [  W E L C O M E  ] </p>
                   {#if recentProjects.length > 0}
                     <div class="recent-projects">
                       <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
@@ -463,12 +464,6 @@
                       {/if}
                     </div>
                   {/if}
-                  <p>Open a file from the sidebar to start editing</p>
-                  <div class="shortcuts">
-                    <div><kbd>⌘O</kbd> Search Files</div>
-                    <div><kbd>⌃`</kbd> Terminal</div>
-                    <div><kbd>⌘G</kbd> Source Control</div>
-                  </div>
                 </div>
               {/if}
             {/if}
@@ -531,9 +526,7 @@
           {#each breadcrumbSegments as seg, i}
             <span class="breadcrumb-seg" role="button" tabindex="0" onclick={() => navigateBreadcrumb(seg.path)} onkeydown={(e) => e.key === 'Enter' && navigateBreadcrumb(seg.path)}>
               {#if i === 0}
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12" style="flex-shrink:0;">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" />
-                </svg>
+                <span class="breadcrumb-dot"></span>
               {/if}
               {seg.name}
             </span>
@@ -730,15 +723,6 @@
     gap: 12px;
   }
 
-  .shortcuts {
-    margin-top: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    font-size: 14px;
-    font-weight: 500;
-  }
-
   .recent-projects {
     display: flex;
     flex-direction: column;
@@ -793,17 +777,6 @@
 
   .show-more-btn:hover {
     color: var(--accent);
-  }
-
-  .shortcuts kbd {
-    background: var(--bg-surface);
-    padding: 4px 8px;
-    border-radius: 5px;
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    margin-right: 10px;
-    color: var(--text-primary);
   }
 
   /* Resize handles */
@@ -864,7 +837,7 @@
 
   .statusbar {
     background: var(--accent);
-    color: var(--bg-tertiary);
+    color: var(--statusbar-text, #E8E2D5);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -919,7 +892,7 @@
     width: 20px;
     height: 20px;
     border-radius: 4px;
-    color: #000;
+    color: var(--statusbar-text, #E8E2D5);
     cursor: pointer;
     transition: background 0.15s;
     margin-left: 8px;
@@ -927,11 +900,11 @@
 
   .statusbar-ai-btn:hover {
     background: var(--bg-surface);
-    color: #000;
+    color: var(--statusbar-text, #E8E2D5);
   }
 
   .statusbar-ai-btn.active {
-    color: #000;
+    color: var(--statusbar-text, #E8E2D5);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
@@ -970,28 +943,35 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    font-size: 11.5px;
+    font-size: 10.5px;
     min-width: 0;
     overflow: hidden;
+    padding-left: 8px;
   }
 
   .breadcrumb-seg {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    background: color-mix(in srgb, currentColor 18%, transparent);
-    padding: 1px 8px;
-    border-radius: 10px;
+    padding: 1px 0;
     white-space: nowrap;
-    font-size: 11.5px;
-    font-weight: 600;
+    font-size: 10.5px;
+    font-weight: 400;
     color: inherit;
     cursor: pointer;
-    transition: background 0.1s;
+    transition: opacity 0.1s;
   }
 
   .breadcrumb-seg:hover {
-    background: color-mix(in srgb, currentColor 32%, transparent);
+    opacity: 0.7;
+  }
+
+  .breadcrumb-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--settings-icon, #B34B3C);
+    flex-shrink: 0;
   }
 
   .breadcrumb-sep {

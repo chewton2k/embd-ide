@@ -1,66 +1,64 @@
 :root {
+  --font-display: "Cormorant Garamond", Georgia, serif;
   --font-ui:
+    "IBM Plex Sans",
     -apple-system, BlinkMacSystemFont,
-    "Segoe UI Variable", "Segoe UI",
-    "SF Pro Text", "Helvetica Neue",
-    system-ui, "Inter",
-    "Ubuntu", "Droid Sans",
     sans-serif;
   --font-mono:
-    ui-monospace,
-    "SF Mono", "Menlo", "Monaco",
-    "Cascadia Mono", "Cascadia Code",
-    "Consolas", "DejaVu Sans Mono",
-    "Liberation Mono", "Courier New",
-    monospace;
+    "IBM Plex Mono",
+    ui-monospace, monospace;
   --radius: 8px;
   --sidebar-width: 240px;
 }
 
 /* ── Dark mode (default) ──────────────────────────────────────── */
 :root.dark {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #181818;
-  --bg-tertiary: #131313;
-  --bg-surface: #2d2d2d;
-  --text-primary: #e4e4e4;
-  --text-secondary: #ababab;
-  --text-muted: #6e6e6e;
-  --accent: #7b9fc2;
-  --accent-hover: #9ab8d6;
-  --border: #2b2b2b;
+  --bg-primary: #0E0E10;
+  --bg-secondary: #0E0E10;
+  --bg-tertiary: #0a0a0b;
+  --bg-surface: #1a1a1c;
+  --text-primary: #E8E2D5;
+  --text-secondary: #b8b3a8;
+  --text-muted: #6e6a62;
+  --accent: #0E0E10;
+  --accent-hover: #1a1a1c;
+  --border: #1f1f22;
   --success: #4ec9b0;
   --warning: #dcdcaa;
   --error: #f14c4c;
-  --tab-active: #1e1e1e;
-  --tab-inactive: #181818;
+  --tab-active: #0E0E10;
+  --tab-inactive: #0E0E10;
   --diff-add: #4ec9b0;
   --diff-del: #f14c4c;
-  --git-graph-accent: #7b9fc2;
+  --git-graph-accent: #E8E2D5;
   --git-notification: #4ec9b0;
+  --statusbar-text: #E8E2D5;
+  --settings-icon: #B34B3C;
 }
 
 /* ── Light mode ───────────────────────────────────────────────── */
 :root.light {
-  --bg-primary: #fafafa;
-  --bg-secondary: #f2f2f2;
-  --bg-tertiary: #eaeaea;
-  --bg-surface: #e0e0e0;
-  --text-primary: #111111;
-  --text-secondary: #3d3d3d;
-  --text-muted: #6b6b6b;
-  --accent: #4a4a4a;
-  --accent-hover: #333333;
-  --border: #d4d4d4;
+  --bg-primary: #E8E2D5;
+  --bg-secondary: #E8E2D5;
+  --bg-tertiary: #ddd7ca;
+  --bg-surface: #d4cfc3;
+  --text-primary: #0E0E10;
+  --text-secondary: #2a2a2c;
+  --text-muted: #5c5a55;
+  --accent: #E8E2D5;
+  --accent-hover: #ddd7ca;
+  --border: #ccc7bb;
   --success: #1a7f37;
   --warning: #9a6700;
   --error: #cf222e;
-  --tab-active: #fafafa;
-  --tab-inactive: #f2f2f2;
+  --tab-active: #E8E2D5;
+  --tab-inactive: #E8E2D5;
   --diff-add: #1a7f37;
   --diff-del: #cf222e;
-  --git-graph-accent: #4a4a4a;
+  --git-graph-accent: #0E0E10;
   --git-notification: #1a7f37;
+  --statusbar-text: #0E0E10;
+  --settings-icon: #B34B3C;
 }
 
 * {

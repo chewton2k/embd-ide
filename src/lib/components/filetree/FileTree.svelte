@@ -1530,15 +1530,11 @@
 
   .tree-item.selected {
     font-weight: 600;
+    border-left: 2px solid var(--settings-icon, #B34B3C);
   }
 
   .tree-item:hover {
     background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
-    color: var(--text-primary);
-  }
-
-  .tree-item.selected {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--text-primary);
   }
 

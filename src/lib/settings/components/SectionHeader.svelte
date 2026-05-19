@@ -19,6 +19,7 @@
     margin-bottom: 4px;
   }
   h1 {
+    font-family: var(--font-display);
     font-size: 18px;
     font-weight: 600;
     letter-spacing: -0.3px;
