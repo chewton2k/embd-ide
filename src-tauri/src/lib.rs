@@ -71,6 +71,7 @@ pub fn run() {
             git::git_restore_checkpoint,
             git::git_list_checkpoints,
             git::git_clone,
+            git::find_git_repos,
             // Shell
             shell::spawn_terminal,
             shell::write_terminal,

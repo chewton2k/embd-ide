@@ -1296,6 +1296,42 @@ pub fn git_list_checkpoints(
     Ok(checkpoints)
 }
 
+/// Find all git repositories within the project root (directories containing .git).
+/// Returns paths relative to the project root. Searches up to 3 levels deep.
+#[tauri::command]
+pub fn find_git_repos(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, ProjectRootState>,
+    path: String,
+) -> Result<Vec<String>, String> {
+    validate_repo_path(&path, window.label(), &state)?;
+    let root = PathBuf::from(&path);
+    let mut repos = Vec::new();
+    // Check if root itself is a git repo
+    if root.join(".git").exists() {
+        repos.push(path.clone());
+        return Ok(repos);
+    }
+    // Search subdirectories up to 3 levels
+    fn scan(dir: &Path, depth: u32, repos: &mut Vec<String>) {
+        if depth > 3 { return; }
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() { continue; }
+            let name = p.file_name().unwrap_or_default().to_string_lossy();
+            if name == "node_modules" || name == "target" || name == ".git" { continue; }
+            if p.join(".git").exists() {
+                repos.push(p.to_string_lossy().to_string());
+            } else {
+                scan(&p, depth + 1, repos);
+            }
+        }
+    }
+    scan(&root, 0, &mut repos);
+    Ok(repos)
+}
+
 /// Clone a git repository. Does not require a project to be open.
 /// Used by the "Clone Repo" welcome screen action.
 #[tauri::command]

@@ -242,10 +242,24 @@
     let newFileStatus: Map<string, string>;
     let newFolderStatus: Map<string, string>;
     let newIgnored: Set<string>;
+
+    // Find git repos (could be root itself or sub-repos)
+    let gitRepoPaths: string[] = [];
     try {
-      const status = await invoke<Record<string, string>>('get_git_status', { path: requestRoot });
-      nextSharedStatus = status;
-      newFileStatus = new Map(Object.entries(status));
+      gitRepoPaths = await invoke<string[]>('find_git_repos', { path: requestRoot });
+    } catch (_) {
+      gitRepoPaths = [requestRoot]; // fallback: assume root is a repo
+    }
+
+    try {
+      // Merge status from all detected repos
+      for (const repoPath of gitRepoPaths) {
+        try {
+          const status = await invoke<Record<string, string>>('get_git_status', { path: repoPath });
+          Object.assign(nextSharedStatus, status);
+        } catch (_) { /* repo may not have changes */ }
+      }
+      newFileStatus = new Map(Object.entries(nextSharedStatus));
       // Compute folder statuses
       const folders = new Map<string, string>();
       const priority: Record<string, number> = { M: 3, U: 2, A: 1, S: 1, D: 2 };
@@ -269,9 +283,13 @@
     let newRemoteFileStatus: Map<string, string>;
     let newRemoteFolderStatus: Map<string, string>;
     try {
-      const remoteStatus = await invoke<Record<string, string>>('get_git_remote_status', { path: requestRoot });
-      nextSharedRemoteStatus = remoteStatus;
-      newRemoteFileStatus = new Map(Object.entries(remoteStatus));
+      for (const repoPath of gitRepoPaths) {
+        try {
+          const remoteStatus = await invoke<Record<string, string>>('get_git_remote_status', { path: repoPath });
+          Object.assign(nextSharedRemoteStatus, remoteStatus);
+        } catch (_) { /* no upstream */ }
+      }
+      newRemoteFileStatus = new Map(Object.entries(nextSharedRemoteStatus));
       // Compute folder propagation for remote status
       const remoteFolders = new Map<string, string>();
       const remotePriority: Record<string, number> = { M: 3, A: 2, D: 1 };
@@ -292,14 +310,22 @@
     }
     // Fetch gitignored paths
     try {
-      const ignored = await invoke<string[]>('get_git_ignored', { path: requestRoot });
-      newIgnored = new Set(ignored);
+      const allIgnored: string[] = [];
+      for (const repoPath of gitRepoPaths) {
+        try {
+          const ignored = await invoke<string[]>('get_git_ignored', { path: repoPath });
+          allIgnored.push(...ignored);
+        } catch (_) { /* not a git repo */ }
+      }
+      newIgnored = new Set(allIgnored);
     } catch (_) {
       newIgnored = new Set();
     }
     let branch: string | null = null;
     try {
-      branch = await invoke<string | null>('get_git_branch', { path: requestRoot });
+      // Use the first detected git repo for branch display
+      const branchRepo = gitRepoPaths[0] || requestRoot;
+      branch = await invoke<string | null>('get_git_branch', { path: branchRepo });
     } catch (_) {
       // Keep the last known branch on transient errors (e.g. git lock)
     }
@@ -1514,7 +1540,7 @@
     width: 100%;
     text-align: left;
     font-size: 12px;
-    font-weight: 500;
+    font-weight: 520;
     color: var(--text-secondary);
     border-radius: 3px;
     margin: 0 3px;
