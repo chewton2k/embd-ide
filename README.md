@@ -1,6 +1,6 @@
 # leo-IDE
 
-A lightweight (~20MB) IDE that's written with a rust backend for speed and consistency. 
+A lightweight (~10MB) IDE that's written with a rust backend for speed and consistency. 
 
 ---
 
@@ -60,15 +60,6 @@ Compiles and installs the app to your system's application folder.
 To test the latest in-progress features, switch to the beta branch after cloning:
 
 > **Warning:** Beta builds are unstable. Do not use them for important work.
-
-### Themes
-Themes are configured in `src/lib/themes.ts` inside the `THEMES` export:
-```ts
-export const THEMES: ThemePreset[] = [ ... ]
-```
-
-To create a custom theme, see [`docs/Themes.md`](docs/Themes.md).
-
 ---
 
 ### Feedback
