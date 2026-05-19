@@ -22,14 +22,12 @@ pub struct PtyInstance {
 
 pub struct TerminalManager {
     sessions: HashMap<u32, PtyInstance>,
-    next_id: u32,
 }
 
 impl TerminalManager {
     pub fn new() -> Self {
         Self {
             sessions: HashMap::new(),
-            next_id: 1,
         }
     }
 
@@ -40,14 +38,20 @@ impl TerminalManager {
     }
 }
 
-pub type TerminalState = Arc<Mutex<TerminalManager>>;
+/// Global atomic counter for terminal session IDs. Ensures IDs are unique
+/// across all windows, preventing event collision when two windows both
+/// listen for `terminal-output-{id}`.
+static NEXT_TERMINAL_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+pub type TerminalState = Arc<Mutex<HashMap<String, TerminalManager>>>;
 
 pub fn create_terminal_state() -> TerminalState {
-    Arc::new(Mutex::new(TerminalManager::new()))
+    Arc::new(Mutex::new(HashMap::new()))
 }
 
 #[tauri::command]
 pub fn spawn_terminal(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, TerminalState>,
     project_root: tauri::State<'_, ProjectRootState>,
     app: AppHandle,
@@ -55,20 +59,24 @@ pub fn spawn_terminal(
     rows: Option<u16>,
     cols: Option<u16>,
 ) -> Result<SpawnResult, String> {
-    // Limit concurrent sessions
+    let label = window.label().to_string();
+
+    // Limit concurrent sessions per window
     {
-        let manager = state.lock().map_err(|e| e.to_string())?;
-        if manager.sessions.len() >= MAX_SESSIONS {
-            return Err("Maximum number of terminal sessions reached".to_string());
+        let managers = state.lock().map_err(|e| e.to_string())?;
+        if let Some(manager) = managers.get(&label) {
+            if manager.sessions.len() >= MAX_SESSIONS {
+                return Err("Maximum number of terminal sessions reached".to_string());
+            }
         }
     }
 
-    // Validate cwd against project root — require a project to be open.
-    // When cwd is None, default to the project root so callers cannot bypass containment.
+    // Validate cwd against project root
     let cwd = {
-        let root = project_root.blocking_read();
-        let root_path = root
-            .as_ref()
+        let map = project_root.blocking_read();
+        let root_path = map
+            .get(&label)
+            .and_then(|opt| opt.as_ref())
             .ok_or_else(|| "No project is open. Open a folder first.".to_string())?;
         let cwd_path = cwd.as_ref().map(std::path::PathBuf::from);
         let dir_to_check = cwd_path.as_deref().unwrap_or(root_path.as_path());
@@ -108,9 +116,9 @@ pub fn spawn_terminal(
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
 
-    let mut manager = state.lock().map_err(|e| e.to_string())?;
-    let id = manager.next_id;
-    manager.next_id += 1;
+    let mut managers = state.lock().map_err(|e| e.to_string())?;
+    let manager = managers.entry(label).or_insert_with(TerminalManager::new);
+    let id = NEXT_TERMINAL_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     manager.sessions.insert(
         id,
         PtyInstance {
@@ -119,14 +127,16 @@ pub fn spawn_terminal(
             child,
         },
     );
-    drop(manager);
+    drop(managers);
 
-    // Spawn reader thread — emits "terminal-output" events to the frontend
+    // Spawn reader thread — emits "terminal-output" events to the spawning window only
     let event_name = format!("terminal-output-{}", id);
     let exit_event_name = format!("terminal-exit-{}", id);
+    let window_label = window.label().to_string();
     std::thread::spawn(move || {
         let mut buf = [0u8; 16384];
         let mut pending = Vec::new();
+        let target = tauri::EventTarget::WebviewWindow { label: window_label.clone() };
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -143,7 +153,7 @@ pub fn spawn_terminal(
                     };
                     if valid_len > 0 {
                         let data = String::from_utf8_lossy(&pending[..valid_len]).to_string();
-                        let _ = app.emit(&event_name, data);
+                        let _ = app.emit_to(target.clone(), &event_name, data);
                         pending.drain(..valid_len);
                     }
                 }
@@ -153,10 +163,10 @@ pub fn spawn_terminal(
         // Flush any remaining bytes
         if !pending.is_empty() {
             let data = String::from_utf8_lossy(&pending).to_string();
-            let _ = app.emit(&event_name, data);
+            let _ = app.emit_to(target.clone(), &event_name, data);
         }
         // Notify frontend that this terminal session has exited
-        let _ = app.emit(&exit_event_name, ());
+        let _ = app.emit_to(target, &exit_event_name, ());
     });
 
     Ok(SpawnResult { id, pid })
@@ -164,11 +174,15 @@ pub fn spawn_terminal(
 
 #[tauri::command]
 pub fn write_terminal(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, TerminalState>,
     id: u32,
     data: String,
 ) -> Result<(), String> {
-    let mut manager = state.lock().map_err(|e| e.to_string())?;
+    let mut managers = state.lock().map_err(|e| e.to_string())?;
+    let manager = managers
+        .get_mut(window.label())
+        .ok_or("No terminal manager for this window")?;
     let session = manager
         .sessions
         .get_mut(&id)
@@ -182,26 +196,31 @@ pub fn write_terminal(
 }
 
 #[tauri::command]
-pub fn kill_terminal(state: tauri::State<'_, TerminalState>, id: u32) -> Result<(), String> {
-    let mut manager = state.lock().map_err(|e| e.to_string())?;
-    if let Some(mut session) = manager.sessions.remove(&id) {
-        // Kill the child process and reap it in a background thread
-        let _ = session.child.kill();
-        std::thread::spawn(move || {
-            let _ = session.child.wait();
-        });
+pub fn kill_terminal(window: tauri::WebviewWindow, state: tauri::State<'_, TerminalState>, id: u32) -> Result<(), String> {
+    let mut managers = state.lock().map_err(|e| e.to_string())?;
+    if let Some(manager) = managers.get_mut(window.label()) {
+        if let Some(mut session) = manager.sessions.remove(&id) {
+            let _ = session.child.kill();
+            std::thread::spawn(move || {
+                let _ = session.child.wait();
+            });
+        }
     }
     Ok(())
 }
 
 #[tauri::command]
 pub fn resize_terminal(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, TerminalState>,
     id: u32,
     rows: u16,
     cols: u16,
 ) -> Result<(), String> {
-    let mut manager = state.lock().map_err(|e| e.to_string())?;
+    let mut managers = state.lock().map_err(|e| e.to_string())?;
+    let manager = managers
+        .get_mut(window.label())
+        .ok_or("No terminal manager for this window")?;
     let session = manager
         .sessions
         .get_mut(&id)
@@ -232,16 +251,23 @@ pub struct CommandOutput {
 /// Enforces a timeout to prevent runaway processes.
 #[tauri::command]
 pub async fn run_command_capture(
+    window: tauri::WebviewWindow,
     command: String,
     cwd: String,
     timeout_ms: u64,
     state: tauri::State<'_, ProjectRootState>,
 ) -> Result<CommandOutput, String> {
-    // Validate cwd is within project root
-    let root = state.blocking_read();
-    let root = root.as_ref().ok_or("No project is open")?;
+    // Validate cwd is within project root (async context — must use .read().await)
+    let label = window.label().to_string();
+    let root = {
+        let map = state.read().await;
+        map.get(&label)
+            .and_then(|opt| opt.as_ref())
+            .ok_or("No project is open")?
+            .clone()
+    };
     let cwd_path = std::fs::canonicalize(&cwd).map_err(|e| format!("Invalid cwd: {}", e))?;
-    if !cwd_path.starts_with(root) {
+    if !cwd_path.starts_with(&root) {
         return Err("Access denied: cwd is outside the project directory".into());
     }
 

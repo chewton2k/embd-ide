@@ -1,6 +1,6 @@
-mod modules;
+pub mod modules;
 
-use modules::{ai, fs, git, graph, knowledge, log as app_log, session, shell, symbols};
+use modules::{ai, fs, git, graph, knowledge, log as app_log, menu, session, shell, symbols, window_mgr};
 use std::sync::Arc;
 use tauri::Manager;
 
@@ -21,6 +21,9 @@ pub fn run() {
         .manage(app_log::LogState::new())
         .manage(session::AppStateHandle(std::sync::Mutex::new(
             session::AppState::default(),
+        )))
+        .manage(window_mgr::InitialProjectState(std::sync::Mutex::new(
+            std::collections::HashMap::new(),
         )))
         .invoke_handler(tauri::generate_handler![
             // Logging
@@ -101,6 +104,11 @@ pub fn run() {
             // Symbols
             symbols::symbols_extract,
             symbols::symbols_get_body,
+            // Window management
+            window_mgr::open_new_window,
+            window_mgr::open_folder_in_new_window,
+            window_mgr::close_focused_window,
+            window_mgr::get_initial_project,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -121,13 +129,47 @@ pub fn run() {
                 .lock()
                 .map_err(|e| format!("failed to lock app state during setup: {e}"))?;
             *guard = loaded;
+
+            // Register the main window's slot in the per-window state map
+            {
+                let state: tauri::State<fs::ProjectRootState> = app.state();
+                let mut map = state.blocking_write();
+                map.insert("main".to_string(), None);
+            }
+
+            // Build and attach the native menu
+            let menu = menu::build_menu(app.handle())?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, event| {
+                menu::handle_menu_event(app, event.id().as_ref());
+            });
+
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
+                let label = window.label().to_string();
+                // Remove project root entry for this window
+                if let Some(state) = window.try_state::<fs::ProjectRootState>() {
+                    let mut map = state.blocking_write();
+                    map.remove(&label);
+                }
+                // Kill terminals for this window
                 if let Some(state) = window.try_state::<shell::TerminalState>() {
-                    if let Ok(mut manager) = state.lock() {
-                        manager.kill_all();
+                    if let Ok(mut managers) = state.lock() {
+                        if let Some(mut manager) = managers.remove(&label) {
+                            manager.kill_all();
+                        }
+                    }
+                }
+                // Drop cached knowledge DB connection for this window
+                if let Some(state) = window.try_state::<Arc<knowledge::KnowledgeState>>() {
+                    state.remove_window(&label);
+                }
+                // Remove any unclaimed initial project entry
+                if let Some(state) = window.try_state::<window_mgr::InitialProjectState>() {
+                    if let Ok(mut map) = state.0.lock() {
+                        map.remove(&label);
                     }
                 }
             }

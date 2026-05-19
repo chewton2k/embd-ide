@@ -23,6 +23,7 @@
   import { getRecentProjects, removeRecentProject, scheduleSaveSession, saveSessionNow, type RecentProject } from './lib/modules/session';
   import { log } from './lib/modules/logging';
   import { isMac, isFullscreen, installWindowChromeWatchers, openSettingsWindow } from './lib/modules/ui';
+  import { openFolderInNewWindow } from './lib/modules/window/window';
   import { showToast } from './lib/modules/ui/toast';
   import { toggleTerminal } from './lib/modules/terminal';
   import { shortcutBindings, eventMatchesBinding, APP_LEVEL_SHORTCUT_IDS, type AppLevelShortcutId } from './lib/modules/shortcuts';
@@ -166,6 +167,9 @@
         }).catch((e) => { log.warn('knowledge_init failed', e); });
         // Also persist for settings window
         localStorage.setItem('leo-project-root', root);
+        // Update window title to show project name
+        const name = root.split('/').pop() || 'leo';
+        getCurrentWindow().setTitle(name).catch(() => {});
       }
     });
     // Load recent projects
@@ -181,6 +185,54 @@
     if (get(terminalMode) === 'panel' && isTerminalPath(get(activeFilePath))) {
       activeFilePath.set(get(openFiles).at(-1)?.path ?? null);
     }
+
+    // ── Menu event listeners ──
+    const { listen } = await import('@tauri-apps/api/event');
+    await listen('menu:open-folder', () => { openFolderDialog(); });
+    await listen('menu:save', () => { document.dispatchEvent(new CustomEvent('menu-save')); });
+    await listen('menu:save-all', () => { document.dispatchEvent(new CustomEvent('menu-save-all')); });
+    await listen('menu:close-tab', () => { document.dispatchEvent(new CustomEvent('menu-close-tab')); });
+    await listen('menu:close-window', async () => { (await import('@tauri-apps/api/window')).getCurrentWindow().close(); });
+    await listen('menu:toggle-file-tree', () => { sidebarVisible = !sidebarVisible; });
+    await listen('menu:toggle-ai-panel', () => { toggleChatPanel(); });
+    await listen('menu:toggle-terminal', () => { toggleTerminal(); });
+    await listen('menu:toggle-sidebar', () => { toggleSidebar(); });
+    await listen('menu:go-to-file', () => { showFileSearch = true; });
+    await listen('menu:new-file', () => { createFileSignal.set(Date.now()); });
+    await listen('menu:toggle-fullscreen', async () => {
+      const win = (await import('@tauri-apps/api/window')).getCurrentWindow();
+      const full = await win.isFullscreen();
+      await win.setFullscreen(!full);
+    });
+    await listen('menu:reload', () => { location.reload(); });
+    await listen('menu:open-settings', () => { openSettingsWindow(); });
+    await listen('menu:find', () => { document.dispatchEvent(new CustomEvent('menu-find')); });
+    await listen('menu:replace', () => { document.dispatchEvent(new CustomEvent('menu-replace')); });
+    await listen('menu:toggle-comment', () => { document.dispatchEvent(new CustomEvent('menu-toggle-comment')); });
+    await listen('menu:indent', () => { document.dispatchEvent(new CustomEvent('menu-indent')); });
+    await listen('menu:outdent', () => { document.dispatchEvent(new CustomEvent('menu-outdent')); });
+    await listen('menu:undo-last-ai-edit', () => { document.dispatchEvent(new CustomEvent('menu-undo-ai-edit')); });
+    await listen('menu:go-to-line', () => { document.dispatchEvent(new CustomEvent('menu-go-to-line')); });
+    await listen('menu:go-to-symbol', () => { showDiagramSearch = true; });
+    await listen('menu:back', () => { document.dispatchEvent(new CustomEvent('menu-back')); });
+    await listen('menu:forward', () => { document.dispatchEvent(new CustomEvent('menu-forward')); });
+    await listen('menu:revert-file', () => { document.dispatchEvent(new CustomEvent('menu-revert-file')); });
+    await listen('menu:toggle-devtools', async () => {
+      const win = (await import('@tauri-apps/api/window')).getCurrentWindow();
+      // @ts-ignore — internal API available in debug builds
+      if ((win as any).__TAURI_INTERNALS__) { (win as any).__TAURI_INTERNALS__.invoke('plugin:webview|internal_toggle_devtools'); }
+    });
+    await listen('menu:documentation', async () => { (await import('@tauri-apps/plugin-shell')).open('https://github.com/chewton2k/leo-ide'); });
+    await listen('menu:report-issue', async () => { (await import('@tauri-apps/plugin-shell')).open('https://docs.google.com/forms/d/e/1FAIpQLSe1Dsog4TyfOHtNnQaMMKLqfcnWlTFNW2U9RcAnF-E5PB_NCw/viewform?usp=publish-editor'); });
+
+    // Pull initial project for this window (set by open_folder_in_new_window)
+    try {
+      const initialProject: string | null = await invoke('get_initial_project');
+      if (initialProject && openFolderByPath) {
+        await openFolderByPath(initialProject);
+      }
+    } catch { /* no initial project — normal for main window */ }
+
     // Save session on window close — await the save before destroying
     const appWindow = getCurrentWindow();
     await appWindow.onCloseRequested(async (event) => {
@@ -447,12 +499,12 @@
                 <Editor filePath={$activeFile} />
               {:else}
                 <div class="welcome">
-                  <p> [  W E L C O M E  ] </p>
+                  <h3> [  W E L C O M E ] </h3>
                   {#if recentProjects.length > 0}
                     <div class="recent-projects">
-                      <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent Projects</p>
+                      <p style="font-size: 12px; margin-bottom: 8px; color: var(--text-secondary);">Recent</p>
                       {#each (showAllRecent ? recentProjects : recentProjects.slice(0, 3)) as project}
-                        <button class="recent-item" onclick={() => openRecentProject(project)}>
+                        <button class="recent-item" onclick={(e: MouseEvent) => { if (e.metaKey || e.ctrlKey) { openFolderInNewWindow(project.path); } else { openRecentProject(project); } }}>
                           <span class="recent-name">{project.name}</span>
                           <span class="recent-path">{project.path}</span>
                         </button>

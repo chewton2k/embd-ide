@@ -1,53 +1,61 @@
 use base64::Engine;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// The project root path is read by every command that performs path
-/// validation (every fs/git/shell/graph/knowledge command). Using
-/// `tokio::sync::RwLock` lets many concurrent commands hold a shared
-/// read lock at once and only serializes writers (currently just
-/// `set_project_root` and the knowledge-init bootstrap path).
-///
-/// We expose the lock as `RwLock<Option<PathBuf>>` rather than baking the
-/// type behind a façade because every consumer site already deals with
-/// the `Option` explicitly.
-pub type ProjectRootState = Arc<RwLock<Option<PathBuf>>>;
+/// Per-window project root. Each Tauri window has its own entry,
+/// keyed by `WebviewWindow::label()`. The outer RwLock guards the map;
+/// inner Option holds the per-window root.
+pub type ProjectRootState = Arc<RwLock<HashMap<String, Option<PathBuf>>>>;
 
 const MAX_TEXT_FILE_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
 const MAX_BINARY_FILE_BYTES: u64 = 100 * 1024 * 1024; // 100 MB
 
 pub fn create_project_root_state() -> ProjectRootState {
-    Arc::new(RwLock::new(None))
+    Arc::new(RwLock::new(HashMap::new()))
 }
 
 #[tauri::command]
 pub fn set_project_root(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<String, String> {
     let canonical = fs::canonicalize(&path).map_err(|e| format!("Invalid path: {}", e))?;
     let canonical_str = canonical.to_string_lossy().to_string();
-    // `blocking_write` is safe here: this is a synchronous Tauri command,
-    // and Tauri runs sync commands on its own worker thread (not on a
-    // tokio runtime worker), so we cannot starve the async runtime.
-    let mut root = state.blocking_write();
-    *root = Some(canonical);
+    let mut map = state.blocking_write();
+    map.insert(window.label().to_string(), Some(canonical));
     Ok(canonical_str)
 }
 
-/// Validate that a path is within the current project root.
+/// Testable helper: set project root by label without needing a WebviewWindow.
+pub fn set_project_root_for_label(
+    state: &ProjectRootState,
+    label: &str,
+    path: &str,
+) -> Result<String, String> {
+    let canonical = fs::canonicalize(path).map_err(|e| format!("Invalid path: {}", e))?;
+    let canonical_str = canonical.to_string_lossy().to_string();
+    let mut map = state.blocking_write();
+    map.insert(label.to_string(), Some(canonical));
+    Ok(canonical_str)
+}
+
+/// Validate that a path is within the calling window's project root.
 /// Returns the canonicalized path on success.
 pub fn validate_path(
     path: &str,
+    window_label: &str,
     state: &tauri::State<'_, ProjectRootState>,
 ) -> Result<PathBuf, String> {
-    let root = state.blocking_read();
-    let root = root
-        .as_ref()
+    let map = state.blocking_read();
+    let root = map
+        .get(window_label)
+        .and_then(|opt| opt.as_ref())
         .ok_or_else(|| "No project is open".to_string())?;
 
     let p = PathBuf::from(path);
@@ -135,11 +143,12 @@ pub struct FileEntry {
 
 #[tauri::command]
 pub fn read_dir_tree(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
     depth: Option<u32>,
 ) -> Result<Vec<FileEntry>, String> {
-    validate_path(&path, &state)?;
+    validate_path(&path, window.label(), &state)?;
     let max_depth = depth.unwrap_or(1).min(50);
     let mut visited = std::collections::HashSet::new();
     read_dir_recursive(&PathBuf::from(path), 0, max_depth, &mut visited)
@@ -225,10 +234,11 @@ fn read_dir_recursive(
 
 #[tauri::command]
 pub fn read_file_content(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<String, String> {
-    validate_path(&path, &state)?;
+    validate_path(&path, window.label(), &state)?;
     let meta = fs::metadata(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))?;
     if meta.len() > MAX_TEXT_FILE_BYTES {
         return Err(format!("FILE_TOO_LARGE: {} bytes; limit {}", meta.len(), MAX_TEXT_FILE_BYTES));
@@ -238,11 +248,12 @@ pub fn read_file_content(
 
 #[tauri::command]
 pub fn write_file_content(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
     content: String,
 ) -> Result<(), String> {
-    validate_path(&path, &state)?;
+    validate_path(&path, window.label(), &state)?;
     if content.len() as u64 > MAX_TEXT_FILE_BYTES {
         return Err(format!("CONTENT_TOO_LARGE: {} bytes; limit {}", content.len(), MAX_TEXT_FILE_BYTES));
     }
@@ -251,10 +262,11 @@ pub fn write_file_content(
 
 #[tauri::command]
 pub fn read_file_binary(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<String, String> {
-    validate_path(&path, &state)?;
+    validate_path(&path, window.label(), &state)?;
     let meta = fs::metadata(&path).map_err(|e| format!("Failed to read file: {}", e.kind()))?;
     if meta.len() > MAX_BINARY_FILE_BYTES {
         return Err(format!("FILE_TOO_LARGE: {} bytes; limit {}", meta.len(), MAX_BINARY_FILE_BYTES));
@@ -271,8 +283,8 @@ pub fn get_home_dir() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn create_file(state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
-    validate_path(&path, &state)?;
+pub fn create_file(window: tauri::WebviewWindow, state: tauri::State<'_, ProjectRootState>, path: String) -> Result<(), String> {
+    validate_path(&path, window.label(), &state)?;
     let p = PathBuf::from(&path);
     if p.exists() {
         return Err("File already exists".to_string());
@@ -285,10 +297,11 @@ pub fn create_file(state: tauri::State<'_, ProjectRootState>, path: String) -> R
 
 #[tauri::command]
 pub fn create_folder(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<(), String> {
-    validate_path(&path, &state)?;
+    validate_path(&path, window.label(), &state)?;
     let p = PathBuf::from(&path);
     if p.exists() {
         return Err("Folder already exists".to_string());
@@ -298,11 +311,12 @@ pub fn create_folder(
 
 #[tauri::command]
 pub fn delete_entries(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     paths: Vec<String>,
 ) -> Result<(), String> {
     for path in &paths {
-        validate_path(path, &state)?;
+        validate_path(path, window.label(), &state)?;
     }
     for path in paths {
         let p = PathBuf::from(&path);
@@ -316,25 +330,27 @@ pub fn delete_entries(
 
 #[tauri::command]
 pub fn rename_entry(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     old_path: String,
     new_path: String,
 ) -> Result<(), String> {
-    validate_path(&old_path, &state)?;
-    validate_path(&new_path, &state)?;
+    validate_path(&old_path, window.label(), &state)?;
+    validate_path(&new_path, window.label(), &state)?;
     fs::rename(&old_path, &new_path).map_err(|e| format!("Failed to rename: {}", e))
 }
 
 #[tauri::command]
 pub fn move_entries(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     sources: Vec<String>,
     dest_dir: String,
 ) -> Result<(), String> {
     for src in &sources {
-        validate_path(src, &state)?;
+        validate_path(src, window.label(), &state)?;
     }
-    validate_path(&dest_dir, &state)?;
+    validate_path(&dest_dir, window.label(), &state)?;
 
     let dest = fs::canonicalize(&dest_dir).map_err(|e| format!("Invalid destination: {}", e))?;
     if !dest.is_dir() {
@@ -361,11 +377,12 @@ pub fn move_entries(
 
 #[tauri::command]
 pub fn import_external_files(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     sources: Vec<String>,
     dest_dir: String,
 ) -> Result<(), String> {
-    validate_path(&dest_dir, &state)?;
+    validate_path(&dest_dir, window.label(), &state)?;
     let dest = PathBuf::from(&dest_dir);
     if !dest.is_dir() {
         return Err("Destination is not a directory".to_string());
@@ -408,14 +425,15 @@ pub fn import_external_files(
 
 #[tauri::command]
 pub fn paste_entries(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     sources: Vec<String>,
     dest_dir: String,
 ) -> Result<(), String> {
     for src in &sources {
-        validate_path(src, &state)?;
+        validate_path(src, window.label(), &state)?;
     }
-    validate_path(&dest_dir, &state)?;
+    validate_path(&dest_dir, window.label(), &state)?;
     let dest = PathBuf::from(&dest_dir);
     if !dest.is_dir() {
         return Err("Destination is not a directory".to_string());
@@ -443,10 +461,11 @@ pub fn paste_entries(
 
 #[tauri::command]
 pub fn duplicate_entry(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<(), String> {
-    validate_path(&path, &state)?;
+    validate_path(&path, window.label(), &state)?;
     let src_path = PathBuf::from(&path);
     if !src_path.exists() {
         return Err("Path does not exist".to_string());
@@ -472,10 +491,11 @@ pub fn duplicate_entry(
 
 #[tauri::command]
 pub fn reveal_in_file_manager(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<(), String> {
-    let canonical = validate_path(&path, &state)?;
+    let canonical = validate_path(&path, window.label(), &state)?;
     let safe_path = canonical.to_string_lossy().to_string();
     #[cfg(target_os = "macos")]
     {
@@ -540,10 +560,11 @@ fn copy_dir_recursive_inner(src: &Path, dst: &Path, depth: u32) -> Result<(), St
 
 #[tauri::command]
 pub fn list_all_files(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<Vec<String>, String> {
-    validate_path(&path, &state)?;
+    validate_path(&path, window.label(), &state)?;
     let root = PathBuf::from(&path);
     let mut files = Vec::new();
     collect_files(&root, &root, &mut files, 0);
@@ -595,10 +616,8 @@ mod tests {
     #[test]
     fn create_project_root_state_starts_empty() {
         let state = create_project_root_state();
-        // Synchronous read on a tokio RwLock is safe outside any tokio
-        // runtime context, which is how Tauri sync commands run.
         let guard = state.blocking_read();
-        assert!(guard.is_none());
+        assert!(guard.is_empty());
     }
 
     #[test]
@@ -606,28 +625,28 @@ mod tests {
         let state = create_project_root_state();
         {
             let mut w = state.blocking_write();
-            *w = Some(PathBuf::from("/tmp/example"));
+            w.insert("main".to_string(), Some(PathBuf::from("/tmp/example")));
         }
         let r = state.blocking_read();
-        assert_eq!(r.as_ref().map(|p| p.as_path()), Some(Path::new("/tmp/example")));
+        assert_eq!(
+            r.get("main").and_then(|o| o.as_ref()).map(|p| p.as_path()),
+            Some(Path::new("/tmp/example"))
+        );
     }
 
     #[test]
     fn many_concurrent_blocking_readers_do_not_deadlock() {
-        // Confirms the conversion to a reader-writer lock actually buys
-        // us reader concurrency: many threads taking blocking_read() at
-        // once must all proceed without serialization.
         let state = create_project_root_state();
         {
             let mut w = state.blocking_write();
-            *w = Some(PathBuf::from("/tmp/example"));
+            w.insert("main".to_string(), Some(PathBuf::from("/tmp/example")));
         }
         let mut handles = vec![];
         for _ in 0..16 {
             let s = state.clone();
             handles.push(std::thread::spawn(move || {
                 let g = s.blocking_read();
-                assert!(g.is_some());
+                assert!(g.get("main").is_some());
             }));
         }
         for h in handles {
@@ -637,18 +656,32 @@ mod tests {
 
     #[tokio::test]
     async fn async_read_write_round_trip() {
-        // Exercises the async path used by knowledge_init and
-        // validate_knowledge_root.
         let state = create_project_root_state();
         {
             let mut w = state.write().await;
-            *w = Some(PathBuf::from("/tmp/from-async"));
+            w.insert("main".to_string(), Some(PathBuf::from("/tmp/from-async")));
         }
         let r = state.read().await;
         assert_eq!(
-            r.as_ref().map(|p| p.as_path()),
+            r.get("main").and_then(|o| o.as_ref()).map(|p| p.as_path()),
             Some(Path::new("/tmp/from-async"))
         );
+    }
+
+    #[test]
+    fn per_window_isolation() {
+        let state = create_project_root_state();
+        {
+            let mut w = state.blocking_write();
+            w.insert("main".to_string(), Some(PathBuf::from("/tmp/project-a")));
+            w.insert("win-2".to_string(), None);
+        }
+        let r = state.blocking_read();
+        assert_eq!(
+            r.get("main").and_then(|o| o.as_ref()).map(|p| p.as_path()),
+            Some(Path::new("/tmp/project-a"))
+        );
+        assert_eq!(r.get("win-2"), Some(&None));
     }
 
     // ── M15: symlinks in the file tree ──────────────────────────

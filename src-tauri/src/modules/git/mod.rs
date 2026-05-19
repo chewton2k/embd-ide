@@ -9,13 +9,13 @@ use crate::modules::fs::ProjectRootState;
 /// Validate that a repo_path is within (or equal to) the project root for git commands.
 pub fn validate_repo_path(
     repo_path: &str,
+    window_label: &str,
     state: &tauri::State<'_, ProjectRootState>,
 ) -> Result<PathBuf, String> {
-    // Sync command path: see fs::set_project_root for why blocking_read
-    // is safe here (Tauri sync commands run off the tokio worker pool).
-    let root = state.blocking_read();
-    let root = root
-        .as_ref()
+    let map = state.blocking_read();
+    let root = map
+        .get(window_label)
+        .and_then(|opt| opt.as_ref())
         .ok_or_else(|| "No project is open".to_string())?;
     let canonical = fs::canonicalize(repo_path).map_err(|e| format!("Invalid repo path: {}", e))?;
     if !canonical.starts_with(root) {
@@ -280,10 +280,11 @@ pub(crate) fn parse_status_porcelain_z(stdout: &[u8]) -> Vec<PorcelainEntry> {
 
 #[tauri::command]
 pub fn get_git_status(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<HashMap<String, String>, String> {
-    validate_repo_path(&path, &state)?;
+    validate_repo_path(&path, window.label(), &state)?;
     let output = Command::new("git")
         .args(["status", "--porcelain", "-uall", "-z"])
         .current_dir(&path)
@@ -325,10 +326,11 @@ pub fn get_git_status(
 
 #[tauri::command]
 pub fn get_git_remote_status(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<HashMap<String, String>, String> {
-    validate_repo_path(&path, &state)?;
+    validate_repo_path(&path, window.label(), &state)?;
 
     let upstream_check = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "@{u}"])
@@ -405,10 +407,11 @@ pub fn get_git_remote_status(
 
 #[tauri::command]
 pub fn get_git_ignored(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<Vec<String>, String> {
-    validate_repo_path(&path, &state)?;
+    validate_repo_path(&path, window.label(), &state)?;
     let output = Command::new("git")
         .args([
             "ls-files",
@@ -441,12 +444,14 @@ pub fn get_git_ignored(
 
 #[tauri::command]
 pub fn get_git_branch(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     path: String,
 ) -> Result<Option<String>, String> {
-    let root = state.blocking_read();
-    let root = root
-        .as_ref()
+    let map = state.blocking_read();
+    let root = map
+        .get(window.label())
+        .and_then(|opt| opt.as_ref())
         .ok_or_else(|| "No project is open".to_string())?;
     let canonical = fs::canonicalize(&path).map_err(|e| format!("Invalid path: {}", e))?;
     if !canonical.starts_with(root) {
@@ -478,13 +483,14 @@ pub fn get_git_branch(
 
 #[tauri::command]
 pub fn git_diff(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     file_path: String,
     staged: bool,
     is_untracked: Option<bool>,
 ) -> Result<Vec<DiffLine>, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     validate_git_file_path(&file_path)?;
 
     let untracked = match is_untracked {
@@ -527,11 +533,12 @@ pub fn git_diff(
 
 #[tauri::command]
 pub fn git_stage(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     paths: Vec<String>,
 ) -> Result<(), String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     for p in &paths {
         validate_git_file_path(p)?;
     }
@@ -550,11 +557,12 @@ pub fn git_stage(
 
 #[tauri::command]
 pub fn git_unstage(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     paths: Vec<String>,
 ) -> Result<(), String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     for p in &paths {
         validate_git_file_path(p)?;
     }
@@ -577,11 +585,12 @@ pub fn git_unstage(
 
 #[tauri::command]
 pub fn git_discard(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     paths: Vec<String>,
 ) -> Result<(), String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     for p in &paths {
         validate_git_file_path(p)?;
     }
@@ -628,9 +637,10 @@ pub fn git_discard(
     }
 
     if !untracked.is_empty() {
-        let root = state.blocking_read();
-        let root = root
-            .as_ref()
+        let map = state.blocking_read();
+        let root = map
+            .get(window.label())
+            .and_then(|opt| opt.as_ref())
             .ok_or_else(|| "No project is open".to_string())?;
         for file in &untracked {
             let full_path = PathBuf::from(&repo_path).join(file);
@@ -655,11 +665,12 @@ pub fn git_discard(
 
 #[tauri::command]
 pub fn git_commit(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     message: String,
 ) -> Result<String, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let output = Command::new("git")
         .args(["commit", "-m", &message])
         .current_dir(&repo_path)
@@ -681,10 +692,11 @@ pub fn git_commit(
 
 #[tauri::command]
 pub fn git_push(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
 ) -> Result<String, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let output = Command::new("git")
         .args(["push"])
         .current_dir(&repo_path)
@@ -721,10 +733,11 @@ pub fn git_push(
 
 #[tauri::command]
 pub fn git_fetch(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
 ) -> Result<String, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let output = Command::new("git")
         .args(["fetch"])
         .current_dir(&repo_path)
@@ -738,10 +751,11 @@ pub fn git_fetch(
 
 #[tauri::command]
 pub fn git_pull(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
 ) -> Result<String, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let output = Command::new("git")
         .args(["pull"])
         .current_dir(&repo_path)
@@ -757,10 +771,11 @@ pub fn git_pull(
 
 #[tauri::command]
 pub fn git_pull_rebase(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
 ) -> Result<String, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let output = Command::new("git")
         .args(["pull", "--rebase"])
         .current_dir(&repo_path)
@@ -776,12 +791,13 @@ pub fn git_pull_rebase(
 
 #[tauri::command]
 pub fn git_delete_branch(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     branch: String,
     force: bool,
 ) -> Result<String, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     validate_git_ref_name(&branch)?;
     let head_output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -808,10 +824,11 @@ pub fn git_delete_branch(
 
 #[tauri::command]
 pub fn git_ahead_behind(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
 ) -> Result<AheadBehind, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let upstream_out = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
         .current_dir(&repo_path)
@@ -858,11 +875,12 @@ pub fn git_ahead_behind(
 
 #[tauri::command]
 pub fn git_diff_line_ranges(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     file_path: String,
 ) -> Result<Vec<DiffRange>, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     validate_git_file_path(&file_path)?;
     let output = Command::new("git")
         .args(["diff", "-U0", "--", &file_path])
@@ -916,11 +934,12 @@ pub fn git_diff_line_ranges(
 
 #[tauri::command]
 pub fn git_log(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     count: Option<u32>,
 ) -> Result<Vec<GitGraphRow>, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let limit = count.unwrap_or(50).min(500).to_string();
     let format = "%H\x09%h\x09%an\x09%ar\x09%s".to_string();
     let output = Command::new("git")
@@ -977,10 +996,11 @@ pub fn git_log(
 
 #[tauri::command]
 pub fn git_list_branches(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
 ) -> Result<Vec<BranchInfo>, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     let output = Command::new("git")
         .args(["branch", "-a", "--no-color"])
         .current_dir(&repo_path)
@@ -1026,12 +1046,13 @@ pub fn git_list_branches(
 
 #[tauri::command]
 pub fn git_checkout_branch(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     branch: String,
     is_remote: bool,
 ) -> Result<String, String> {
-    validate_repo_path(&repo_path, &state)?;
+    validate_repo_path(&repo_path, window.label(), &state)?;
     if is_remote {
         // For remote branches like "origin/feature", validate the local name portion
         let local_name = branch.split('/').skip(1).collect::<Vec<&str>>().join("/");
@@ -1066,13 +1087,14 @@ pub fn git_checkout_branch(
 
 #[tauri::command]
 pub fn git_resolve_conflict(
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, ProjectRootState>,
     repo_path: String,
     file_path: String,
     content: String,
     stage: bool,
 ) -> Result<(), String> {
-    let canonical_repo = validate_repo_path(&repo_path, &state)?;
+    let canonical_repo = validate_repo_path(&repo_path, window.label(), &state)?;
     validate_git_file_path(&file_path)?;
 
     let abs_path = canonical_repo.join(&file_path);
@@ -1112,11 +1134,12 @@ pub struct Checkpoint {
 /// This allows "undo agent run" by restoring to this point.
 #[tauri::command]
 pub fn git_create_checkpoint(
+    window: tauri::WebviewWindow,
     repo_path: String,
     message: String,
     state: tauri::State<'_, ProjectRootState>,
 ) -> Result<String, String> {
-    let repo = validate_repo_path(&repo_path, &state)?;
+    let repo = validate_repo_path(&repo_path, window.label(), &state)?;
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -1195,11 +1218,12 @@ pub fn git_create_checkpoint(
 /// Restore a checkpoint by checking out its tree.
 #[tauri::command]
 pub fn git_restore_checkpoint(
+    window: tauri::WebviewWindow,
     repo_path: String,
     checkpoint_id: String,
     state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    let repo = validate_repo_path(&repo_path, &state)?;
+    let repo = validate_repo_path(&repo_path, window.label(), &state)?;
 
     // Validate checkpoint_id format
     if !checkpoint_id.starts_with("leo-checkpoint-") {
@@ -1236,10 +1260,11 @@ pub fn git_restore_checkpoint(
 /// List all checkpoints for a repo.
 #[tauri::command]
 pub fn git_list_checkpoints(
+    window: tauri::WebviewWindow,
     repo_path: String,
     state: tauri::State<'_, ProjectRootState>,
 ) -> Result<Vec<Checkpoint>, String> {
-    let repo = validate_repo_path(&repo_path, &state)?;
+    let repo = validate_repo_path(&repo_path, window.label(), &state)?;
 
     // List refs under refs/leo/checkpoints/
     let out = Command::new("git")

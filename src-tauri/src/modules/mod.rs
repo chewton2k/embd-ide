@@ -4,6 +4,8 @@ pub mod git;
 pub mod graph;
 pub mod knowledge;
 pub mod log;
+pub mod menu;
 pub mod session;
 pub mod shell;
 pub mod symbols;
+pub mod window_mgr;

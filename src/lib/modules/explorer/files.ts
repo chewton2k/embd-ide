@@ -21,7 +21,7 @@ export const activeFileModified = derived(
   }
 );
 
-export const maxRecentProjects = persistedNumber('leo-max-recent-projects', 3);
+export const maxRecentProjects = persistedNumber('leo-max-recent-projects', 10);
 export const maxTabs = persistedNumber('leo-max-tabs', 9);
 
 export const pinnedFiles = derived(openFiles, files => files.filter(f => f.pinned));

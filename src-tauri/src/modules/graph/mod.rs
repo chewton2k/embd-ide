@@ -1131,6 +1131,7 @@ fn find_dependents(target_path: &Path, project_root: &Path) -> Vec<DependentNode
 
 #[tauri::command]
 pub fn analyze_file_graph(
+    window: tauri::WebviewWindow,
     file_path: String,
     project_root: String,
     state: tauri::State<'_, crate::modules::fs::ProjectRootState>,
@@ -1138,7 +1139,8 @@ pub fn analyze_file_graph(
     // Validate both paths are within the project root
     let root_guard = state.blocking_read();
     let root_canonical = root_guard
-        .as_ref()
+        .get(window.label())
+        .and_then(|opt| opt.as_ref())
         .ok_or_else(|| "No project is open".to_string())?;
     let root = std::fs::canonicalize(&project_root)
         .map_err(|e| format!("Invalid project root: {}", e))?;

@@ -1531,11 +1531,17 @@
   .tree-item.selected {
     font-weight: 600;
     border-left: 2px solid var(--settings-icon, #B34B3C);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
   .tree-item:hover {
-    background: color-mix(in srgb, var(--bg-surface) 60%, transparent);
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface) 40%);
     color: var(--text-primary);
+  }
+
+  .tree-item.selected:hover {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
   /* Chevron */

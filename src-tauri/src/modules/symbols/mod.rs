@@ -155,14 +155,20 @@ fn find_name(node: Node, source: &str, ext: &str) -> Option<String> {
 /// Extract symbols from a file.
 #[tauri::command]
 pub fn symbols_extract(
+    window: tauri::WebviewWindow,
     path: String,
     state: tauri::State<'_, ProjectRootState>,
 ) -> Result<Vec<Symbol>, String> {
-    // Validate path is within project
-    let root = state.blocking_read();
-    let root = root.as_ref().ok_or("No project is open")?;
+    // Validate path is within project — clone root and drop lock before I/O
+    let root = {
+        let map = state.blocking_read();
+        map.get(window.label())
+            .and_then(|opt| opt.as_ref())
+            .ok_or("No project is open")?
+            .clone()
+    };
     let file_path = std::fs::canonicalize(&path).map_err(|e| format!("Invalid path: {e}"))?;
-    if !file_path.starts_with(root) {
+    if !file_path.starts_with(&root) {
         return Err("Access denied: path is outside the project".into());
     }
 
@@ -180,11 +186,12 @@ pub fn symbols_extract(
 /// Extract a specific symbol's body by name from a file.
 #[tauri::command]
 pub fn symbols_get_body(
+    window: tauri::WebviewWindow,
     path: String,
     symbol_name: String,
     state: tauri::State<'_, ProjectRootState>,
 ) -> Result<String, String> {
-    let symbols = symbols_extract(path, state)?;
+    let symbols = symbols_extract(window, path, state)?;
     symbols
         .into_iter()
         .find(|s| s.name == symbol_name)

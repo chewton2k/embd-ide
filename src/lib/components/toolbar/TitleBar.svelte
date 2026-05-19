@@ -17,7 +17,7 @@
    * once a few tabs are open — that was the original bug report.
    */
   import {
-    SidebarOpen, SidebarClose, GitBranch, Settings2, Search, TerminalSquare,
+    SidebarOpen, SidebarClose, GitBranch, Settings, Search, TerminalSquare,
   } from 'lucide-svelte';
   import {
     showSettings, showGit, gitBranch, toggleGitPanel,
@@ -120,7 +120,7 @@
       aria-label="Settings"
       aria-pressed={$showSettings}
     >
-      <Settings2 size={14} />
+      <Settings size={14} />
     </button>
   </div>
 </header>

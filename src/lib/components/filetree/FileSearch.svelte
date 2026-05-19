@@ -235,7 +235,7 @@
   }
 
   .search-result.selected {
-    background: var(--bg-surface);
+    background: color-mix(in srgb, var(--accent) 20%, var(--bg-surface) 80%);
   }
 
   .result-name {
@@ -249,10 +249,11 @@
   }
 
   .search-result :global(mark) {
-    background: color-mix(in srgb, var(--accent) 30%, transparent);
-    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--text-primary);
+    font-weight: 600;
     border-radius: 2px;
-    padding: 0 1px;
+    padding: 0 2px;
   }
 
   .no-results {

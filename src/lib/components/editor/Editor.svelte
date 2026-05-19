@@ -1590,9 +1590,14 @@
           </svg>
         </button>
       </div>
-      <div class="md-preview-content" onclick={(e) => {
+      <div class="md-preview-content" role="document" onclick={(e) => {
         const a = (e.target as HTMLElement).closest('a');
         if (a?.href) { e.preventDefault(); openExternal(a.href); }
+      }} onkeydown={(e) => {
+        if (e.key === 'Enter') {
+          const a = (e.target as HTMLElement).closest('a');
+          if (a?.href) { e.preventDefault(); openExternal(a.href); }
+        }
       }}>
         {@html previewHtml}
       </div>

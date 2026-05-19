@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
@@ -12,29 +12,32 @@ use crate::modules::fs::ProjectRootState;
 // ── State ──
 
 pub struct KnowledgeState {
-    db: Mutex<Option<Connection>>,
+    db: Mutex<HashMap<String, Connection>>,
 }
 
 impl KnowledgeState {
     pub fn new() -> Self {
-        Self { db: Mutex::new(None) }
+        Self { db: Mutex::new(HashMap::new()) }
+    }
+
+    /// Remove the cached DB connection for a window. Called on window destroy.
+    pub fn remove_window(&self, label: &str) {
+        if let Ok(mut map) = self.db.try_lock() {
+            map.remove(label);
+        }
     }
 }
 
-/// Validate that the provided project_root matches the app's active project root.
-/// Compares both canonicalized and raw paths to handle symlinks, /private prefix
-/// on macOS, and cases where canonicalize fails.
-///
-/// Async because all four call sites are async commands and the lock is
-/// `tokio::sync::RwLock`. Calling `blocking_read` from inside an async
-/// task would panic; `.read().await` is the correct discipline.
+/// Validate that the provided project_root matches the calling window's active project root.
 async fn validate_knowledge_root(
     project_root: &str,
+    window_label: &str,
     state: &tauri::State<'_, ProjectRootState>,
 ) -> Result<PathBuf, String> {
     let root_guard = state.read().await;
     let active_root = root_guard
-        .as_ref()
+        .get(window_label)
+        .and_then(|opt| opt.as_ref())
         .ok_or_else(|| "No project is open".to_string())?;
 
     let provided = PathBuf::from(project_root);
@@ -181,22 +184,23 @@ fn cleanup_old_data(conn: &Connection) {
 
 #[tauri::command]
 pub async fn knowledge_init(
+    window: tauri::WebviewWindow,
     project_root: String,
     state: tauri::State<'_, Arc<KnowledgeState>>,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    // Ensure the project root state is set — handles the case where
-    // knowledge_init fires before set_project_root completes (race condition
-    // from the Svelte store subscription triggering immediately).
+    // Ensure the project root state is set for this window — if not yet set,
+    // bootstrap it (handles race where knowledge_init fires before set_project_root).
     {
         let mut root_guard = root_state.write().await;
-        if root_guard.is_none() {
+        let entry = root_guard.entry(window.label().to_string()).or_insert(None);
+        if entry.is_none() {
             let canonical = std::fs::canonicalize(&project_root)
-                .unwrap_or_else(|_| PathBuf::from(&project_root));
-            *root_guard = Some(canonical);
+                .map_err(|e| format!("Invalid project root: {}", e))?;
+            *entry = Some(canonical);
         }
     }
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let path = db_path(&project_root);
     let conn = Connection::open(&path).map_err(|e| format!("Failed to open DB: {}", e))?;
     init_schema(&conn)?;
@@ -208,18 +212,20 @@ pub async fn knowledge_init(
     ).map_err(|e| format!("Failed to record project_root: {}", e))?;
     cleanup_old_data(&conn);
     let mut db = state.db.lock().await;
-    *db = Some(conn);
+    db.insert(window.label().to_string(), conn);
     Ok(())
 }
 
 #[tauri::command]
 pub async fn knowledge_index(
+    window: tauri::WebviewWindow,
     project_root: String,
     app: AppHandle,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let root = PathBuf::from(&project_root);
+    let window_label = window.label().to_string();
 
     tokio::task::spawn_blocking(move || {
         let skip: HashSet<&str> = ["node_modules", ".git", "dist", "build", "target", ".next", "__pycache__", ".svelte-kit"].into_iter().collect();
@@ -227,7 +233,8 @@ pub async fn knowledge_index(
         walk_files(&root, &skip, &mut files);
 
         let total = files.len() as u32;
-        let _ = app.emit("indexing-progress", IndexProgress { done: 0, total });
+        let target = tauri::EventTarget::WebviewWindow { label: window_label.clone() };
+        let _ = app.emit_to(target.clone(), "indexing-progress", IndexProgress { done: 0, total });
 
         // Open DB in this thread
         let db_p = db_path(&root.to_string_lossy());
@@ -279,7 +286,7 @@ pub async fn knowledge_index(
             ).ok();
 
             if (i + 1) % 20 == 0 || i + 1 == files.len() {
-                let _ = app.emit("indexing-progress", IndexProgress { done: (i + 1) as u32, total });
+                let _ = app.emit_to(target.clone(), "indexing-progress", IndexProgress { done: (i + 1) as u32, total });
             }
         }
     }).await.map_err(|e| format!("Indexing failed: {}", e))?;
@@ -289,12 +296,13 @@ pub async fn knowledge_index(
 
 #[tauri::command]
 pub async fn knowledge_get_context(
+    window: tauri::WebviewWindow,
     project_root: String,
     query: String,
     current_file: Option<String>,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<Vec<FileInfo>, String> {
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
 
@@ -348,6 +356,7 @@ pub async fn knowledge_get_context(
 
 #[tauri::command]
 pub async fn knowledge_save_conversation(
+    window: tauri::WebviewWindow,
     project_root: String,
     id: String,
     title: String,
@@ -355,7 +364,7 @@ pub async fn knowledge_save_conversation(
     generation: Option<u64>,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<bool, String> {
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64;
@@ -383,10 +392,11 @@ pub async fn knowledge_save_conversation(
 
 #[tauri::command]
 pub async fn knowledge_list_conversations(
+    window: tauri::WebviewWindow,
     project_root: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<Vec<ConversationSummary>, String> {
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     let mut stmt = conn.prepare("SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
@@ -398,11 +408,12 @@ pub async fn knowledge_list_conversations(
 
 #[tauri::command]
 pub async fn knowledge_load_conversation(
+    window: tauri::WebviewWindow,
     project_root: String,
     id: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<String, String> {
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.query_row("SELECT messages FROM conversations WHERE id = ?1", params![id], |row| row.get::<_, String>(0))
@@ -411,10 +422,11 @@ pub async fn knowledge_load_conversation(
 
 #[tauri::command]
 pub async fn knowledge_delete_conversations(
+    window: tauri::WebviewWindow,
     project_root: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.execute("DELETE FROM conversations", []).map_err(|e| e.to_string())?;
@@ -423,11 +435,12 @@ pub async fn knowledge_delete_conversations(
 
 #[tauri::command]
 pub async fn knowledge_delete_conversation(
+    window: tauri::WebviewWindow,
     project_root: String,
     id: String,
     root_state: tauri::State<'_, ProjectRootState>,
 ) -> Result<(), String> {
-    validate_knowledge_root(&project_root, &root_state).await?;
+    validate_knowledge_root(&project_root, window.label(), &root_state).await?;
     let db_p = db_path(&project_root);
     let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
     conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
@@ -528,10 +541,10 @@ pub async fn knowledge_delete_project(
     state: tauri::State<'_, Arc<KnowledgeState>>,
 ) -> Result<(), String> {
     let db_p = db_path(&project_root);
-    // Drop any cached connection before touching the file.
+    // Drop all cached connections before touching the file.
     {
         let mut db = state.db.lock().await;
-        *db = None;
+        db.clear();
     }
     if db_p.exists() {
         std::fs::remove_file(&db_p)
@@ -571,10 +584,10 @@ pub async fn knowledge_delete_by_hash(
         return Err("Invalid db_hash: path traversal detected".to_string());
     }
 
-    // Drop cached connection if it matches
+    // Drop cached connections before deleting
     {
         let mut db = state.db.lock().await;
-        *db = None;
+        db.clear();
     }
 
     if db_p.exists() {
@@ -597,10 +610,10 @@ pub async fn knowledge_delete_by_hash(
 pub async fn knowledge_delete_all_projects(
     state: tauri::State<'_, Arc<KnowledgeState>>,
 ) -> Result<(), String> {
-    // Drop any cached connection first.
+    // Drop all cached connections first.
     {
         let mut db = state.db.lock().await;
-        *db = None;
+        db.clear();
     }
     let dir = knowledge_dir();
     if !dir.exists() {
