@@ -816,20 +816,19 @@
      is visible — inactive layers keep their xterm DOM mounted so PTYs stay
      live and their scrollback isn't lost when switching.
 
-     Uses visibility:hidden (not opacity or display:none) so that:
-     1. The xterm DOM stays mounted and sized (no reflow on switch).
-     2. There's no opacity transition frame where the canvas is visible
-        but has stale/zero-dimension content (the "blank flash" bug).
-     3. Children cannot punch through a hidden parent (unlike opacity:0
-        which still composites the layer). */
+     Uses opacity (not visibility) because the parent .terminal-tab-slot
+     uses visibility:hidden to hide the terminal when a file tab is active.
+     CSS spec allows a child to set visibility:visible and punch through a
+     hidden parent — opacity on a child cannot override a parent's
+     visibility:hidden. No transition is set so there's no blank frame. */
   .tab-layer {
     position: absolute;
     inset: 0;
-    visibility: hidden;
+    opacity: 0;
     pointer-events: none;
   }
   .tab-layer.active {
-    visibility: visible;
+    opacity: 1;
     pointer-events: auto;
   }
 
