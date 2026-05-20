@@ -882,9 +882,26 @@ pub fn git_diff_line_ranges(
 ) -> Result<Vec<DiffRange>, String> {
     validate_repo_path(&repo_path, window.label(), &state)?;
     validate_git_file_path(&file_path)?;
+
+    // Resolve the absolute path of the file to find its actual git root.
+    // This handles sub-repos/submodules: git is invoked from the file's
+    // parent directory so it auto-discovers the correct .git ancestor.
+    let abs_file = PathBuf::from(&repo_path).join(&file_path);
+    let work_dir = abs_file.parent().unwrap_or_else(|| Path::new(&repo_path));
+    // Canonicalize and verify work_dir is still within the project root
+    // to prevent symlink-based escapes.
+    let work_dir = std::fs::canonicalize(work_dir).unwrap_or_else(|_| work_dir.to_path_buf());
+    let canonical_repo = std::fs::canonicalize(&repo_path).unwrap_or_else(|_| PathBuf::from(&repo_path));
+    if !work_dir.starts_with(&canonical_repo) {
+        return Err("Access denied: file path resolves outside the project directory".to_string());
+    }
+    let file_name = abs_file.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| file_path.clone());
+
     let output = Command::new("git")
-        .args(["diff", "-U0", "--", &file_path])
-        .current_dir(&repo_path)
+        .args(["diff", "-U0", "--", &file_name])
+        .current_dir(&work_dir)
         .output()
         .map_err(|e| e.to_string())?;
 
