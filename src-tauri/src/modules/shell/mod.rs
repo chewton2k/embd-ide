@@ -191,7 +191,9 @@ pub fn write_terminal(
         .writer
         .write_all(data.as_bytes())
         .map_err(|e| e.to_string())?;
-    session.writer.flush().map_err(|e| e.to_string())?;
+    // No flush needed: PTY master fd is unbuffered — the kernel delivers
+    // bytes to the slave process immediately after write(). Flushing added
+    // one syscall per keystroke with zero benefit.
     Ok(())
 }
 
