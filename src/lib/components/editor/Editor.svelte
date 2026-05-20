@@ -26,6 +26,13 @@
   import { scheme } from 'codemirror-lang-scheme';
   import { StreamLanguage } from '@codemirror/language';
   import { oCaml } from '@codemirror/legacy-modes/mode/mllike';
+  import { yaml } from '@codemirror/legacy-modes/mode/yaml';
+  import { toml } from '@codemirror/legacy-modes/mode/toml';
+  import { shell } from '@codemirror/legacy-modes/mode/shell';
+  import { properties } from '@codemirror/legacy-modes/mode/properties';
+  import { stex } from '@codemirror/legacy-modes/mode/stex';
+  import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
+  import { nginx } from '@codemirror/legacy-modes/mode/nginx';
   import { oneDark } from '@codemirror/theme-one-dark';
   import { tags } from '@lezer/highlight';
   import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
@@ -34,6 +41,7 @@
   import { shouldDispatchVersionUpdate } from '../../modules/editor/versionGate';
   import { bindAiDiffResolve } from '../../modules/editor/aiDiffEvents';
   import { ghostTextExtension } from '../../modules/editor/ghostText';
+  import { scrollbarAnnotations, setScrollbarRanges, type ScrollbarRange } from '../../modules/editor/scrollbarAnnotations';
   import { pendingEdits, approveEdit, rejectEdit, addEdits } from '../../modules/ai/pendingEdits';
   import { log } from '../../modules/logging';
 
@@ -122,6 +130,22 @@
       { tag: tags.bool, color: s.number },
       { tag: tags.null, color: s.number },
       { tag: tags.atom, color: s.number },
+      // Markdown / prose tags
+      { tag: tags.heading, color: s.keyword, fontWeight: 'bold' },
+      { tag: tags.heading1, color: s.keyword, fontWeight: 'bold' },
+      { tag: tags.heading2, color: s.keyword, fontWeight: 'bold' },
+      { tag: tags.heading3, color: s.keyword, fontWeight: 'bold' },
+      { tag: tags.emphasis, fontStyle: 'italic', color: s.string },
+      { tag: tags.strong, fontWeight: 'bold', color: s.function },
+      { tag: tags.link, color: s.type, textDecoration: 'underline' },
+      { tag: tags.url, color: s.type },
+      { tag: tags.monospace, color: s.number },
+      { tag: tags.strikethrough, textDecoration: 'line-through', color: s.comment },
+      { tag: tags.quote, color: s.string, fontStyle: 'italic' },
+      { tag: tags.meta, color: s.comment },
+      { tag: tags.contentSeparator, color: s.comment },
+      { tag: tags.processingInstruction, color: s.keyword },
+      { tag: tags.labelName, color: s.function },
     ]));
     return [theme, highlight];
   }
@@ -201,10 +225,13 @@
   let editorContainer: HTMLDivElement;
   let view: EditorView | null = null;
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let gitGutterTimer: ReturnType<typeof setTimeout> | null = null;
   let saving = $state(false);
 
   // Per-file undo/redo: cache EditorState keyed by file path
   const stateCache = new Map<string, EditorState>();
+  // Per-file scroll position (EditorState doesn't include viewport scroll)
+  const scrollCache = new Map<string, number>();
   let currentFilePath: string | null = null;
 
   // Per-path counter of the highest `openFiles` version we've already
@@ -244,6 +271,12 @@
   const themeComp = new Compartment();
   const vimComp = new Compartment();
 
+  /** Debounced git gutter update — prevents subprocess pile-up during rapid tab switching. */
+  function debouncedGitGutter(path: string) {
+    if (gitGutterTimer) clearTimeout(gitGutterTimer);
+    gitGutterTimer = setTimeout(() => updateGitGutter(path), 150);
+  }
+
   async function updateGitGutter(path: string) {
     if (!view) return;
     const root = get(projectRoot);
@@ -254,7 +287,6 @@
       if (!view || currentFilePath !== path) return;
       const doc = view.state.doc;
       const builder = new RangeSetBuilder<GutterMarker>();
-      // RangeSetBuilder requires positions in ascending order
       const marks: { pos: number; marker: GutterMarker }[] = [];
       for (const r of ranges) {
         const marker = r.kind === 'add' ? addedMarker : r.kind === 'del' ? deletedMarker : modifiedMarker;
@@ -270,18 +302,28 @@
         builder.add(m.pos, m.pos, m.marker);
       }
       const markers = builder.finish();
+      const sbRanges: ScrollbarRange[] = ranges.map(r => ({
+        kind: r.kind === 'add' ? 'add' : r.kind === 'del' ? 'del' : 'mod',
+        start: r.start,
+        end: r.end,
+      }));
       view.dispatch({
-        effects: gitGutterComp.reconfigure(
-          gutter({
-            class: 'cm-git-gutter',
-            markers: () => markers,
-          })
-        ),
+        effects: [
+          gitGutterComp.reconfigure(
+            gutter({
+              class: 'cm-git-gutter',
+              markers: () => markers,
+            })
+          ),
+          setScrollbarRanges.of(sbRanges),
+        ],
       });
     } catch {
-      // Not in a git repo or command failed — clear gutter
+      // Not in a git repo or command failed — clear gutter and scrollbar
       if (view) {
-        view.dispatch({ effects: gitGutterComp.reconfigure([]) });
+        view.dispatch({
+          effects: [gitGutterComp.reconfigure([]), setScrollbarRanges.of([])],
+        });
       }
     }
   }
@@ -594,14 +636,21 @@
       case 'pl': case 'pro': case 'prolog': return prolog();
       case 'scm': case 'ss': case 'rkt': return scheme();
       case 'ml': case 'mli': case 'ocaml': return StreamLanguage.define(oCaml);
-      case 'yaml': case 'yml': case 'toml': case 'ini': case 'conf': case 'cfg': return null;
-      case 'sh': case 'bash': case 'zsh': case 'fish': return null;
-      case 'txt': case 'text': case 'log': case 'env': return null;
-      case 'gitignore': case 'gitattributes': case 'editorconfig': return null;
+      case 'yaml': case 'yml': return StreamLanguage.define(yaml);
+      case 'toml': return StreamLanguage.define(toml);
+      case 'ini': case 'conf': case 'cfg': case 'env': case 'properties':
+        return StreamLanguage.define(properties);
+      case 'sh': case 'bash': case 'zsh': case 'fish': return StreamLanguage.define(shell);
+      case 'tex': case 'latex': case 'sty': case 'cls': return StreamLanguage.define(stex);
+      case 'dockerfile': return StreamLanguage.define(dockerFile);
+      case 'txt': case 'text': case 'log': return null;
+      case 'gitignore': case 'gitattributes': case 'editorconfig':
+        return StreamLanguage.define(properties);
       default:
         // Files with no extension (Makefile, Dockerfile, etc.)
-        if (name === 'makefile') return null;
-        if (name === 'dockerfile') return null;
+        if (name === 'makefile') return StreamLanguage.define(shell);
+        if (name === 'dockerfile') return StreamLanguage.define(dockerFile);
+        if (name === '.env' || name.startsWith('.env.')) return StreamLanguage.define(properties);
         return null;
     }
   }
@@ -842,6 +891,7 @@
     if (view && currentFilePath) {
       closeSearchPanel(view);
       stateCache.set(currentFilePath, view.state);
+      scrollCache.set(currentFilePath, view.scrollDOM.scrollTop);
     }
 
     const cached = stateCache.get(path);
@@ -849,8 +899,17 @@
       // Restore cached state (preserves undo history)
       if (view) {
         view.setState(cached);
+        // Restore scroll position (EditorState doesn't include viewport scroll)
+        const savedScroll = scrollCache.get(path);
+        if (savedScroll != null) {
+          view.scrollDOM.scrollTop = savedScroll;
+        }
       } else {
         view = new EditorView({ state: cached, parent: editorContainer });
+        const savedScroll = scrollCache.get(path);
+        if (savedScroll != null) {
+          view.scrollDOM.scrollTop = savedScroll;
+        }
       }
       currentFilePath = path;
       // Project pendingEdits onto the (possibly fresh) CM state — the
@@ -867,38 +926,40 @@
         });
       }
       updatePreview(cached.doc.toString());
-      updateGitGutter(path);
+      debouncedGitGutter(path);
       startWatching(path);
 
-      // Background check: verify content against disk (handles external edits)
-      // Compare disk against last SAVED content, not cached editor content.
-      // If they match, disk hasn't changed — keep cached state with unsaved edits intact.
-      try {
-        const diskContent = await invoke<string>('read_file_content', { path });
-        // Re-check after await — user may have switched tabs
-        if (currentFilePath !== path || !view) return;
-        const lastSaved = savedContentCache.get(path) ?? '';
-        if (diskContent !== lastSaved) {
-          // Disk changed externally — reload from disk
-          savedContentCache.set(path, diskContent);
-          if (diskContent !== view.state.doc.toString()) {
-            ignoreNextDocChange = true;
-            view.dispatch({
-              changes: { from: 0, to: view.state.doc.length, insert: diskContent },
-              annotations: Transaction.addToHistory.of(false),
-            });
-            markFileSaved(path);
-            updatePreview(diskContent);
-            updateGitGutter(path);
-            // doc.lines may have changed — re-anchor pending edits
-            // against the new content via line-aligned search before
-            // re-projecting onto the CM diff field.
-            reanchorPendingEditsForExternalContent(path, diskContent);
-            syncDiffFieldFromPendingEdits(get(pendingEdits));
+      // Background check: verify content against disk (handles external edits).
+      // Skip when the file watcher is active — it will trigger reloadFromDisk
+      // on any external change. This avoids an IPC + disk read per tab switch.
+      if (!unwatchFn) {
+        try {
+          const diskContent = await invoke<string>('read_file_content', { path });
+          // Re-check after await — user may have switched tabs
+          if (currentFilePath !== path || !view) return;
+          const lastSaved = savedContentCache.get(path) ?? '';
+          if (diskContent !== lastSaved) {
+            // Disk changed externally — reload from disk
+            savedContentCache.set(path, diskContent);
+            if (diskContent !== view.state.doc.toString()) {
+              ignoreNextDocChange = true;
+              view.dispatch({
+                changes: { from: 0, to: view.state.doc.length, insert: diskContent },
+                annotations: Transaction.addToHistory.of(false),
+              });
+              markFileSaved(path);
+              updatePreview(diskContent);
+              updateGitGutter(path);
+              // doc.lines may have changed — re-anchor pending edits
+              // against the new content via line-aligned search before
+              // re-projecting onto the CM diff field.
+              reanchorPendingEditsForExternalContent(path, diskContent);
+              syncDiffFieldFromPendingEdits(get(pendingEdits));
+            }
           }
+        } catch {
+          // File may have been deleted externally
         }
-      } catch {
-        // File may have been deleted externally
       }
     } else {
       // No cached state — load fresh from disk
@@ -909,7 +970,7 @@
         currentFilePath = path;
         syncDiffFieldFromPendingEdits(get(pendingEdits));
         updatePreview(content);
-        updateGitGutter(path);
+        debouncedGitGutter(path);
         startWatching(path);
       } catch (e) {
         const errStr = String(e);
@@ -1025,6 +1086,7 @@
         tabSizeComp.of(EditorState.tabSize.of(get(editorTabSize))),
         wordWrapComp.of(get(editorWordWrap) ? EditorView.lineWrapping : []),
         gitGutterComp.of([]),
+        scrollbarAnnotations(),
         errorLensComp.of(hasErrorLens(path) && get(editorShowErrorLens) ? buildErrorLensPlugin() : []),
         vimComp.of(get(editorVimMode) ? vim() : []),
         keymap.of([
@@ -1335,6 +1397,11 @@
         stateCache.delete(oldPath);
         stateCache.set(newPath, cached);
       }
+      const savedScroll = scrollCache.get(oldPath);
+      if (savedScroll != null) {
+        scrollCache.delete(oldPath);
+        scrollCache.set(newPath, savedScroll);
+      }
       const savedContent = savedContentCache.get(oldPath);
       if (savedContent !== undefined) {
         savedContentCache.delete(oldPath);
@@ -1447,6 +1514,7 @@
       }
     }
     stateCache.clear();
+    scrollCache.clear();
     savedContentCache.clear();
     if (view) view.destroy();
   });
@@ -1454,6 +1522,13 @@
   $effect(() => {
     if (filePath && editorContainer) {
       loadFile(filePath);
+      // Focus the editor so the user can type immediately after clicking a tab.
+      // Deferred to next frame so the editor DOM is fully mounted/restored.
+      requestAnimationFrame(() => {
+        if (view && currentFilePath === filePath) {
+          view.focus();
+        }
+      });
     }
   });
 
@@ -1485,6 +1560,7 @@
       }
       savedContentCache.set(filePath, file!.content);
       stateCache.delete(filePath);
+      scrollCache.delete(filePath);
       updatePreview(file!.content);
       updateGitGutter(filePath);
       lastHandledVersion.set(path, file!.version);
@@ -1499,6 +1575,7 @@
       for (const key of keys) {
         if (!openPaths.has(key)) {
           stateCache.delete(key);
+          scrollCache.delete(key);
           savedContentCache.delete(key);
           lastHandledVersion.delete(key);
         }
@@ -1509,6 +1586,7 @@
     // version bump but no edited state yet).
     const allKeys = new Set<string>();
     for (const k of stateCache.keys()) allKeys.add(k);
+    for (const k of scrollCache.keys()) allKeys.add(k);
     for (const k of savedContentCache.keys()) allKeys.add(k);
     for (const k of lastHandledVersion.keys()) allKeys.add(k);
     purge(allKeys.values());
@@ -1659,6 +1737,40 @@
     height: 100%;
     background: var(--error, #f38ba8);
     border-radius: 1px;
+  }
+
+  /* Scrollbar annotations overlay */
+  .editor-wrapper :global(.cm-scrollbar-annotations) {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 8px;
+    height: 100%;
+    pointer-events: none;
+    z-index: 5;
+  }
+
+  .editor-wrapper :global(.cm-sb-mark) {
+    position: absolute;
+    right: 1px;
+    width: 6px;
+    min-height: 2px;
+    border-radius: 1px;
+  }
+
+  .editor-wrapper :global(.cm-sb-add) {
+    background: var(--success, #a6e3a1);
+    opacity: 0.8;
+  }
+
+  .editor-wrapper :global(.cm-sb-mod) {
+    background: var(--accent, #89b4fa);
+    opacity: 0.8;
+  }
+
+  .editor-wrapper :global(.cm-sb-del) {
+    background: var(--error, #f38ba8);
+    opacity: 0.8;
   }
 
   .editor-wrapper :global(.cm-error-lens) {
