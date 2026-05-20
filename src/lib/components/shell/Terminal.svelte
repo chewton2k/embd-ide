@@ -229,7 +229,7 @@
   function fitPane(pane: TerminalPane) {
     if (!pane.mounted) return;
     const mount = getPaneMount(pane.id);
-    if (!mount || mount.clientWidth === 0 || mount.clientHeight === 0) return;
+    if (!mount || mount.clientWidth < 10 || mount.clientHeight < 10) return;
     try { pane.fitAddon.fit(); } catch { /* Legitimate: xterm may not be attached to DOM yet */ }
   }
 
@@ -516,8 +516,12 @@
       if (prevActive === paneId) {
         setActivePane(tabId, tabPanes[0].id);
       }
-      // Refit remaining panes after layout change.
+      // Refit remaining panes after layout change. Double-rAF ensures
+      // the browser has completed the layout pass with the new pane
+      // dimensions (the split tree collapsed, so the remaining pane
+      // should now span the full area).
       await tick();
+      await new Promise((r) => requestAnimationFrame(r));
       await new Promise((r) => requestAnimationFrame(r));
       for (const p of tabPanes) fitPane(p);
       const current = activePaneByTab[tabId];
@@ -652,12 +656,19 @@
   });
 
   // Refit all panes when rects change (e.g. container resize or active tab switch).
+  // Uses a double-rAF to ensure the browser has completed layout after the
+  // DOM change that triggered the rect recomputation. A single rAF can fire
+  // before the layout pass completes (especially after panel toggles that
+  // change the terminal container's dimensions), causing fit() to read
+  // zero/stale dimensions and blank the terminal.
   $effect(() => {
     // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     paneRects;
     currentTabId;
     requestAnimationFrame(() => {
-      for (const p of currentPanes) fitPane(p);
+      requestAnimationFrame(() => {
+        for (const p of currentPanes) fitPane(p);
+      });
     });
   });
 
@@ -805,19 +816,20 @@
      is visible — inactive layers keep their xterm DOM mounted so PTYs stay
      live and their scrollback isn't lost when switching.
 
-     Uses opacity (not visibility) so that the parent .terminal-tab-slot's
-     visibility:hidden cannot be overridden by children. CSS spec allows a
-     child to set visibility:visible and punch through a hidden parent, but
-     opacity on a child cannot override a parent's visibility:hidden. This
-     keeps the slot/layer hiding hierarchy correct. */
+     Uses visibility:hidden (not opacity or display:none) so that:
+     1. The xterm DOM stays mounted and sized (no reflow on switch).
+     2. There's no opacity transition frame where the canvas is visible
+        but has stale/zero-dimension content (the "blank flash" bug).
+     3. Children cannot punch through a hidden parent (unlike opacity:0
+        which still composites the layer). */
   .tab-layer {
     position: absolute;
     inset: 0;
-    opacity: 0;
+    visibility: hidden;
     pointer-events: none;
   }
   .tab-layer.active {
-    opacity: 1;
+    visibility: visible;
     pointer-events: auto;
   }
 
