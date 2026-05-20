@@ -631,6 +631,92 @@ pub async fn knowledge_delete_all_projects(
     Ok(())
 }
 
+// ── Admin commands (settings window — no per-window project root required) ──
+
+/// Validate that a project_root has a corresponding knowledge DB on disk.
+/// Used by admin commands that don't require per-window project root validation.
+fn validate_admin_db_access(project_root: &str) -> Result<PathBuf, String> {
+    if project_root.is_empty() || project_root == "(unknown)" {
+        return Err("Invalid project root".to_string());
+    }
+    let db_p = db_path(project_root);
+    if !db_p.exists() {
+        return Err("No knowledge DB exists for this project".to_string());
+    }
+    // Ensure the resolved path is inside the knowledge directory
+    let dir = knowledge_dir();
+    if !db_p.starts_with(&dir) {
+        return Err("Invalid project root: path traversal detected".to_string());
+    }
+    Ok(db_p)
+}
+
+/// Verify the calling window is the settings window.
+fn require_settings_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != "settings" {
+        return Err("Access denied: admin commands are only available from the settings window".to_string());
+    }
+    Ok(())
+}
+
+/// List conversations for a project — callable only from the settings window.
+#[tauri::command]
+pub async fn knowledge_admin_list_conversations(
+    window: tauri::WebviewWindow,
+    project_root: String,
+) -> Result<Vec<ConversationSummary>, String> {
+    require_settings_window(&window)?;
+    let db_p = validate_admin_db_access(&project_root)?;
+    let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
+    let mut stmt = conn.prepare("SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT 50").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |row| {
+        Ok(ConversationSummary { id: row.get(0)?, title: row.get(1)?, created_at: row.get(2)?, updated_at: row.get(3)? })
+    }).map_err(|e| e.to_string())?;
+    Ok(rows.flatten().collect())
+}
+
+/// Load a conversation — callable only from the settings window.
+#[tauri::command]
+pub async fn knowledge_admin_load_conversation(
+    window: tauri::WebviewWindow,
+    project_root: String,
+    id: String,
+) -> Result<String, String> {
+    require_settings_window(&window)?;
+    let db_p = validate_admin_db_access(&project_root)?;
+    let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
+    conn.query_row("SELECT messages FROM conversations WHERE id = ?1", params![id], |row| row.get::<_, String>(0))
+        .map_err(|e| format!("Not found: {}", e))
+}
+
+/// Delete a single conversation — callable only from the settings window.
+#[tauri::command]
+pub async fn knowledge_admin_delete_conversation(
+    window: tauri::WebviewWindow,
+    project_root: String,
+    id: String,
+) -> Result<(), String> {
+    require_settings_window(&window)?;
+    let db_p = validate_admin_db_access(&project_root)?;
+    let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
+    conn.execute("DELETE FROM conversations WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Delete all conversations for a project — callable only from the settings window.
+#[tauri::command]
+pub async fn knowledge_admin_delete_conversations(
+    window: tauri::WebviewWindow,
+    project_root: String,
+) -> Result<(), String> {
+    require_settings_window(&window)?;
+    let db_p = validate_admin_db_access(&project_root)?;
+    let conn = Connection::open(&db_p).map_err(|e| format!("DB open failed: {}", e))?;
+    conn.execute("DELETE FROM conversations", []).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ── Helpers ──
 
 fn walk_files(dir: &Path, skip: &HashSet<&str>, files: &mut Vec<PathBuf>) {

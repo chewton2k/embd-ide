@@ -104,6 +104,10 @@ pub fn run() {
             knowledge::knowledge_delete_project,
             knowledge::knowledge_delete_by_hash,
             knowledge::knowledge_delete_all_projects,
+            knowledge::knowledge_admin_list_conversations,
+            knowledge::knowledge_admin_load_conversation,
+            knowledge::knowledge_admin_delete_conversation,
+            knowledge::knowledge_admin_delete_conversations,
             // Symbols
             symbols::symbols_extract,
             symbols::symbols_get_body,

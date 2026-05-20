@@ -7,6 +7,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 // ── Shared types ─────────────────────────────────────────────────
 
@@ -35,6 +36,17 @@ export interface KnowledgeMessage {
   content: string;
 }
 
+// ── Internal helpers ─────────────────────────────────────────────
+
+/** Returns true when the current window is the settings window (no project root). */
+function isSettingsWindow(): boolean {
+  try {
+    return getCurrentWebviewWindow().label === 'settings';
+  } catch {
+    return false;
+  }
+}
+
 // ── Commands ─────────────────────────────────────────────────────
 
 /** List every known project (all knowledge DBs on disk). */
@@ -46,6 +58,9 @@ export async function listProjects(): Promise<ProjectInfo[]> {
 export async function listConversations(
   projectRoot: string,
 ): Promise<ConversationSummary[]> {
+  if (isSettingsWindow()) {
+    return await invoke<ConversationSummary[]>('knowledge_admin_list_conversations', { projectRoot });
+  }
   return await invoke<ConversationSummary[]>('knowledge_list_conversations', { projectRoot });
 }
 
@@ -55,7 +70,10 @@ export async function loadConversation(
   projectRoot: string,
   id: string,
 ): Promise<KnowledgeMessage[]> {
-  const json = await invoke<string>('knowledge_load_conversation', { projectRoot, id });
+  const cmd = isSettingsWindow()
+    ? 'knowledge_admin_load_conversation'
+    : 'knowledge_load_conversation';
+  const json = await invoke<string>(cmd, { projectRoot, id });
   try {
     const parsed = JSON.parse(json);
     if (!Array.isArray(parsed)) throw new Error('Conversation body is not an array');
@@ -70,12 +88,18 @@ export async function deleteConversation(
   projectRoot: string,
   id: string,
 ): Promise<void> {
-  await invoke<void>('knowledge_delete_conversation', { projectRoot, id });
+  const cmd = isSettingsWindow()
+    ? 'knowledge_admin_delete_conversation'
+    : 'knowledge_delete_conversation';
+  await invoke<void>(cmd, { projectRoot, id });
 }
 
 /** Delete every conversation in a project (keeps the file index). */
 export async function deleteProjectConversations(projectRoot: string): Promise<void> {
-  await invoke<void>('knowledge_delete_conversations', { projectRoot });
+  const cmd = isSettingsWindow()
+    ? 'knowledge_admin_delete_conversations'
+    : 'knowledge_delete_conversations';
+  await invoke<void>(cmd, { projectRoot });
 }
 
 /** Delete an entire project's knowledge DB — files + conversations. */
