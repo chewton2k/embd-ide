@@ -7,7 +7,7 @@
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
   import Icon from '@iconify/svelte';
   import { FolderOpen, Folder, ChevronRight, Link2 } from 'lucide-svelte';
-  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview, createFileSignal, createFolderSignal } from '../../modules';
+  import { projectRoot, hiddenPatterns, renameOpenFile, fileTreeRefreshTrigger, closeAllUnpinned, sharedGitStatus, sharedGitRemoteStatus, gitBranch, addFile, togglePin, activeFilePath, fileTreeNavTarget, openDiagrams, diagramPath, showPreview, createFileSignal, createFolderSignal, expandedDirsStore, showTerminal, createTerminalSignal } from '../../modules';
   import { saveSessionNow, findRecentProject } from '../../modules/session';
   import { beginGitBranchRequest, getLatestGitBranchRequestId, updateGitBranch } from '../../modules/git/branchUpdate';
   import { log } from '../../modules/logging';
@@ -47,6 +47,11 @@
   // Context menu state
   let contextMenu = $state<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   let contextMenuEl = $state<HTMLDivElement | undefined>();
+
+  // Sync local expandedDirs to the shared store for session persistence
+  $effect(() => {
+    expandedDirsStore.set(expandedDirs);
+  });
 
   $effect(() => {
     if (contextMenuEl && contextMenu) {
@@ -396,7 +401,12 @@
 
   function startGitPolling() {
     stopGitPolling();
-    gitPollInterval = setInterval(() => fetchGitStatus(), 3000);
+    gitPollInterval = setInterval(() => {
+      if (document.hidden) return; // Skip when window not visible
+      fetchGitStatus();
+    }, 5000);
+    // Poll immediately when window regains focus
+    document.addEventListener('visibilitychange', handleVisibilityChange);
   }
 
   function stopGitPolling() {
@@ -404,6 +414,11 @@
       clearInterval(gitPollInterval);
       gitPollInterval = null;
     }
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }
+
+  function handleVisibilityChange() {
+    if (!document.hidden && rootPath) fetchGitStatus();
   }
 
   // File watcher
@@ -496,6 +511,35 @@
             } catch { /* scope permission — skip */ }
           }
         }
+        if (project) {
+          // Restore expanded directories
+          if (project.session.expanded_dirs && project.session.expanded_dirs.length > 0) {
+            const dirs = new Set<string>(project.session.expanded_dirs);
+            // Always include the root
+            dirs.add(rootPath!);
+            expandedDirs = dirs;
+            // Load children for each expanded dir so the tree renders them
+            for (const dir of project.session.expanded_dirs) {
+              if (dir === rootPath) continue;
+              try {
+                const children = await invoke<FileEntry[]>('read_dir_tree', { path: dir, depth: 1 });
+                // Find the entry in the tree and set its children
+                setChildrenDeep(files, dir, children);
+              } catch { /* dir may no longer exist */ }
+            }
+            files = [...files]; // trigger reactivity
+          }
+          // Restore terminal panel visibility and spawn terminal tabs
+          if (project.session.terminal_visible) {
+            showTerminal.set(true);
+          }
+          if (project.session.terminal_count > 0) {
+            // Signal the terminal component to create tabs (up to saved count)
+            for (let i = 0; i < project.session.terminal_count; i++) {
+              createTerminalSignal.update(s => ({ count: s.count + 1, forceNew: i > 0 }));
+            }
+          }
+        }
       } catch (e) {
         log.error('Failed to restore session', e);
       }
@@ -516,6 +560,20 @@
         }
       }
     }
+  }
+
+  /** Recursively find a directory entry by path and set its children. */
+  function setChildrenDeep(entries: FileEntry[], dirPath: string, children: FileEntry[]): boolean {
+    for (const entry of entries) {
+      if (entry.path === dirPath) {
+        entry.children = children;
+        return true;
+      }
+      if (entry.is_dir && entry.children && dirPath.startsWith(entry.path + '/')) {
+        if (setChildrenDeep(entry.children, dirPath, children)) return true;
+      }
+    }
+    return false;
   }
 
   async function loadDirectory(path: string) {

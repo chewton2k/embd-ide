@@ -24,6 +24,10 @@ export const activeFileModified = derived(
 export const maxRecentProjects = persistedNumber('leo-max-recent-projects', 10);
 export const maxTabs = persistedNumber('leo-max-tabs', 9);
 
+/** Shared store for expanded directory paths in the file tree.
+ *  Synced by FileTree.svelte; read by session.ts for persistence. */
+export const expandedDirsStore = writable<Set<string>>(new Set());
+
 export const pinnedFiles = derived(openFiles, files => files.filter(f => f.pinned));
 export const unpinnedFiles = derived(openFiles, files => files.filter(f => !f.pinned));
 

@@ -12,6 +12,15 @@ pub struct SessionFile {
 pub struct SessionData {
     pub open_files: Vec<SessionFile>,
     pub active_file: Option<String>,
+    /// Number of terminal tabs to restore on session load.
+    #[serde(default)]
+    pub terminal_count: u32,
+    /// Whether the terminal panel was visible.
+    #[serde(default)]
+    pub terminal_visible: bool,
+    /// Expanded directory paths in the file tree.
+    #[serde(default)]
+    pub expanded_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

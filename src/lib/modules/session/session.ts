@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { get } from 'svelte/store';
-import { openFiles, activeFilePath, maxRecentProjects } from '../explorer/files';
+import { openFiles, activeFilePath, maxRecentProjects, expandedDirsStore } from '../explorer/files';
 import { projectRoot } from '../git/git';
+import { terminalTabs, showTerminal } from '../terminal/shell';
 import { log } from '../logging';
 
 export interface SessionFile {
@@ -12,6 +13,9 @@ export interface SessionFile {
 export interface SessionData {
   open_files: SessionFile[];
   active_file: string | null;
+  terminal_count: number;
+  terminal_visible: boolean;
+  expanded_dirs: string[];
 }
 
 export interface RecentProject {
@@ -37,9 +41,15 @@ export async function removeRecentProject(path: string): Promise<void> {
 export function buildSessionData(): SessionData {
   const files = get(openFiles);
   const active = get(activeFilePath);
+  const tabs = get(terminalTabs);
+  const termVisible = get(showTerminal);
+  const expanded = get(expandedDirsStore);
   return {
     open_files: files.map(f => ({ path: f.path, pinned: f.pinned })),
     active_file: active,
+    terminal_count: tabs.length,
+    terminal_visible: termVisible,
+    expanded_dirs: [...expanded],
   };
 }
 
